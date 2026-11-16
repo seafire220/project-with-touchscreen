@@ -1,32 +1,47 @@
 # Low-cost AI character device
 
-An independently designed, lower-cost functional alternative to the SyBran
-CODE27 Companion Hub: a desk device that shows a 3D character you can talk to,
-built from commodity hardware and original software, with no lock-in to one AI
-or voice provider.
+An independently designed, lower-cost alternative to the SyBran CODE27
+Companion Hub: a desk device that shows a 2D anime-style character you can
+talk to. Built from commodity hardware and original software, using the
+owner's own AI service keys, with no lock-in to one AI or voice provider.
+
+Two tiers: **Lite** plays pre-rendered 2D animation; **Standard** drives a
+rigged 2D puppet.
 
 ## Status
 
 | Phase | State |
 |---|---|
 | 1. Reference product research | First pass done |
-| 2. Requirements interview | Issued, awaiting answers |
-| 3. Requirements specification | Not started |
-| 4. Hardware selection and BOM | Not started — blocked on 3 |
-| 5. Architecture | Not started — blocked on 3 |
+| 2. Requirements interview | Answered |
+| 3. Requirements specification | Draft 1 |
+| 4. Hardware selection and BOM | Proposed; awaiting agreement |
+| 5. Architecture | Proposed; awaiting agreement |
 | 6. Software implementation | Not started |
-| 7. Install, boot and appliance behaviour | Not started |
+| 7. Install, boot and appliance behaviour | Designed; not implemented |
 | 8. Build guide, test plan | Not started |
+
+Estimated prototype cost: about A$239 (recommended configuration), against
+roughly A$850 for the reference product.
 
 ## Documents
 
-- [Reference product research](docs/01-reference-product-research.md)
-- [Requirements interview](docs/02-requirements-interview.md)
+1. [Reference product research](docs/01-reference-product-research.md)
+2. [Requirements interview and answers](docs/02-requirements-interview.md)
+3. [Requirements specification](docs/03-requirements-spec.md)
+4. [Technology research](docs/04-technology-research.md)
+5. [Hardware options and bill of materials](docs/05-hardware-and-bom.md)
+6. [System architecture](docs/06-architecture.md)
 - [Decision log](docs/decision-log.md)
 
-## Open questions
+## Awaiting the owner
 
-- All interview questions in `docs/02-requirements-interview.md`.
-- Research was done from search summaries because direct page access was
-  blocked; primary pages should be re-read before any claim about CODE27
-  drives a design decision.
+- Agreement on decisions D-006 to D-015 in the decision log.
+
+## Known gaps
+
+- No part has been bought or tested; every compatibility statement is from
+  documentation or search results.
+- Memory use, boot time and on-device speech recognition speed are estimates.
+- Several prices are estimates, marked in the hardware document.
+- Compliance cost for selling in Australia has not been researched.

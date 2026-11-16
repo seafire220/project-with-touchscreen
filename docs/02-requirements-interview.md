@@ -1,6 +1,6 @@
 # Requirements interview
 
-Status: issued 2026-11-16, awaiting answers.
+Status: answered 2026-11-16. The answers are written up in `03-requirements-spec.md`.
 
 How to answer: reply with only the numbers you want to change. Anything skipped
 takes the **default** shown and is recorded in the requirements specification
@@ -157,4 +157,38 @@ as an assumption that can be overturned later.
 
 ## Answers
 
-Not yet received.
+Received 2026-11-16. Summary by question; the specification is authoritative.
+
+| Q | Answer |
+|---|---|
+| 1 | No fixed figure; must be significantly cheaper than the reference. Intended for sale. Two versions wanted. Owner has a 3D printer. |
+| 2 | Cheapest workable first; the second version may be better value but still cheap. |
+| 3–4 | User-supplied API keys stored on the device; several LLM and voice options; voices must support custom or cloned voices. No local AI server assumed. |
+| 5 | Has a 3D printer; will learn soldering. Prototype first, then publish and sell. AliExpress acceptable. Prototype and production sourcing to be separated. |
+| 6 | Replace VRM with 2D animation. Long-term memory included. |
+| 7 | A design suited to flat 2D screens. |
+| 8 | Plain panel (option a). |
+| 9 | Any reasonable size; several sizes may follow later. |
+| 10 | Whatever looks decent for the animation type. |
+| 11 | Standard: Live2D-like 2D without Live2D Cubism (Inochi2D or equivalent). Lite: video-loop characters. |
+| 12–13 | No VRM. Any reasonable 2D anime image in a specified format should work, using AI tools to prepare, split, rig and animate it; processing may happen off the device. |
+| 14 | Upload character files, ideally one image, and have the character created. Memories stored on the device, viewable and editable. |
+| 15 | Wi-Fi preferred; USB or microSD optional. |
+| 16 | Add, switch and delete; no set limit. |
+| 17 | Several LLM APIs. |
+| 18 | Several voice APIs, including ones with cloning. |
+| 19 | On-device recognition for cost, unless a free cloud service exists. |
+| 20 | Boots straight into the character application as an appliance. A button turns listening on and off; fallback of press to start and press to stop. |
+| 21 | English only for now. |
+| 22 | Aim for low latency. |
+| 23 | Speech-to-speech mode if possible. |
+| 24 | Memory stored on the device. |
+| 25 | No elaborate skills; simple alarms, timers and web search are fine. |
+| 26 | Voice-focused audio. |
+| 27 | Omit camera, RGB, presence sensor and spare USB ports. |
+| 28 | Mains. Battery possibly later for the higher tier if cheap. |
+| 29 | Repairability, boot speed, low idle power, looks, heat — in that order. |
+| 30 | 3D printing available. |
+| 31 | Wi-Fi setup and uploads through a local web UI. |
+| 32 | Manual updates by computer connection or over Wi-Fi. |
+| 33 | The deliverable is a complete working device, not separate programs: parts, operating system and software chosen to work together. |
