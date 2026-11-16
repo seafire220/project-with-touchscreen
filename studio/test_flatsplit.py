@@ -104,6 +104,51 @@ class FlatSplitTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             flatsplit.split(self.image, marks)
 
+    def test_a_well_suited_picture_gives_no_warnings(self):
+        self.assertEqual(self.report["warnings"], [])
+
+    def test_a_tilted_face_is_warned_about(self):
+        marks = dict(MARKS, eyes={"l": [104, 86, 10, 8], "r": [136, 96, 10, 8]})
+        _, report = flatsplit.split(self.image, marks)
+        self.assertTrue(any("tilted" in w for w in report["warnings"]), report["warnings"])
+
+    def test_hair_matching_the_clothes_is_warned_about(self):
+        # Repaint the body in the hair colour: the hair selection then runs into it.
+        image = self.image.copy()
+        pixels = np.asarray(image).copy()
+        body = (np.abs(pixels[..., :3].astype(int) - np.array(BODY)).max(axis=-1) < 8) & (pixels[..., 3] > 0)
+        pixels[body, :3] = HAIR
+        _, report = flatsplit.split(Image.fromarray(pixels, "RGBA"), MARKS)
+        self.assertTrue(any("same colour as the clothing" in w for w in report["warnings"]), report["warnings"])
+
+    def test_a_picture_without_transparency_is_refused(self):
+        solid = Image.new("RGBA", self.image.size, (150, 134, 134, 255))
+        solid.alpha_composite(self.image)
+        with self.assertRaises(ValueError):
+            flatsplit.split(solid, MARKS)
+
+    def test_a_plain_background_is_removed_and_the_split_then_works(self):
+        import prepare
+        solid = Image.new("RGBA", self.image.size, (150, 134, 134, 255))
+        solid.alpha_composite(self.image)
+        self.assertFalse(prepare.has_transparency(solid.convert("RGB")))
+        cleared, notes = prepare.prepare(solid.convert("RGB"))
+        self.assertTrue(prepare.has_transparency(cleared))
+        self.assertIn("removed a plain background", notes[0])
+        layers, report = flatsplit.split(cleared, MARKS)
+        self.assertEqual(report["unassigned_pixels"], 0)
+        # The character itself is untouched apart from its outermost edge pixel.
+        kept = np.asarray(cleared)[..., 3] > 0
+        self.assertTrue(np.array_equal(np.asarray(cleared)[kept][:, :3], np.asarray(solid)[kept][:, :3]))
+        self.assertGreater(kept.sum(), 0.9 * (np.asarray(self.image)[..., 3] > 0).sum())
+
+    def test_a_busy_background_is_refused_not_guessed(self):
+        import prepare
+        rng = np.random.default_rng(0)
+        noise = Image.fromarray(rng.integers(0, 255, (120, 90, 3), dtype=np.uint8), "RGB")
+        with self.assertRaises(ValueError):
+            prepare.prepare(noise)
+
     def test_layers_are_padded_to_a_square(self):
         padded = flatsplit.pad_square(self.roles["torso"])
         self.assertEqual(padded.shape[0], padded.shape[1])

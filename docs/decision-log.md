@@ -305,3 +305,39 @@ rejected. Settled entries are not reopened without new evidence.
 - Date: 2026-11-16.
 - The archive arrived and its checksum matches the brief. Review so far is
   limited to how it calls the rigger; see `08-prior-work-review.md`.
+
+## D-025 revised — Cutting from the original stays; choosing parts by colour does not
+
+- Date: 2026-11-16. Status: decided, on trial evidence (`10-generalisation-trial.md`).
+- Five unfamiliar images, method unchanged: no acceptable result. In all
+  five the hair was found wrongly, because shaded or textured hair is not
+  one colour and unshaded hair can match the clothing.
+- Kept: layers are cut from the original pixels, never regenerated. No image
+  lost or altered any detail.
+- Replaced (next work): deciding which pixels belong to which part. A model
+  that labels parts will propose them; the user's marks become corrections.
+- Lesson recorded: the stage's automatic checks passed on all five failures.
+  They are not evidence of quality.
+
+## D-027 — Head turn is a warp in place, not a rigid rotation
+
+- Date: 2026-11-16. Status: implemented; awaiting the owner's review.
+- The rigger's rigid head rotation is replaced by `studio/headturn.py`, which
+  bends the head parts as if their features slide over a ball and keeps the
+  chin on the neck, as hand-made Live2D and Inochi2D rigs do.
+- Rejected: reducing the amount of head movement to hide the problem.
+
+## D-028 — Unsuitable pictures are refused or flagged, not processed silently
+
+- Date: 2026-11-16. Status: implemented.
+- `studio/prepare.py` removes plain backgrounds only and refuses others.
+  `studio/flatsplit.py` refuses pictures without transparency and lists
+  warnings when its result should not be trusted.
+
+## D-029 — Large gestures will use alternative drawings, small ones bending
+
+- Date: 2026-11-16. Status: direction agreed in principle; not designed.
+- A puppet bends the original picture and cannot show what was never drawn.
+  Gestures such as crossed arms will be alternative poses switched in, as
+  hand-made rigs do, with each gesture declaring the parts it needs so that
+  a character lacking them skips it.

@@ -143,6 +143,8 @@ def split(image, marks):
     body = alpha > 128
     h, w = body.shape
     report = {}
+    if body.mean() > 0.98:
+        raise ValueError("the picture has no transparent background; run prepare.py on it first")
 
     # --- which pixels are flat paint and which are outlines or fine detail
     fill = flat_paint(rgb, body)
@@ -258,7 +260,47 @@ def split(image, marks):
     assigned = hair.astype(np.int32) + face.astype(np.int32) + rest.astype(np.int32)
     report["unassigned_pixels"] = int((body & (assigned == 0)).sum())
     report["doubly_assigned_pixels"] = int((assigned > 1).sum())
+    report["warnings"] = suitability_warnings(marks, body, hair, face, eye_parts, mouth)
     return layers, report
+
+
+def suitability_warnings(marks, body, hair, face, eye_parts, mouth):
+    """Plain-language reasons this picture is likely to give a poor puppet.
+
+    The split always produces layers; these say when not to trust them.
+    """
+    warnings = []
+    character = max(int(body.sum()), 1)
+    face_size = max(int(face.sum()), 1)
+    if hair.sum() > 0.45 * character:
+        warnings.append("the hair selection covers most of the character; the hair is probably "
+                        "the same colour as the clothing, so the body would move with the head")
+    elif hair.sum() < 0.6 * face_size:
+        warnings.append("very little hair was found; shaded or textured hair is not one colour, "
+                        "so the hair will not move separately")
+    left, right = marks["eyes"]["l"], marks["eyes"]["r"]
+    dx, dy = right[0] - left[0], right[1] - left[1]
+    tilt = abs(np.degrees(np.arctan2(dy, dx))) if dx else 90.0
+    if tilt > 8:
+        warnings.append("the face is tilted by about %d degrees; blink and mouth animation "
+                        "assume an upright, front-facing face and will be misplaced" % round(tilt))
+    if np.hypot(dx, dy) < 30:
+        warnings.append("the face is very small (eyes %d pixels apart); details will be coarse"
+                        % round(np.hypot(dx, dy)))
+    for side, name in (("l", "left"), ("r", "right")):
+        parts = eye_parts[side]
+        total = sum(int(v.sum()) for v in parts.values())
+        if total == 0:
+            warnings.append("nothing was found in the %s eye mark" % name)
+        elif parts["eye_white"].sum() < 0.05 * total:
+            warnings.append("no white was found in the %s eye (narrow, shaded or closed eye); "
+                            "the blink will look wrong" % name)
+        elif parts["eye"].sum() > 0.6 * total:
+            warnings.append("most of the %s eye was read as eyelash; the closed eye will be too heavy" % name)
+    eye_area = np.pi * marks["mouth"][2] * marks["mouth"][3]
+    if mouth.sum() > 0.45 * eye_area:
+        warnings.append("the mouth looks open in the artwork; it will not close when the character is silent")
+    return warnings
 
 
 def pad_square(array):
@@ -278,7 +320,11 @@ def main(argv):
     image = Image.open(argv[1])
     with open(argv[2]) as f:
         marks = json.load(f)
-    layers, report = split(image, marks)
+    try:
+        layers, report = split(image, marks)
+    except ValueError as error:
+        print("cannot split this picture: %s" % error, file=sys.stderr)
+        return 1
     os.makedirs(argv[3], exist_ok=True)
     for old in os.listdir(argv[3]):
         if old.endswith(".png"):

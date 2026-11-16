@@ -74,7 +74,7 @@ Using the status words adopted from the earlier project's brief:
 | Implemented | Yes |
 | Executed end to end | Yes, on one image |
 | Visually reviewed | By me, from still frames and a short animation. Not yet accepted by the owner. |
-| Works on unfamiliar artwork | **Not shown.** One image, with marks placed by me while developing the method. It is development data, not a test. |
+| Works on unfamiliar artwork | **No.** Tried on five further images with no acceptable result; see `10-generalisation-trial.md`. |
 | Works without hand-placed marks | Not attempted. |
 | Runs on the owner's Mac | Not tried; nothing in it needs a graphics card. |
 
@@ -82,6 +82,27 @@ Reasons to expect trouble on other images, none yet tested: painterly or
 gradient-shaded art without flat colours; hair the same colour as clothing or
 skin; faces in profile or three-quarter view; hands or props across the face;
 very small faces.
+
+## Follow-up: the head moved like a detached piece
+
+The owner reviewed the animation and found the head motion wrong: it moved
+as a separate block and smeared what was behind it. The cause was the
+rigger's head turn, which rotates the whole head group as one flat card. With
+waist-length hair in that group, the card's hinge sat near the waist.
+
+Hand-made Live2D and Inochi2D puppets never move the head bodily. Each
+part's mesh is bent so that features slide across the face as if over a
+ball, the far side narrows, and the chin stays joined to the neck.
+`studio/headturn.py` now rewrites a rigger puppet to do this: one shared
+displacement field, taken from a ball centred on the head, warps every head
+part for turning and nodding; tilting leans the head about the base of the
+neck; and all of it fades out below the chin so long hair bends rather than
+swings. Blink, mouth, breathing and hair physics are left alone.
+
+On the test image the head now stays in place while the features move
+within it. Remaining flaws at the extremes: the chin line can show a doubled
+contour against the hair, and the lower face compresses when looking down.
+Not yet reviewed by the owner.
 
 ## Known defects to work on
 
@@ -110,7 +131,8 @@ very small faces.
 ```
 pip install -r studio/requirements.txt
 python studio/flatsplit.py IMAGE.png MARKS.json layers/
-python -m image2live2d layers/ -o character.inp      # image2live2d at commit 714e7cc
+python -m image2live2d layers/ -o rigged.inp         # image2live2d at commit 714e7cc
+python studio/headturn.py rigged.inp character.inp   # in-place head turn
 stage/target/release/stage character.inp
-python -m unittest studio/test_flatsplit.py           # 9 tests, no artwork needed
+cd studio && python -m unittest                       # 25 tests, no artwork needed
 ```
