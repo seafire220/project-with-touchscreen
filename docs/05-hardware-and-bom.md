@@ -108,6 +108,30 @@ is optional.
 | Radxa ROCK 3C with Radxa's 8" ribbon-cable screen | Unpriced | Would give a non-Pi board a portrait touch screen on one ribbon and three USB ports. Current prices could not be confirmed (the screen was found at US$46.99–81.95). |
 | Second-hand tablet | Rejected | Not repairable, supply changes monthly, boot behaviour cannot be controlled. |
 
+**Decision (owner, 2026-11-16): Raspberry Pi 4 Model B, 1 GB.** If 1 GB
+proves too tight, switch to a Radxa Zero 3W or an Orange Pi.
+
+### Second search for cheaper boards
+
+| Board | Memory | Price found | Comment |
+|---|---|---|---|
+| Raspberry Pi Zero 2 W | 512 MB | "just over €20" (Aug 2026); unaffected by the memory shortage | No ribbon display connector; only viable if the software fits in 512 MB |
+| Orange Pi Zero 2W | 1–4 GB | US$18.90–41.99 across memory sizes at one reseller (Oct 2026); €53 for 1 GB on Amazon.de | Same chip as the Orange Pi Zero 3. The sources disagree by a factor of three |
+| LCKFB TaishanPi (RK3566) | 2 GB + 16 GB | US$67.78–68.76 at LCSC | Not cheaper |
+| Luckfox Core3566 module | 2 GB | US$55.99 | A module that needs a carrier board |
+| Other RK3566 boards | 1 GB | Cheapest found US$139 | Not cheaper |
+
+Nothing was found that is reliably cheaper than the Pi 4 1 GB (about US$42)
+while having at least 1 GB and a graphics chip that supports OpenGL ES 3.
+Two leads are worth following once the software's real memory use has been
+measured on the Pi 4:
+
+- The **Orange Pi Zero 2W 1 GB**, if the US$18.90 listing is genuine. Check
+  the manufacturer's own AliExpress store on the day.
+- The **Raspberry Pi Zero 2 W**, at about half the price of a Pi 4. The
+  stage is now a 4.5 MB native program rather than a web browser, which
+  makes fitting in 512 MB plausible, though unmeasured.
+
 The software does not depend on the choice. It needs a Debian-based system,
 any screen the display server can drive, and USB audio. Moving between these
 boards is a matter of screen and Wi-Fi bring-up, not a rewrite.
@@ -283,6 +307,8 @@ and EMC test reports, and an external mains adapter that is already marked.
 - Orange Pi Zero 3: https://www.newegg.com/p/3D0-004Z-000C2 , https://www.aliexpress.com/item/1005005785846814.html , https://www.makeuseof.com/board-everyone-recommends-costs-60-what-buy-instead/ , https://www.cnx-software.com/2023/07/03/orange-pi-zero-3-allwinner-h618-sbc-ships-with-up-to-4gb-ram/
 - Orange Pi Zero 3 software status: https://forum.armbian.com/topic/29202-orange-pi-zero-3/page/26/ and https://github.com/giltal/Retro-OrangePI-Zero-3
 - Radxa Display 8 HD: https://shop.allnetchina.cn/products/radxa-display-8-hd
+- Pi Zero 2 W and Orange Pi Zero 2W pricing: https://raspberry.tips/en/raspberrypi-tutorials/raspberry-pi-alternatives-sbc , https://raspberry.tips/en/raspberrypi-infos/raspberry-pi-zero-2-w-alternative-sold-out , https://spotpear.com/index/forum/detail/id/14816.html
+- LCKFB TaishanPi: https://www.lcsc.com/product-detail/C19273641.html ; Luckfox Core3566: https://www.luckfox.com/EN-Core3566
 - ESP32-P4 boards: https://www.atomic14.com/esp32/boards/displays/ , https://www.waveshare.com/product/esp32-related/boards-kits/esp32-p4.htm , https://shop.m5stack.com/products/m5stack-tab5-iot-development-kit-esp32-p4
 - ReSpeaker Lite: https://www.seeedstudio.com/ReSpeaker-Lite-p-5928.html
 - Waveshare USB sound card: https://www.waveshare.com/usb-to-audio.htm

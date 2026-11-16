@@ -47,6 +47,7 @@ manual route when automatic rigging falls short.
 | Image-editing models | Produce variants of the same picture (mouth open, eyes closed, angry) | Commercial APIs | Cents per image. [Memory] |
 | Stretchy Studio | Browser tool that takes a See-through layered file, builds meshes, finds a skeleton by pose detection or simple rules, and animates on a timeline | MIT [Read] | Exports Spine and Live2D project files, not Inochi2D. Works by keyframed animation, not live parameters. Last commit April 2026. Useful as a source of mesh-generation and pose-detection code, and for rendering clips. [Read] |
 | psd2live | Layered file to Live2D model with automatic rigging | GPL-3.0 [Search] | Live2D output only; reference for technique. |
+| image2live2d | Named layers (a folder or layered file) to a full-body rig with blink, mouth, head turn, body sway, breathing and hair/cloth physics; writes an Inochi2D-family `.inp` | Apache-2.0 [Read] | Needs layers as input; calls See-through for flat images. Writes only plain nodes, parts and simple physics, which the stage supports [Read]. Not run here. Used in the owner's earlier attempt. |
 
 Three character kinds follow from this, in rising cost and difficulty:
 
@@ -60,10 +61,9 @@ Three character kinds follow from this, in rising cost and difficulty:
    pose and clips can be cut together cleanly. A dozen four-second clips is
    roughly US$2–15 per character at the prices above.
 3. **Puppet** — a rigged Inochi2D character, made one of two ways:
-   - Automatically: See-through splits the image into named layers on the
-     user's laptop; our rigger builds meshes, applies a template rig and
-     writes an Inochi2D file. The rigger is new work; the steps before it
-     reuse existing code.
+   - Automatically: the image is split into named layers, then an existing
+     open-source rigger (image2live2d) builds meshes and the rig and writes
+     an Inochi2D-family file. Splitting is the unsolved part.
    - By hand: rigged in Inochi Creator and uploaded.
 
 Lite ships kinds 1 and 2. Standard adds kind 3.
@@ -142,6 +142,7 @@ Checked directly against the Debian 13 (trixie) ARM64 package index [Read]:
 - Stretchy Studio: https://github.com/MangoLion/stretchystudio and https://stretchy.studio/
 - Ayatsuri2D: https://github.com/Yoru-KenomoVT/ayatsuri_2d
 - psd2live: https://github.com/tsunehimatoi/psd2live
+- image2live2d: https://github.com/Wzhang3912/image2live2d
 - Mali driver capabilities: https://www.collabora.com/news-and-blog/blog/2021/01/13/desktop-opengl-3-1-on-mali-gpus-with-panfrost and https://sources.debian.org/src/mesa/26.0.1-2/docs/drivers/panfrost.rst
 - nijilive: https://github.com/nijigenerate/nijilive ; nicxlive: https://github.com/nijigenerate/nicxlive
 - See-through: https://github.com/shitagaki-lab/see-through and https://arxiv.org/abs/2602.03749

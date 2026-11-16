@@ -15,14 +15,19 @@ rigged 2D puppet.
 | 1. Reference product research | First pass done |
 | 2. Requirements interview | Answered |
 | 3. Requirements specification | Draft 2 |
-| 4. Hardware selection and BOM | Two prototype options costed; owner to choose |
+| 4. Hardware selection and BOM | Prototype board chosen: Raspberry Pi 4, 1 GB |
 | 5. Architecture | Revision 2, after review and testing |
-| 6. Software implementation | Not started; Inochi2D rendering proven in a test |
+| 6. Software implementation | Started. Stage (character drawing) implemented and tested on software graphics; core service, console and installer not started |
 | 7. Install, boot and appliance behaviour | Designed; not implemented |
 | 8. Build guide, test plan | Not started |
 
 Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 (Radxa Zero 3W option), against roughly A$850 for the reference product.
+
+## Code
+
+- [`stage/`](stage/README.md) — draws and animates the character on the
+  device screen.
 
 ## Documents
 
@@ -33,14 +38,15 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 5. [Hardware options and bill of materials](docs/05-hardware-and-bom.md)
 6. [System architecture](docs/06-architecture.md)
 7. [Test: Inochi2D on Linux](docs/07-spike-inochi2d.md)
+8. [Review of the owner's earlier work](docs/08-prior-work-review.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner
 
-- Choice of prototype board (decision D-016).
-- A layered file from See-through for one of the owner's characters, to
-  develop the rigger against.
-- The summary of the owner's earlier work on this idea.
+- The source archive from the earlier attempt, so working parts can be
+  reused.
+- Permission to install and run the third-party rigger `image2live2d` in
+  the development environment.
 
 ## Known gaps
 

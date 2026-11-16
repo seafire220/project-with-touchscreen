@@ -229,28 +229,39 @@ Rules:
 
 ### Standard tier: from one image to a rigged puppet
 
-This follows the chain of tools the owner proposed. The heavy step needs a
-graphics card, so it runs on the user's laptop, not on the device.
+This follows the chain of tools the owner proposed. It has two stages, and
+they are in very different states.
 
-| Step | Tool | Runs on | Output |
+| Stage | Tool | Runs on | State |
 |---|---|---|---|
-| 1. Split the image into layers | See-through (Apache-2.0) | Laptop with an 8–16 GB graphics card, about 2–3 minutes; or its free online demo, 1–2 images a day | A layered file with up to 23 named parts: front hair, back hair, face, irises, eye whites, eyelashes, eyebrows, mouth, ears, neck, clothing and so on |
-| 2. Build a mesh for each layer | Our rigger, reusing Stretchy Studio's mesh generator (MIT) | Any browser | Triangle meshes fitted to each part |
-| 3. Find the joints and face position | Pose detection as Stretchy Studio does it, with manual markers as the fallback | Any browser | Pivot points |
-| 4. Apply a template rig | Our rigger | Any browser | The standard parameters (head turn and tilt, body sway, blink per eye, mouth, breathing) with generated mesh movements, plus physics on hair, tails and loose clothing |
-| 5. Export | Our rigger | Any browser | An Inochi2D `.inp` file, uploaded to the device |
+| 1. Split the flat image into named layers (front hair, back hair, face, irises, eyelashes, mouth, clothing and so on) | See-through (Apache-2.0 code) | An NVIDIA graphics card with 8–16 GB. Not the owner's Mac. | The weak link; see below |
+| 2. Build meshes, rig, add physics, export | image2live2d (Apache-2.0), an existing open-source rigger | Any computer; no graphics card | Exists. Writes an Inochi2D-family `.inp` using only node types the stage supports (checked by reading its source; not yet run here) |
+| 3. Upload | Console | — | Designed |
 
-Because the output is a normal Inochi2D file, a result that needs touching
-up can be opened in the free Inochi Creator editor, corrected and
-re-exported. Users without a suitable laptop upload a hand-rigged `.inp`.
+Stage 2 was earlier described in these documents as new work. That was
+wrong; the rigger already exists and was used in the owner's earlier attempt.
 
-What is new work here is steps 4 and 5: no existing tool writes Inochi2D
-files from a layered image. Stretchy Studio exports only to Spine and Live2D
-project formats. Steps 1 to 3 reuse existing open-source code.
+Stage 1 is the open problem. In the earlier attempt the one real image that
+went through See-through came out with its head ornaments missing and its
+clothing altered, and a larger trial was blocked by lack of a graphics card.
+Three routes, to be compared on the owner's test image and on independent
+artwork:
 
-The honest limit: template rigs suit front-facing characters in a neutral
-pose. Unusual poses, heavy overlap between parts, or props across the face
-will need manual correction.
+- **A. See-through** on a rented or borrowed NVIDIA card, to find out how
+  often it keeps a character faithful. A Mac port is unproven.
+- **B. A splitter that never repaints the artwork.** Anime art is flat
+  colours inside dark outlines, so regions can be found and grouped into
+  parts by colour and position, with the user clicking a few points (eyes,
+  mouth, neck). Hidden areas are filled by extending the neighbouring colour.
+  It runs on any laptop, cannot lose an ornament or change clothing because
+  it only cuts the original, and limits how far parts can move. Unbuilt and
+  unproven; proposed as the next experiment.
+- **C. Layers or a finished puppet supplied by the user.** Always accepted,
+  but by the owner's definition this does not count as custom-character
+  support on its own.
+
+A result that needs touching up can be opened in the free Inochi Creator
+editor, corrected and re-exported.
 
 ### Lite tier
 

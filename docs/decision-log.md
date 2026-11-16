@@ -227,3 +227,47 @@ rejected. Settled entries are not reopened without new evidence.
 - Decision: regulatory work waits until after prototyping. Meanwhile, parts
   that already carry certification are preferred, and the mains adapter is
   an external, already-marked unit.
+
+## D-016 resolved — Prototype board is the Raspberry Pi 4, 1 GB
+
+- Date: 2026-11-16. Status: decided by the owner.
+- Fallback if 1 GB proves too tight: Radxa Zero 3W or an Orange Pi.
+- A second search found nothing reliably cheaper with at least 1 GB and
+  OpenGL ES 3. Leads to revisit after measuring memory use: Orange Pi Zero 2W
+  1 GB, Raspberry Pi Zero 2 W.
+
+## D-022 — Stage implemented; OpenGL ES first; renderer kept in-tree
+
+- Date: 2026-11-16. Status: implemented and tested on software graphics.
+- What: `stage/`, a native program that draws an Inochi2D puppet and drives
+  mouth, blink, head, body and breathing from commands.
+- Finding that forced a change: the Inox2D renderer's native build assumed
+  desktop OpenGL 3.3, which the Raspberry Pi 4 and Mali boards do not have.
+  Its OpenGL part is therefore kept in `stage/vendor/inox2d-opengl` with
+  three small changes so it runs on OpenGL ES 3.0. The same changes remove
+  the stray fragments seen in the browser test.
+- The stage asks for OpenGL ES first and falls back to desktop OpenGL.
+- Not yet done: a run on real hardware; the browser build; clip and sprite
+  kinds; on-screen status and setup screens.
+
+## D-019 corrected — The rigger already exists
+
+- Date: 2026-11-16.
+- D-019 called the rigger and Inochi2D exporter new work. The owner's earlier
+  project used an existing open-source one, image2live2d (Apache-2.0). It is
+  to be reused. The unsolved step is splitting a flat image into layers.
+
+## D-023 — Earlier work is evidence to check, not a base to assume
+
+- Date: 2026-11-16. Status: decided.
+- The handoff brief from the owner's earlier attempt is reviewed in
+  `08-prior-work-review.md`. Its claims are unverified because the source
+  was not supplied. The source has been requested so working parts can be
+  reused. Until then, new code is limited to parts needed either way.
+
+## D-024 — Other people's characters stay out of the repository
+
+- Date: 2026-11-16. Status: decided.
+- Test artwork depicting existing commercial characters is used locally only
+  and never committed, shown in committed screenshots or shipped. Committed
+  tests and evidence use openly licensed or original art.

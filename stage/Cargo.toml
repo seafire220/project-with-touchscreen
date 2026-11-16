@@ -1,0 +1,22 @@
+[package]
+name = "stage"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Draws and animates the character on the device screen"
+
+[dependencies]
+inox2d = { git = "https://github.com/Inochi2D/inox2d", rev = "d4dd9dd7f16b775042cbda44370570abf9a8cf81" }
+inox2d-opengl = { path = "vendor/inox2d-opengl" }
+glam = "0.29.0"
+glow = "0.14.1"
+glutin = "0.31.2"
+glutin-winit = "0.4.2"
+raw-window-handle = "0.5.2"
+winit = { version = "0.29", features = ["rwh_05"] }
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+opt-level = 3
+strip = true
