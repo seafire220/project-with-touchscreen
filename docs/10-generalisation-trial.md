@@ -93,6 +93,9 @@ and so on*. The proposal is to keep the cutting and replace the deciding:
    puppet has and reports them; the animation system should read that list
    and skip what is missing.
 
+Follow-up: item 1 has been done with an existing model; see
+`11-part-labelling-model.md`.
+
 ## On richer movement
 
 The owner wants larger gestures later: moving and crossing arms,

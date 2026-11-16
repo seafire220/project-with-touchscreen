@@ -17,7 +17,7 @@ rigged 2D puppet.
 | 3. Requirements specification | Draft 2 |
 | 4. Hardware selection and BOM | Prototype board chosen: Raspberry Pi 4, 1 GB |
 | 5. Architecture | Revision 2, after review and testing |
-| 6. Software implementation | Started. Stage (character drawing) works. Character preparation works on one image and failed on five others; part-finding is being replaced. Core service, console and installer not started |
+| 6. Software implementation | Started. Stage (character drawing) works. Character preparation now separates the parts correctly on all six test images using an existing model; blink and mouth artwork still poor on some. Core service, console and installer not started |
 | 7. Install, boot and appliance behaviour | Designed; not implemented |
 | 8. Build guide, test plan | Not started |
 
@@ -28,10 +28,12 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 
 - [`stage/`](stage/README.md) — draws and animates the character on the
   device screen.
-- [`studio/`](studio/) — character preparation: `prepare.py` removes a
-  plain background, `flatsplit.py` cuts a flat picture into named layers
-  without repainting it, `headturn.py` gives a rigged puppet an in-place
-  head turn.
+- [`studio/`](studio/) — character preparation. `parts_model.py` labels a
+  picture's body parts with an existing open model; `partsplit.py` cuts the
+  original picture along those labels without repainting it; `headturn.py`
+  gives the rigged puppet an in-place head turn; `prepare.py` removes a
+  plain background. `flatsplit.py` is an older colour-based cutter kept as
+  a fallback.
 
 ## Documents
 
@@ -45,11 +47,15 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 8. [Review of the owner's earlier work](docs/08-prior-work-review.md)
 9. [Experiment: flat image to puppet without repainting](docs/09-flat-image-experiment.md)
 10. [Trial on five unfamiliar images](docs/10-generalisation-trial.md)
+11. [Finding the parts with an existing model](docs/11-part-labelling-model.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner
 
 - The owner's verdict on the revised head movement.
+- A run of `studio/parts_model.py` on the owner's Mac, to confirm it works
+  there and how long it takes.
+- A fresh set of images for an unbiased test.
 
 ## Known gaps
 

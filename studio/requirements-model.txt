@@ -1,0 +1,19 @@
+# For parts_model.py only. Install PyTorch for your machine first
+# (https://pytorch.org); on a machine without a graphics card:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# This is the set that was installed when the model was tested; some of the
+# last four may not be strictly needed.
+torch>=2.5
+torchvision
+einops
+numpy
+Pillow
+packaging
+requests
+accelerate
+huggingface_hub
+safetensors
+diffusers
+transformers
+omegaconf
+tqdm

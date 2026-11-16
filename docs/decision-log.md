@@ -341,3 +341,21 @@ rejected. Settled entries are not reopened without new evidence.
   Gestures such as crossed arms will be alternative poses switched in, as
   hand-made rigs do, with each gesture declaring the parts it needs so that
   a character lacking them skips it.
+
+## D-030 — Parts are found by the See-through body-part model
+
+- Date: 2026-11-16. Status: decided, on test evidence (`11-part-labelling-model.md`).
+- Decision: `studio/parts_model.py` runs the See-through body-part model
+  (Apache-2.0 code and weights, commercial use permitted) to label 19 parts;
+  `studio/partsplit.py` cuts the original picture along those labels.
+- Why: on the six test images it separated hair, face, neck, arms and
+  clothing correctly in every case, where colour-picking got five of six
+  wrong. It labels only, so nothing is repainted. It ran on a plain CPU in
+  about 20 seconds.
+- The owner asked for an existing project in place of the home-made script;
+  this is that.
+- Rejected: extending colour-picking; the full generative See-through
+  pipeline for now; YOLO-based detectors (licence); general SAM with clicks
+  (the fine-tune is the anime-specific form of it).
+- Open: untested on Apple Silicon; closed-eye and mouth artwork is still
+  poor on some faces.
