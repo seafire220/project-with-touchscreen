@@ -17,7 +17,7 @@ rigged 2D puppet.
 | 3. Requirements specification | Draft 2 |
 | 4. Hardware selection and BOM | Prototype board chosen: Raspberry Pi 4, 1 GB |
 | 5. Architecture | Revision 2, after review and testing |
-| 6. Software implementation | Started. Stage (character drawing) implemented and tested on software graphics; core service, console and installer not started |
+| 6. Software implementation | Started. Stage (character drawing) and a flat-image layer splitter implemented and tested on software graphics; core service, console and installer not started |
 | 7. Install, boot and appliance behaviour | Designed; not implemented |
 | 8. Build guide, test plan | Not started |
 
@@ -28,6 +28,8 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 
 - [`stage/`](stage/README.md) — draws and animates the character on the
   device screen.
+- [`studio/flatsplit.py`](studio/flatsplit.py) — cuts a flat character
+  picture into named layers for the rigger, without repainting it.
 
 ## Documents
 
@@ -39,14 +41,15 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 6. [System architecture](docs/06-architecture.md)
 7. [Test: Inochi2D on Linux](docs/07-spike-inochi2d.md)
 8. [Review of the owner's earlier work](docs/08-prior-work-review.md)
+9. [Experiment: flat image to puppet without repainting](docs/09-flat-image-experiment.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner
 
-- The source archive from the earlier attempt, so working parts can be
-  reused.
-- Permission to install and run the third-party rigger `image2live2d` in
-  the development environment.
+- The owner's verdict on the first generated puppet (animation and stills
+  supplied outside the repository).
+- A handful of other character images the method has never seen, to test
+  whether it generalises.
 
 ## Known gaps
 

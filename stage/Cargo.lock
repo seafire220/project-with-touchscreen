@@ -607,7 +607,6 @@ dependencies = [
 [[package]]
 name = "inox2d"
 version = "0.3.0"
-source = "git+https://github.com/Inochi2D/inox2d?rev=d4dd9dd7f16b775042cbda44370570abf9a8cf81#d4dd9dd7f16b775042cbda44370570abf9a8cf81"
 dependencies = [
  "glam",
  "image",

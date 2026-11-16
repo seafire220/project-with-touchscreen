@@ -66,10 +66,28 @@ which is reassuring:
 | Puppet runtime | nicxlive (C++) | Inox2D (Rust), with our fixes for OpenGL ES | Inox2D runs natively and was tested here; both read the same family of files |
 | Build order | Both tiers in parallel | Premium tier first, microcontroller tier after | Owner's decision |
 
-## What is needed from the owner
+## Source archive received
+
+The owner has since supplied `character-device-v0.8.0.zip`. Its SHA-256
+matches the value given in the brief
+(`51c958c28c13c51ebcc47b1fc27cdb351eb5e7ef11e179c89ada808822ade33f`).
+
+| Part | Size | Reviewed so far |
+|---|---|---|
+| `firmware/` — ESP32-P4 and radio firmware, including pre-built images | 235 files, 9.7 MB | Not yet |
+| `examples/` — includes an original layered example character in the rigger's input format | 62 files, 3.9 MB | Listed only |
+| `device_app/` — Linux controller, providers, speech, memory, artwork preparation | 42 files, about 2,900 lines of Python | Artwork preparation read, to learn how the rigger is called |
+| `native/`, `tests/`, `scripts/`, `deploy/`, `docs/` | about 180 files | Not yet |
+
+Used so far: the rigger's layer roles and the practice of padding art to a
+square. The rest is still unverified and unreviewed. The firmware is the
+part most likely to save work, and will be examined when the microcontroller
+Lite is started.
+
+## What was needed from the owner
 
 The source archive (`character-device-v0.8.0.zip`) and its evidence folders.
-With them I can check what actually works and reuse it instead of writing it
+Requested so that working parts can be checked and reused instead of written
 again, in particular the ESP32-P4 firmware, the provider adapters, the layer
 importer and the saved test images. Until then, new code is limited to parts
 that are needed whichever way that review turns out.

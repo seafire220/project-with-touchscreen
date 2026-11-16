@@ -235,7 +235,7 @@ they are in very different states.
 | Stage | Tool | Runs on | State |
 |---|---|---|---|
 | 1. Split the flat image into named layers (front hair, back hair, face, irises, eyelashes, mouth, clothing and so on) | See-through (Apache-2.0 code) | An NVIDIA graphics card with 8–16 GB. Not the owner's Mac. | The weak link; see below |
-| 2. Build meshes, rig, add physics, export | image2live2d (Apache-2.0), an existing open-source rigger | Any computer; no graphics card | Exists. Writes an Inochi2D-family `.inp` using only node types the stage supports (checked by reading its source; not yet run here) |
+| 2. Build meshes, rig, add physics, export | image2live2d (Apache-2.0), an existing open-source rigger | Any computer; no graphics card | Exists and runs here in a few seconds. Its puppets load and animate in the stage after three fixes to the renderer |
 | 3. Upload | Console | — | Designed |
 
 Stage 2 was earlier described in these documents as new work. That was
@@ -254,8 +254,9 @@ artwork:
   parts by colour and position, with the user clicking a few points (eyes,
   mouth, neck). Hidden areas are filled by extending the neighbouring colour.
   It runs on any laptop, cannot lose an ornament or change clothing because
-  it only cuts the original, and limits how far parts can move. Unbuilt and
-  unproven; proposed as the next experiment.
+  it only cuts the original, and limits how far parts can move. Built and
+  run on one image with a faithful result; unproven on unfamiliar artwork.
+  See `09-flat-image-experiment.md`.
 - **C. Layers or a finished puppet supplied by the user.** Always accepted,
   but by the owner's definition this does not count as custom-character
   support on its own.

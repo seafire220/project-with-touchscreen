@@ -6,7 +6,7 @@ publish = false
 description = "Draws and animates the character on the device screen"
 
 [dependencies]
-inox2d = { git = "https://github.com/Inochi2D/inox2d", rev = "d4dd9dd7f16b775042cbda44370570abf9a8cf81" }
+inox2d = { path = "vendor/inox2d" }
 inox2d-opengl = { path = "vendor/inox2d-opengl" }
 glam = "0.29.0"
 glow = "0.14.1"

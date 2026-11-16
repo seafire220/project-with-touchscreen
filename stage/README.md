@@ -17,9 +17,9 @@ graphics chip**, so its frame rate there is unknown.
 cargo build --release
 ```
 
-Needs Rust (tested with 1.97). The renderer core is fetched from the Inox2D
-repository at a pinned commit; the OpenGL part is kept in
-`vendor/inox2d-opengl` with our changes listed in its `PATCHES.md`.
+Needs Rust (tested with 1.97). The Inox2D renderer is kept in `vendor/` with
+our changes listed in `vendor/PATCHES.md`; nothing but ordinary crates is
+fetched at build time.
 
 ## Run
 
@@ -80,14 +80,16 @@ parameter names, either Inochi2D style (`Mouth:: Shape`, `Eye:: Left:: Blink`,
 ## Tests
 
 ```
-cargo test --release                       # logic: 19 tests
+cargo test --release                       # logic: 18 tests
 python3 tools/visual_test.py target/release/stage PUPPET.inp out/ --gl es
 ```
 
 The visual test needs `Xvfb`, Pillow and a rigged puppet with conventional
-parameter names. It was developed against the "Aka" example model from
-`Inochi2D/example-models` (by seagetch, CC BY 4.0), which is distributed
-through Git LFS and is not stored in this repository. It checks that the
+parameter names. It passes with a hand-rigged model (the "Aka" example from
+`Inochi2D/example-models`, by seagetch, CC BY 4.0, distributed through Git
+LFS and not stored here) and with puppets produced by the image2live2d
+rigger, including its built-in sample (`python -m image2live2d --sample
+--fullbody -o sample.inp`). It checks that the
 character is drawn and framed, that opening the mouth and blinking each
 change only a small area in the right place, and that the picture returns to
 rest afterwards.

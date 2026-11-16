@@ -183,12 +183,7 @@ impl Mapper {
 		let mut out: Vec<(String, Vec2)> = self
 			.values
 			.iter()
-			.map(|(name, v)| {
-				// The renderer skips a parameter whose value is exactly (0, 0),
-				// which would leave it stuck at its previous shape.
-				let x = if v[0] == 0.0 && v[1] == 0.0 { 1e-5 } else { v[0] };
-				(name.clone(), Vec2::new(x, v[1]))
-			})
+			.map(|(name, v)| (name.clone(), Vec2::new(v[0], v[1])))
 			.collect();
 		out.sort_by(|a, b| a.0.cmp(&b.0));
 		out
@@ -240,16 +235,8 @@ mod tests {
 		};
 		let mut m = Mapper::auto(&info);
 		let out = m.resolve(&Pose { blink: 1.0, head_yaw: 0.5, ..Default::default() });
-		assert_eq!(value(&out, "ParamEyeLOpen").x, 1e-5); // closed = 0, nudged off exact zero
+		assert_eq!(value(&out, "ParamEyeLOpen").x, 0.0); // closed
 		assert_eq!(value(&out, "ParamAngleX").x, 15.0);
-	}
-
-	#[test]
-	fn exact_zero_is_nudged() {
-		let mut m = Mapper::auto(&inochi());
-		let out = m.resolve(&Pose::default());
-		let breath = value(&out, "Breath");
-		assert!(breath.x > 0.0 && breath.x < 1e-3 && breath.y == 0.0);
 	}
 
 	#[test]
@@ -263,7 +250,7 @@ mod tests {
 		assert!(m.targets().iter().all(|(c, _)| *c != Control::HeadYaw));
 		let out = m.resolve(&Pose { mouth_open: 1.0, breath: 0.0, ..Default::default() });
 		// Breath is driven by two controls here; the later one (mouth, inverted) wins: 1 -> 0
-		assert!(value(&out, "Breath").x < 1e-3);
+		assert_eq!(value(&out, "Breath").x, 0.0);
 		let bad: Value = serde_json::from_str(r#"{"mouth_open": {"param": "Nope"}}"#).unwrap();
 		assert!(Mapper::with_overrides(&info, &bad).is_err());
 		let unknown: Value = serde_json::from_str(r#"{"tail": null}"#).unwrap();

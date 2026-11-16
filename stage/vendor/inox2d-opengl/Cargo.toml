@@ -10,7 +10,7 @@ keywords = ["gamedev", "graphics", "inochi2d", "vtuber", "opengl"]
 categories = ["graphics", "rendering"]
 
 [dependencies]
-inox2d = { git = "https://github.com/Inochi2D/inox2d", rev = "d4dd9dd7f16b775042cbda44370570abf9a8cf81" }
+inox2d = { path = "../inox2d" }
 glam = "0.29.0"
 glow = { version = "0.14.1" }
 thiserror = "1.0.39"

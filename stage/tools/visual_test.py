@@ -19,7 +19,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 
 from PIL import Image, ImageChops
 
@@ -48,14 +47,14 @@ def main():
         print("SKIP: Xvfb is not installed")
         return 0
 
-    display = ":%d" % (90 + os.getpid() % 9)
-    xvfb = subprocess.Popen(["Xvfb", display, "-screen", "0", "800x1000x24"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Let Xvfb pick a free display number and tell us which one it took.
+    xvfb = subprocess.Popen(["Xvfb", "-displayfd", "1", "-screen", "0", "800x1000x24"],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    display = ":" + xvfb.stdout.readline().strip()
+    if display == ":":
+        print("FAIL  could not start a virtual display")
+        return 1
     try:
-        for _ in range(50):
-            if os.path.exists("/tmp/.X11-unix/X" + display[1:]):
-                break
-            time.sleep(0.1)
         script = tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False)
         script.write("\n".join([
             # The first ten seconds let the puppet's own hair and cloth physics settle.

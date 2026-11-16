@@ -271,3 +271,37 @@ rejected. Settled entries are not reopened without new evidence.
 - Test artwork depicting existing commercial characters is used locally only
   and never committed, shown in committed screenshots or shipped. Committed
   tests and evidence use openly licensed or original art.
+
+## D-025 — Layers are cut from the original, not regenerated, as the first route
+
+- Date: 2026-11-16. Status: adopted for now, on one result.
+- Decision: the default route from a flat image to layers is
+  `studio/flatsplit.py`, which separates parts by colour and position from a
+  few marked points and never repaints the artwork.
+- Why: on the owner's test image it kept every ornament and garment, where
+  the earlier attempt with a generative splitter lost them; it needs no
+  graphics card, so it runs on the owner's Mac and on customers' laptops.
+- Limits: one image is not evidence of generality. See
+  `09-flat-image-experiment.md`. See-through stays as the route to compare
+  against once a graphics card is available.
+
+## D-026 — The existing rigger is used as it is
+
+- Date: 2026-11-16. Status: decided.
+- image2live2d (Apache-2.0, commit 714e7cc) is run unmodified. It was
+  installed and run with the owner's approval. Its files needed three fixes
+  on our side, in the renderer, not in the rigger.
+
+## D-022 updated — Renderer kept wholly in-tree
+
+- Date: 2026-11-16.
+- Both Inox2D crates now live in `stage/vendor/` and nothing is fetched at
+  build time. Added since D-022: opacity bindings, applying controls that sit
+  at zero, and a tolerant metadata reader. All eight changes are listed in
+  `stage/vendor/PATCHES.md`.
+
+## D-023 updated — Earlier source received
+
+- Date: 2026-11-16.
+- The archive arrived and its checksum matches the brief. Review so far is
+  limited to how it calls the rigger; see `08-prior-work-review.md`.
