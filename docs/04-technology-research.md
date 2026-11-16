@@ -1,6 +1,7 @@
 # Technology research
 
-Status: 2026-11-16. Living document.
+Status: revision 2, 2026-11-16. Living document. Section 1 was corrected
+after building and running the Inochi2D code; see `07-spike-inochi2d.md`.
 
 How each fact was checked is stated, because some hosts could not be read
 directly from this session:
@@ -9,36 +10,43 @@ directly from this session:
   entry directly.
 - **[Search]** — taken from web search summaries; not read first-hand.
 - **[Memory]** — from prior knowledge, not re-checked this session.
+- **[Tested]** — built and run here.
 
 ## 1. Rigged 2D puppet engines (Standard tier)
 
 | Option | Licence | Findings | Verdict |
 |---|---|---|---|
 | Live2D Cubism SDK | Proprietary | A device that loads arbitrary user models is an "Expandable Application". That class needs review and a paid agreement even for individuals and small businesses, with annual fees and a revenue share. [Search] | Rejected, as the owner already decided |
-| Inochi2D (reference SDK) | BSD-2-Clause [Read] | Written in D. The reference renderer needs a desktop OpenGL 3.1 context, not the OpenGL ES found on low-cost boards. States "at least 1 GB of RAM for bigger models". Has a WebAssembly build configuration. [Read] | Not usable as the runtime without porting work |
-| Inox2D (Rust port of Inochi2D) | BSD-2-Clause [Read] | Renders through OpenGL and WebGL. Its own README says it is "in a prototype state" and "not recommended … in production". Animations and mesh groups are not implemented. [Read] | Too immature to build a product on |
+| Inochi2D official library | BSD-2-Clause [Read] | Being rewritten for 0.9 as a renderer-independent library with a C interface, WebAssembly build and TypeScript bindings. An August 2026 snapshot builds and loads a real model; the current source has not compiled since 3 October 2026. Latest release is still 0.8.7. [Tested] | Track; adopt when 0.9 is released |
+| **Inox2D (Rust implementation of Inochi2D)** | BSD-2-Clause [Read] | Rendered a full rigged sample character correctly as a native program and, compiled to WebAssembly, in a browser. Two small defects found. Lacks mesh groups and animation playback; its README still calls it a prototype. [Tested] | **Chosen runtime**, pinned and patched |
 | nijilive / nicxlive | BSD-2-Clause [Read] | A fork of Inochi2D 0.8. nicxlive is a C++ implementation "developing", said to work with OpenGL, Vulkan and WebGL. No stable builds of its editor. [Read] | Watch; not ready |
 | Spine | Proprietary | Runtimes need a paid editor licence and rigs are authored in its editor. [Memory] | Rejected |
 | Rive | Runtime open, editor proprietary | Files come from the Rive editor; no route for machine-generated rigs. [Memory] | Rejected |
 | Talking Head Anime 4 | MIT code [Read] | Animates a single anime image, but needs a per-character model trained for "several ten hours" on a high-end GPU, and a powerful Nvidia GPU to run. [Read] | Rejected: impractical per character |
-| **Own puppet format and WebGL runtime** | Ours | A small runtime that draws textured meshes and bends them with named parameters (head turn, blink, mouth, breathing, hair sway). Only needs the features our own rig generator emits. | **Proposed** |
+| Ayatsuri2D | Editor GPL-3.0; runtime MIT; C interface Apache-2.0 [Read] | A young open alternative to Live2D with its own format and the ability to read Live2D model files without the Live2D SDK. Beta. [Read] | Watch. Loading Live2D files in a sold product is a legal question to settle first |
+| Own puppet format and runtime | Ours | Proposed in the first draft. | Withdrawn: Inochi2D works and already has an editor and models |
 
-Why the proposal is our own runtime and not Inochi2D: nobody publishes an
-automatic rigger that targets Inochi2D, so the rig generator has to be written
-here in any case, and the generator decides which runtime features are needed.
-The only Inochi2D runtime that runs in WebGL calls itself a prototype.
-Inochi2D's file format is open, so an importer for hand-made Inochi2D models
-can be added later without depending on its runtime.
+**Correction.** The first draft rejected Inochi2D because its README says
+the reference renderer needs desktop OpenGL 3.1 and because the Rust port
+calls itself a prototype. Both statements are true and neither is a reason
+to reject it. The open graphics drivers for the Mali chips on Orange Pi and
+Radxa boards provide desktop OpenGL 3.1 as well as OpenGL ES 3.1 [Search],
+and the Rust port draws a real rigged character correctly when actually run
+[Tested]. Inochi2D also brings what a home-made format never would: a free
+rigging editor (Inochi Creator) and existing models, which gives users a
+manual route when automatic rigging falls short.
 
 ## 2. Turning one image into a character
 
 | Tool | What it does | Licence | Practical limits |
 |---|---|---|---|
-| See-through (SIGGRAPH 2026) | Splits one anime illustration into up to 23 inpainted layers with draw order, exported as a PSD | Apache-2.0 code [Read]; licences of its model weights not checked | Needs an 8–16 GB GPU, about 2–3 minutes per image. Does not rig: "rigging, deformation meshes, and physics" stay manual. Trained on commercial Live2D models, which is a provenance question for a commercial product. [Read] |
+| See-through (SIGGRAPH 2026) | Splits one anime illustration into up to 23 inpainted, named layers (front hair, back hair, face, irises, eye whites, eyelashes, eyebrows, mouth, ears, neck, clothing items, tail, wings) with draw order, exported as a PSD | Apache-2.0 code [Read]; licences of its model weights not checked | Needs an 8–16 GB GPU, about 2–3 minutes per image. Does not rig: "rigging, deformation meshes, and physics" stay manual. Trained on commercial Live2D models, which is a provenance question for a commercial product. [Read] |
 | Qwen-Image-Layered | Splits any image into a chosen number of transparent layers | Apache-2.0 [Read] | General purpose, not anime-part aware; needs a large GPU. [Read] |
 | anime-segmentation (SkyTNT) | Cuts the character out from the background | Apache-2.0 [Read] | Light enough to run in a browser or on the device as a one-off job. |
 | Image-to-video services | Turn a still into a short animated clip; most accept a first frame and an optional last frame | Commercial APIs | Roughly US$0.03–0.30 per second of video depending on model; quotes vary 2–5× between sources. [Search] |
 | Image-editing models | Produce variants of the same picture (mouth open, eyes closed, angry) | Commercial APIs | Cents per image. [Memory] |
+| Stretchy Studio | Browser tool that takes a See-through layered file, builds meshes, finds a skeleton by pose detection or simple rules, and animates on a timeline | MIT [Read] | Exports Spine and Live2D project files, not Inochi2D. Works by keyframed animation, not live parameters. Last commit April 2026. Useful as a source of mesh-generation and pose-detection code, and for rendering clips. [Read] |
+| psd2live | Layered file to Live2D model with automatic rigging | GPL-3.0 [Search] | Live2D output only; reference for technique. |
 
 Three character kinds follow from this, in rising cost and difficulty:
 
@@ -51,15 +59,12 @@ Three character kinds follow from this, in rising cost and difficulty:
    given as first and last frame so every clip starts and ends on the same
    pose and clips can be cut together cleanly. A dozen four-second clips is
    roughly US$2–15 per character at the prices above.
-3. **Puppet** — a rigged character.
-   - Version 0: the single image is bent as one sheet. Face position, eyes
-     and mouth are located automatically (with a vision model on the user's
-     key) and can be corrected by dragging markers in the web UI. Gives
-     breathing, sway, blinking, mouth movement and a few degrees of head turn.
-     No layer splitting is needed, so it is robust.
-   - Version 1: import a layered PSD, such as See-through output or an
-     artist's file, and rig it from a template. Gives hair that swings
-     separately and larger head turns.
+3. **Puppet** — a rigged Inochi2D character, made one of two ways:
+   - Automatically: See-through splits the image into named layers on the
+     user's laptop; our rigger builds meshes, applies a template rig and
+     writes an Inochi2D file. The rigger is new work; the steps before it
+     reuse existing code.
+   - By hand: rigged in Inochi Creator and uploaded.
 
 Lite ships kinds 1 and 2. Standard adds kind 3.
 
@@ -101,8 +106,9 @@ not to quote to customers.
 
 OpenAI Realtime and Gemini Live both run over a WebSocket. Reported cost is
 roughly US$0.02–0.10 per minute of two-way talk depending on model. [Search]
-Neither was confirmed to accept a user's cloned voice, so this mode uses the
-provider's built-in voices.
+Neither was confirmed to accept a user's cloned voice. Decision: not used.
+The streamed recognition → LLM → cloned-voice chain is the project's own
+form of speech-to-speech.
 
 ## 4. Display software on the device
 
@@ -132,7 +138,11 @@ Checked directly against the Debian 13 (trixie) ARM64 package index [Read]:
 ## Sources
 
 - Live2D licence: https://www.live2d.com/en/sdk/license/ and https://www.live2d.com/en/sdk/license/expandable/
-- Inochi2D: https://github.com/Inochi2D/inochi2d ; Inox2D: https://github.com/Inochi2D/inox2d
+- Inochi2D: https://github.com/Inochi2D/inochi2d ; Inox2D: https://github.com/Inochi2D/inox2d ; example models: https://github.com/Inochi2D/example-models
+- Stretchy Studio: https://github.com/MangoLion/stretchystudio and https://stretchy.studio/
+- Ayatsuri2D: https://github.com/Yoru-KenomoVT/ayatsuri_2d
+- psd2live: https://github.com/tsunehimatoi/psd2live
+- Mali driver capabilities: https://www.collabora.com/news-and-blog/blog/2021/01/13/desktop-opengl-3-1-on-mali-gpus-with-panfrost and https://sources.debian.org/src/mesa/26.0.1-2/docs/drivers/panfrost.rst
 - nijilive: https://github.com/nijigenerate/nijilive ; nicxlive: https://github.com/nijigenerate/nicxlive
 - See-through: https://github.com/shitagaki-lab/see-through and https://arxiv.org/abs/2602.03749
 - Qwen-Image-Layered: https://github.com/QwenLM/Qwen-Image-Layered

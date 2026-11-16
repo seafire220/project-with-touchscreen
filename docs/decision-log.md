@@ -135,3 +135,95 @@ rejected. Settled entries are not reopened without new evidence.
 - Why: without a secure element the decryption key would be stored beside
   the data. Keys are write-only in the console, masked in logs, and left out
   of every package, export and backup.
+
+## Review round, 2026-11-16 — outcome of the owner's feedback
+
+| Decision | Outcome |
+|---|---|
+| D-006 Platform strategy | **Agreed.** Standard first on Linux. Microcontroller Lite afterwards, with the owner providing access to the board through a laptop. |
+| D-007 Prototype hardware | **Reopened**, see D-016. |
+| D-008 Fit in 1 GB | Stands. |
+| D-009 Character drawn by a web page | **Replaced** by D-017. |
+| D-010 Own puppet format | **Reversed** by D-018. |
+| D-011 Own conversation pipeline | Stands. |
+| D-012 On-device speech recognition | Stands. |
+| D-013 Character creation from the device's web UI | **Narrowed** by D-019: true for Lite only. |
+| D-014 USB audio | Stands. |
+| D-015 Key protection | Stands. |
+
+## D-016 — Prototype board: two candidates, owner to choose
+
+- Date: 2026-11-16. Status: awaiting the owner.
+- Evidence: the owner proposed the Orange Pi Zero 3 and Radxa Zero 3W as
+  cheaper. Current listings: Orange Pi Zero 3 1/2/4 GB about A$90/102/113;
+  Radxa Zero 3W 2 GB with storage about A$68–96; Raspberry Pi 4 1 GB A$64.88
+  and 2 GB A$109.33.
+- Finding: the Radxa is cheaper than a 2 GB Raspberry Pi, as the owner said.
+  The Orange Pi Zero 3 is no longer cheap. The cheapest board of all is the
+  Raspberry Pi 4 1 GB, and 1 GB is enough under D-017.
+- Options: (1) Raspberry Pi 4 1 GB with ribbon screen, about A$239 complete;
+  (2) Radxa Zero 3W 2 GB with HDMI screen, about A$294 complete.
+- Recommendation: option 1 for the first prototype on cost and risk. Option 2
+  if the owner prefers to prototype on a non-Pi board or wants the memory
+  headroom. The software is written to run on either.
+- Rejected: Orange Pi Zero 3 (dearer than the Radxa for less performance,
+  weaker Wi-Fi driver); unbranded boards for a prototype (unstable supply).
+
+## D-017 — The character is drawn by a small native program
+
+- Date: 2026-11-16. Status: decided, on test evidence.
+- Decision: the stage is a Rust program drawing through OpenGL ES under the
+  `cage` display server. The same code is also compiled to WebAssembly for
+  the console preview and for running in a browser on a laptop.
+- Why: the working Inochi2D renderer is Rust and runs both ways (tested). A
+  native program uses a fraction of a browser's memory, starts faster, and
+  does not depend on a browser enabling the graphics chip on a lesser-known
+  board. This is what makes 1 GB boards sufficient.
+- Rejected: kiosk web browser as the stage (D-009). Kept as a fallback only.
+
+## D-018 — Standard tier uses the Inochi2D puppet format with the Inox2D runtime
+
+- Date: 2026-11-16. Status: decided, on test evidence (`07-spike-inochi2d.md`).
+- Decision: puppets are Inochi2D `.inp`/`.inx` files. The runtime is Inox2D,
+  pinned to a tested commit, carrying our own patches.
+- Why: it rendered a complete rigged character correctly natively and in a
+  browser. It is BSD-licensed, has a free editor for hand rigging, and has
+  existing models. The owner asked for the Inochi2D ecosystem plus our own
+  patching in preference to a home-made format.
+- Correction recorded: D-010 rejected Inochi2D from its README without
+  running it. That was a mistake in method.
+- Known gaps to patch: stray edge fragments in the browser build; mesh
+  groups unsupported.
+- Rejected: official Inochi2D library today (current source does not build;
+  0.9 unreleased; revisit on release); nijilive; Ayatsuri2D (beta, and its
+  Live2D-file support raises a legal question for a sold product); our own
+  format.
+
+## D-019 — Standard characters are made by a laptop tool chain
+
+- Date: 2026-11-16. Status: decided by the owner; implementation proposed.
+- Decision: one image is split into named layers by See-through on the
+  user's laptop; our rigger meshes the layers, applies a template rig and
+  exports an Inochi2D file for upload. Requirements are stated to the user.
+  Hand-rigged files are accepted as the alternative.
+- Why: layer splitting needs an 8–16 GB graphics card, far beyond the device.
+- New work: the template rigger and Inochi2D exporter. No existing tool
+  produces Inochi2D files from a layered image.
+- Reused: See-through (Apache-2.0) for splitting; Stretchy Studio (MIT) for
+  mesh generation and pose detection.
+- Lite characters are still generated from the device's web UI (D-013).
+
+## D-020 — No ready-made speech-to-speech services
+
+- Date: 2026-11-16. Status: decided by the owner.
+- Decision: the conversation always runs as streamed recognition, LLM and
+  cloned-voice synthesis.
+- Why: speech-to-speech services speak only in their own voices, which
+  defeats the purpose of a character voice.
+
+## D-021 — Compliance deferred; Kickstarter first
+
+- Date: 2026-11-16. Status: decided by the owner.
+- Decision: regulatory work waits until after prototyping. Meanwhile, parts
+  that already carry certification are preferred, and the mains adapter is
+  an external, already-marked unit.
