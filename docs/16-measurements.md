@@ -15,15 +15,17 @@ times slower.
 | Speech model memory | 221 MB once loaded; 356 MB peak while recognising 16.7 s | Loaded once and kept (it was being reloaded for every utterance; fixed) |
 | Core service memory, idle, without the speech model | about 50 MB | Python, aiohttp, numpy |
 | Anthropic library | adds about 51 MB | Loaded only if Anthropic is chosen |
-| Stage program size | 4.5 MB (PC), 4.0 MB (Pi build) | The Pi build needs only the C library; graphics libraries load at run time |
+| Stage program size | 5.2 MB (PC), 4.7 MB (Pi build), with Ayagami | The Pi build needs only the C library; graphics libraries load at run time |
 | Stage Pi build time | under 1 minute, cross-built on a PC | |
+| Stage peak memory, 720x1280 window, software graphics | Synthetic test figure: 16 MB (Inochi2D), 22 MB (Live2D format). A test character from a picture: 22 MB (Inochi2D), 68 MB (Live2D format). Live2D's sample models: 13-57 MB | Before part pictures were packed into one texture page, the same test character took 158 MB in the Live2D format. The device's limit for the stage is 300 MB (`MemoryMax` in `companion-stage.service`) |
+| Stage time per frame on the processor | Moving the character: 0.10-0.17 ms with Ayagami, 0.19-0.27 ms with Inox2D, for the same two characters. Handing the drawing to the graphics chip: about 0.4 ms for ours; 4-7 ms for sample models with many masks | Software graphics here, so the drawing figure is not the device's. Ayagami is not slower than Inox2D at moving a character. Models with many masks redraw each mask every frame; to watch on the Pi |
 
 ## Estimated memory budget on the 1 GB Pi
 
 | Part | Estimate |
 |---|---|
 | Raspberry Pi OS Lite, cage, NetworkManager | 150–200 MB |
-| Stage (character, textures in graphics memory) | 100–200 MB, to measure |
+| Stage (character, textures in graphics memory) | 20–70 MB measured on a PC for our characters (above); to measure on the Pi |
 | Core with on-device speech recognition | 220 MB idle, about 360 MB while recognising |
 | Anthropic library, if chosen | 50 MB |
 | Total | about 520–810 MB |

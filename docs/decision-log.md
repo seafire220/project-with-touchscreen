@@ -506,8 +506,8 @@ rejected. Settled entries are not reopened without new evidence.
 
 ## D-040 — Live2D-format playback stays off in units for sale until a lawyer says otherwise
 
-- Date: 2026-11-17. Status: recommended (`19-live2d-format-licensing.md`);
-  the owner decides.
+- Date: 2026-11-17. Status: superseded by the owner's decision, D-044
+  (`19-live2d-format-licensing.md`).
 - We use no Live2D code, SDK, editor or sample model; the writer
   (image2live2d) and the player (Ayagami) are independent open-source
   projects whose authors describe how they learned the format without
@@ -554,3 +554,43 @@ rejected. Settled entries are not reopened without new evidence.
   and the converter and device drawing code must carry masks and draw-order
   changes. The techniques are summarised in `20-head-turns.md`.
 
+
+## D-044 — The device plays characters with Ayagami, Live2D-format copy first
+
+- Date: 2026-11-17. Status: the owner's decision; implemented.
+- The stage plays Live2D-format models with Ayagami's core (vendored,
+  MIT or Apache-2.0) and our own OpenGL ES 3 drawing (`stage/src/live2d.rs`:
+  masks, inverted masks, Cubism's blends and the newer blend modes, parts
+  drawn off screen, culling). It decides the format by a file's contents.
+  Inochi2D stays for screen cards, older packages and characters without a
+  Live2D-format copy.
+- The core links the Live2D-format copy when a character has one; a device
+  setting (`character_format`) can put Inochi2D first, which is also how
+  units would be switched back if a lawyer advises it.
+- Buyers can add their own Live2D-format models as a zipped model folder;
+  the page asks them to add only models they have the right to use. Not to
+  be advertised until the Cubism Editor licence question (reportedly
+  section 5.1.9) is answered.
+- Checked: on Live2D's eight sample models (local only) the drawing matches
+  Ayagami's own renderer (overlap 0.970-0.9997); on a converted character
+  the two formats overlap 0.989 or more in thirteen poses. The converter now
+  packs part pictures into one texture page, which cut a test character's
+  peak memory on the device from 158 to 68 MB.
+- Not done here: a Raspberry Pi run and the device image build (no base
+  image or ARM emulation in this session); the stage cross-builds for the
+  Pi.
+
+## D-045 — Motion is defined once, on a generic skeleton, and fitted to each character
+
+- Date: 2026-11-17. Status: proposed (from the owner's look at a friend's
+  VTubing app); investigation is roadmap item 3a.
+- VTubing apps built on standard humanoid skeletons (VRM) work with any
+  model because tracking, expressions and smoothing act on the standard
+  skeleton, and every model is mapped onto it. Our equivalent is the stage's
+  control layer (head, body, eyes, mouth, breath; `mapping.rs`) and the
+  standard parameter names our rigger writes. Proposed: grow that into a
+  generic upper-body skeleton with arms and hands, author idle motion and
+  gestures once against it (including recorded human motion), smooth every
+  control with filters and springs, and fit both our own characters and
+  buyers' models to it, with a calibration step for models whose ranges or
+  directions differ.

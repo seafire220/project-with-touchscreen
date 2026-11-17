@@ -2,14 +2,17 @@
 
 The program that draws the character on the device's own screen.
 
-It loads an Inochi2D puppet (`.inp` or `.inx`), keeps it alive with
-breathing, blinking and small head and body movement, and moves its mouth and
-changes its manner on command from the core service. It holds no API keys and
-makes no network connections.
+It loads a character, either an Inochi2D puppet (`.inp` or `.inx`) or a
+Live2D-format model (`.model3.json` with the files it names), keeps it alive
+with breathing, blinking and small head and body movement, and moves its mouth
+and changes its manner on command from the core service. It tells the two
+formats apart by the file's contents, so the device's link can have any name.
+It holds no API keys and makes no network connections.
 
 Status: works on a virtual display with software graphics, in both OpenGL ES
-and desktop OpenGL modes. **Not yet run on a Raspberry Pi or any real
-graphics chip**, so its frame rate there is unknown.
+and desktop OpenGL modes, and cross-builds for 64-bit Raspberry Pi OS.
+**Not yet run on a Raspberry Pi or any real graphics chip**, so its frame
+rate there is unknown.
 
 ## Build
 
@@ -17,15 +20,17 @@ graphics chip**, so its frame rate there is unknown.
 cargo build --release
 ```
 
-Needs Rust (tested with 1.97). The Inox2D renderer is kept in `vendor/` with
-our changes listed in `vendor/PATCHES.md`; nothing but ordinary crates is
-fetched at build time.
+Needs Rust 1.85 or newer (tested with 1.97). The Inox2D renderer and
+Ayagami's core (which plays Live2D-format models) are kept in `vendor/`, with
+our changes and their exact versions listed in `vendor/PATCHES.md`; nothing but
+ordinary crates is fetched at build time. For the Raspberry Pi, see
+`.cargo/config.toml` (`cargo build --release --target aarch64-unknown-linux-gnu`).
 
 ## Run
 
 ```
 target/release/stage character.inp --fullscreen
-target/release/stage character.inp --size 720x1280 --socket /run/stage.sock
+target/release/stage model/model.model3.json --size 720x1280 --socket /run/stage.sock
 ```
 
 `stage --help` lists all options. `--gl es` forces OpenGL ES, which is what
@@ -54,17 +59,31 @@ One JSON object per line, on standard output and to socket clients:
 
 | Event | Meaning |
 |---|---|
-| `ready` | Puppet loaded. Lists which controls were connected to which puppet parameters, and the OpenGL version in use. |
+| `ready` | Character loaded. Gives its format (`inochi2d` or `live2d`), its parameters, which controls were connected to which parameters, and the OpenGL version in use. |
+| `features` | Live2D-format models only, after `ready`: how many meshes use masks (and inverted masks), culling, additive, multiplicative and newer blend modes, parts drawn off screen, whether there is physics, and the canvas size. |
+| `warning` | Something that does not stop the character playing, such as a physics file that cannot be read. |
 | `state` | The state changed. |
-| `heartbeat` | Once a second, with frames per second. The supervisor restarts the stage if these stop. |
+| `heartbeat` | Once a second: frames per second, and the average milliseconds per frame spent moving the character (`update_ms`) and handing its drawing to the graphics chip (`draw_ms`). The supervisor restarts the stage if these stop. |
 | `error` | A command was not understood. |
 | `fatal` | The stage cannot run; it exits with a non-zero status. |
 
-## Puppets it accepts
+## Characters it accepts
 
-Any Inochi2D puppet whose nodes are plain nodes, parts, composites and simple
-physics. Files using other node types (for example mesh groups) are refused
-with a clear message rather than shown half-working.
+**Inochi2D puppets** whose nodes are plain nodes, parts, composites and
+simple physics. Files using other node types (for example mesh groups) are
+refused with a clear message rather than shown half-working.
+
+**Live2D-format models**: a `.model3.json` and the `.moc3`, textures and
+physics it names, read only from the model's own folder (the link to it is
+followed first). Ayagami's core (`vendor/ayagami`) works out each frame;
+`src/live2d.rs` draws it with OpenGL ES 3: premultiplied, mipmapped
+textures; clipping masks, also inverted ones; Cubism's additive and
+multiplicative blends; the newer blend modes, worked out in the shader
+against a copy of what is already drawn; parts drawn off screen first; and
+back-face culling. Textures larger than the graphics chip allows are scaled
+down. Motions and expressions in the model are not played yet: the stage
+drives the standard parameters itself. `--view` is in canvas pixels for these
+models, and `--no-physics` stops hair and clothes swinging (for comparisons).
 
 Controls are connected automatically when the puppet uses conventional
 parameter names, either Inochi2D style (`Mouth:: Shape`, `Eye:: Left:: Blink`,
@@ -82,9 +101,20 @@ parameter names, either Inochi2D style (`Mouth:: Shape`, `Eye:: Left:: Blink`,
 ## Tests
 
 ```
-cargo test --release                       # logic: 18 tests
+cargo test --release                       # logic: 30 tests
 python3 tools/visual_test.py target/release/stage PUPPET.inp out/ --gl es
+python3 tools/compare_formats.py target/release/stage UNPACKED_CHARACTER/ out.png
 ```
+
+`compare_formats.py` draws a character's Inochi2D puppet and its
+Live2D-format copy (`make_character.py --live2d`) in thirteen poses and
+reports how well they overlap; the studio's end-to-end test runs it on the
+synthetic test figure and requires 0.98 or more. The Live2D drawing was also
+checked against Ayagami's own renderer on Live2D's eight sample models, which
+between them use every drawing feature above (overlap 0.970 to 0.9997 in
+seven poses each; nearly all remaining differences are outline pixels, from
+filtering textures in sRGB space as Cubism's OpenGL renderer does). The
+sample models are not stored here.
 
 The visual test needs `Xvfb`, Pillow and a rigged puppet with conventional
 parameter names. It passes with a hand-rigged model (the "Aka" example from

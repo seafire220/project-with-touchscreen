@@ -6,6 +6,19 @@ risks are, and which questions a lawyer must answer before units that make
 or play Live2D-format files are sold. Items marked **For a lawyer** are
 open.
 
+**Owner's decision (2026-11-17, D-044):** the device plays characters
+with Ayagami, Live2D-format copy first, with Inochi2D kept as the fallback
+(screen cards, older packages, and any character without a Live2D-format
+copy). This was decided after a second reading of the terms (ChatGPT's, by
+the owner; also not a lawyer's): Ayagami's licence allows commercial use;
+Live2D's per-unit SDK fee is a condition of using Live2D's own SDK, which a
+build with only Ayagami does not include; the point still open is the Cubism
+Editor licence (reportedly section 5.1.9), which restricts what Editor
+customers may do with exported files and so concerns buyers' own models and
+any models we bundle, not the player. The lawyer questions below still need
+answers before selling; switching units back to Inochi2D is one default
+(`character_format` in `core/companion/store.py`).
+
 Two of the sources could not be read from the development session: Live2D's
 own pages (live2d.com) and one blog post (undeleted.ronsor.com) are blocked
 by its network settings. What is said about them here comes from search
@@ -20,8 +33,9 @@ the session's network settings so they can be read and quoted directly.
   published by the OpenL2D project (`moc3.hexpat`, from its `moc3ingbird`
   repository, whose README says no file in it was derived from the output of
   any Live2D software). We reverse-engineered nothing ourselves.
-- **Playing models.** The planned Live2D-format path on the device uses
-  Ayagami (MIT or Apache-2.0). Its README says it was developed "strictly
+- **Playing models.** The device's Live2D-format path uses Ayagami's core
+  (MIT or Apache-2.0), vendored in `stage/vendor/ayagami` with its licence
+  files; the drawing code around it is ours (`stage/src/live2d.rs`). Its README says it was developed "strictly
   using black-box reverse engineering only": reading model files and
   watching how test models render in VTube Studio, never disassembling or
   decompiling proprietary software. It says it may be used for any purpose
@@ -32,8 +46,14 @@ the session's network settings so they can be read and quoted directly.
   or Cubism Core library, the Cubism Editor, Live2D's sample models, and
   Live2D's names or logos as branding.
 - **Live2D's sample models** were used only on the development computer, to
-  check that our files are drawn the right way up and in the right colours.
-  They are not in the repository or the product and must not be (D-024).
+  check that our files are drawn the right way up and in the right colours,
+  and that the device's drawing matches Ayagami's own renderer and imports
+  model folders correctly. They are not in the repository or the product and
+  must not be (D-024).
+- **Buyers' own models.** The settings page accepts a zip of a Live2D-format
+  model's folder (as shared for VTube Studio) and turns it into a character;
+  it asks people to add only models they have the right to use, and notes
+  that some model licences name the programs allowed to show them.
 
 ## Live2D's published terms
 
@@ -76,23 +96,29 @@ the session's network settings so they can be read and quoted directly.
 | Can Live2D stop others from reading or writing the file format? | A file format as such is generally not protected by copyright; the usual risk is in how the knowledge was obtained, which concerns the people who reverse-engineered it, not us. In Australia, s 47D of the Copyright Act 1968 allows reproducing a program to make interoperable products, and s 47H makes contract terms that exclude it void. | **Yes.** Our position as a downstream user, in Australia and in the countries backers live in (US, Japan, EU). |
 | Patents | Not searched. Live2D Inc. may hold patents on its deformation methods or file handling. | **Yes.** A freedom-to-operate search (JP, US, EU, AU) before selling units that play these files. |
 | Can we say the device plays Live2D models? | Do not use "Live2D" or "Cubism" in the product name, logo or as a badge. A plain factual statement such as "plays .moc3 model files" may be acceptable descriptive use; Ayagami uses the names "only nominatively, to describe file-format compatibility". | **Yes.** What wording, if any, is safe on the Kickstarter page and the box. |
-| Buyers' own models | Models bought from artists, or made with Cubism Editor, come with their own licences; some allow only personal or streaming use, or use in named apps. The device plays what the buyer loads. | Wording for the user guide and terms of sale: buyers must have the right to use a model on the device. |
+| Buyers' own models | Models bought from artists, or made with Cubism Editor, come with their own licences; some allow only personal or streaming use, or use in named apps. The device plays what the buyer loads; the upload page says so. | Wording for the user guide and terms of sale: buyers must have the right to use a model on the device. |
+| Cubism Editor licence (reportedly section 5.1.9) | Reported to restrict Editor customers from using files exported by the Editor with software other than Live2D's. If so, a buyer who made a model in the Editor could be in breach by loading it on the device; the obligation is the buyer's, but advertising the import could be read as encouraging it. It also rules out bundling Editor-made models unless their makers grant the right. Our own characters are not made with the Editor. | **Yes.** Confirm the clause and its current text; whether advertising the import is safe and how to word it; and that models we write ourselves (studio) are outside it. |
 | The studio writing `.moc3` files | image2live2d's authors made writing `.moc3` opt-in, saying the remaining gate is legal (Live2D's SDK licence), not technical. Ours is opt-in as well. | Covered by the format question above. |
 
 ## Recommendation
 
-1. Keep Inochi2D (`.inp`) as the device's default format. Its software is
-   open (Inox2D, BSD-2-Clause) and has none of these questions.
-2. Keep Live2D-format output opt-in in the studio, and build the device's
-   Live2D-format playback with Ayagami, but leave it switched off in units
-   for sale until a lawyer has answered the questions above.
+The engineering recommendation was to keep Inochi2D as the default until a
+lawyer had answered (D-040). The owner decided to play Live2D-format copies
+first (D-044); what follows keeps that decision safe to reverse.
+
+1. Keep Inochi2D able to play every character the studio makes (it does:
+   every package has an `.inp`), so units can be switched back with one
+   default if a lawyer advises it.
+2. Keep Live2D-format output opt-in in the studio (`--live2d`) until the
+   owner turns it on for the one-click app.
 3. Keep the safeguards: no Live2D code, SDK, editor output or sample model
    in the product or the repository; no Live2D trademarks in branding; and a
    record of where every third-party component comes from and under which
-   licence.
-4. Before the Kickstarter page goes live, ask a lawyer the five questions in
+   licence (`stage/vendor/PATCHES.md`).
+4. Before the Kickstarter page goes live, ask a lawyer the six questions in
    the table, with this document and the Ayagami and image2live2d READMEs
-   attached.
+   attached, and do not advertise importing Live2D models until the Cubism
+   Editor question is answered.
 
 ## Sources
 

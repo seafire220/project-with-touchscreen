@@ -15,25 +15,29 @@ Done and tested in software (not yet on real hardware):
   copy (`--live2d`, `studio/live2d_export.py`).
 - The device software: core service, settings page (buyers' own keys),
   Wi-Fi setup, buttons, resets, updates, ready-made Raspberry Pi OS image
-  (`13`, `18`), Inox2D stage.
+  (`13`, `18`), and the stage, which plays Inochi2D puppets with Inox2D and
+  Live2D-format models with Ayagami (D-044). The core shows a character's
+  Live2D-format copy when it has one; buyers can add their own
+  Live2D-format models as a zipped model folder.
 - Measuring and review tools: `studio/reveal.py` (uncovered area, gaps,
   made-up filler shown, outline movement), `stage/tools/pose_strips.py`.
 - Licensing check for the Live2D format (`19`); owner's decision: Ayagami
-  plays everything on the device, Inox2D stays as a fallback (D-040, plan
-  of 2026-11-17).
+  plays everything on the device, Inox2D stays as a fallback (D-044). Six
+  questions remain for a lawyer before selling.
 
 ## Next, in order
 
 | # | Item | Done when | Status |
 |---|---|---|---|
 | 1 | **Board survey** (`22-board-options.md`): boards with a graphics chip Mesa supports (GL ES 3), ≥1 GB, Wi-Fi, sold in Australia, AUD prices | The owner can order one or two boards to test | done: Pi 5 1GB as reference, Radxa Zero 3W 2GB to measure |
-| 2 | **Ayagami on the device**: the stage plays `visual/live2d/model.model3.json` with Ayagami's core and our OpenGL drawing (masks, blend modes, draw order), Inox2D kept for `.inp` and screen cards; the core prefers the Live2D-format copy; buyers can upload their own Live2D models | A converted character drawn by the stage matches the Inox2D drawing (alpha overlap ≥ 0.98) in pose strips; core, studio and stage tests pass; the device image builds and passes `check-image.sh` | in progress |
-| 3 | **Drawing workflow, first test** (`23-drawing-workflow.md`): try generating alternate arm poses and head side views with the owner's Gemini key (image models), and See-through's hidden-area completion; assess the candidates in the owner's research notes (THA3, Qwen multiple angles, PSD2Live, Anime2.5DRig, Iki, Bunraku) | A written assessment with sample pictures, costs and licences; a recommended method | |
-| 4 | **Head-turn polish**: split the front hair into fringe, left and right; the far side drops behind the face at strong turns (draw order by angle, also carried into the Live2D format); keep strands from getting too thin; clean light halos from background removal; review the tilt; close the arm gaps at a full body turn | Pose strips clean at ±100% on Alice and t3; reveal numbers no worse | |
-| 5 | **Drawing workflow, built**: one-click laptop app (`studio/app.py`): picture in, completed hidden areas, alternate arm poses with gestures, review page, send to device; local GPU or the buyer's own key | A buyer-style run on a laptop without a GPU, using a key | |
-| 6 | **90° turns**: generated profile artwork (side nose, lips, fill), ±50/±60 keys, corner tilt transfer, masks and draw-order changes (`20-head-turns.md`) | Strips at ±60 look like a profile, with no folds | |
-| 7 | **Hardware bring-up** on the boards bought in item 1 (`15-hardware-test-plan.md`) | Measurements filled in `16-measurements.md` | |
-| 8 | **Before selling**: original default character (needs commissioned art), signed updates from the settings page, support access, user guide, the lawyer's questions in `19` | | |
+| 2 | **Ayagami on the device**: the stage plays `visual/live2d/model.model3.json` with Ayagami's core and our OpenGL drawing (masks, blend modes, draw order), Inox2D kept for `.inp` and screen cards; the core prefers the Live2D-format copy; buyers can upload their own Live2D models | A converted character drawn by the stage matches the Inochi2D drawing (alpha overlap ≥ 0.98) in pose strips; core, studio and stage tests pass; the device image builds and passes `check-image.sh` | done in software (D-044): overlap ≥ 0.989 in 13 poses; matches Ayagami's own renderer on 8 sample models; all tests pass; textures packed (158 → 68 MB). The image build and a Pi run moved to item 8 (no base image or ARM emulation in the session) |
+| 3 | **Drawing workflow, first test** (`23-drawing-workflow.md`): try generating alternate arm poses and head side views with the owner's Gemini key (image models), and See-through's hidden-area completion. Assess **every** candidate in the owner's research handoff (`live2d_automatic_rigging_research_handoff.md`, 2026-11-18): direct rigging (Image2Live2D, already our rigger and `.moc3` writer; PSD2Live; Bunraku; Anime2.5DRig; Iki; See-through) and multi-view generation (Qwen Image Edit Multiple Angles, THA3, DiffPortrait360, PAniC-3D, CharacterGen, Rotate Your Character, Character 12-View), using its search terms (novel view synthesis, multi-view diffusion, character turnarounds, occlusion-aware inpainting, mesh keyform prediction) to find newer ones | A written assessment answering the handoff's questions (what duplicates ours, licences of code and weights, measured versus reported memory, smallest adapter to our rig), with sample pictures, costs and a recommended method | |
+| 4 | **Motion on a generic skeleton** (D-045; from the owner's look at a friend's VTubing app): write up how VTubing apps make any model move well (standard humanoid skeleton, retargeting, smoothing filters and curves, expression rules), then grow the stage's controls into an upper-body skeleton with arms and hands; author idle motion and talking gestures once against it, including motion recorded from real people; smooth every control (filters, springs); fit buyers' models to it with a calibration step; play models' own motions and expressions | A written design (`24-motion.md`), then the same gesture set playing naturally on our characters and on imported models, judged in side-by-side clips | |
+| 5 | **Head-turn polish**: split the front hair into fringe, left and right; the far side drops behind the face at strong turns (draw order by angle, also carried into the Live2D format); keep strands from getting too thin; clean light halos from background removal; review the tilt; close the arm gaps at a full body turn | Pose strips clean at ±100% on the test characters; reveal numbers no worse | |
+| 6 | **Drawing workflow, built**: one-click laptop app (`studio/app.py`): picture in, completed hidden areas, alternate arm poses with gestures, review page, send to device; local GPU or the buyer's own key | A buyer-style run on a laptop without a GPU, using a key | |
+| 7 | **90° turns**: generated profile artwork (side nose, lips, fill), ±50/±60 keys, corner tilt transfer, masks and draw-order changes (`20-head-turns.md`) | Strips at ±60 look like a profile, with no folds | |
+| 8 | **Hardware bring-up** on the boards bought in item 1 (`15-hardware-test-plan.md`), including the device image with the new stage (`build-image.sh`, `check-image.sh`), frame rate with our characters and with mask-heavy imported models | Measurements filled in `16-measurements.md` | |
+| 9 | **Before selling**: original default character (needs commissioned art), signed updates from the settings page, support access, user guide, the six lawyer questions in `19` (do not advertise Live2D-model import before the Cubism Editor question is answered) | | |
 
 ## How to resume in a fresh session
 
@@ -54,9 +58,11 @@ cloud container is recycled. To rebuild:
 4. **Stage**: `cargo build --release` in `stage/` (Rust 1.85 or newer);
    the Pi build needs the `aarch64-unknown-linux-gnu` target and linker
    (`stage/.cargo/config.toml`).
-5. **Ayagami** (until it is vendored in item 2): clone
-   https://github.com/AyagamiDev/ayagami.
+5. **Ayagami** is vendored in `stage/vendor/ayagami` (commit in
+   `stage/vendor/PATCHES.md`); its own renderer, used once to check our
+   drawing, is in the upstream repository (https://github.com/AyagamiDev/ayagami).
 6. **Checks before committing**: studio tests (`cd studio && PYTHONPATH=../core
-   python -m unittest discover`), core tests, `cargo test` in `stage/`,
-   then pose strips and `reveal.py` on at least Alice and t3 for anything
-   that changes movement.
+   python -m unittest discover`; with the stage built, this includes the
+   two-format comparison on the synthetic test figure), core tests,
+   `cargo test` in `stage/`, then pose strips and `reveal.py` on at least
+   two test characters for anything that changes movement.

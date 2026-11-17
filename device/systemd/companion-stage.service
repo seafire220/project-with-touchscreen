@@ -22,7 +22,8 @@ UtmpMode=user
 Environment=XDG_SESSION_TYPE=wayland
 # cage runs one full-screen program; the stage reads the current character
 # from /var/lib/companion/current.inp, which the core points at the active
-# character or at a setup card. When the core switches character it asks
+# character (its Live2D-format model or its Inochi2D puppet: the stage tells
+# them apart by content) or at a setup card. When the core switches character it asks
 # the stage to exit, and this service starts it again.
 ExecStart=/usr/bin/cage -s -d -- /opt/companion/bin/stage /var/lib/companion/current.inp --fullscreen --socket /run/companion/stage.sock --no-stdin
 Restart=always

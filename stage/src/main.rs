@@ -219,6 +219,9 @@ struct StageApp {
 	last: Instant,
 	frames_since_beat: u32,
 	last_beat: Instant,
+	/// Seconds spent since the last heartbeat posing the character and issuing its drawing.
+	update_time: f64,
+	draw_time: f64,
 	next_capture: usize,
 	quit: bool,
 }
@@ -360,6 +363,8 @@ impl App for StageApp {
 		let Some((renderer, aux)) = &mut self.on_window else {
 			return !self.quit;
 		};
+		let started = Instant::now();
+		let mut posed = started;
 		match (&mut self.puppet, renderer) {
 			(Puppet::Inox(model), Renderer::Inox(renderer)) => {
 				renderer.clear();
@@ -371,12 +376,14 @@ impl App for StageApp {
 					}
 				}
 				puppet.end_frame(dt);
+				posed = Instant::now();
 				renderer.on_begin_draw(puppet);
 				renderer.draw(puppet);
 				renderer.on_end_draw(puppet);
 			}
 			(Puppet::Live2d(puppet), Renderer::Live2d(renderer)) => {
 				puppet.update(&values, dt);
+				posed = Instant::now();
 				if let Err(e) = renderer.draw(puppet) {
 					self.events.emit(json!({"event": "fatal", "message": format!("drawing failed: {e}")}));
 					return false;
@@ -384,6 +391,8 @@ impl App for StageApp {
 			}
 			_ => unreachable!("the renderer is made for the puppet's format"),
 		}
+		self.update_time += posed.duration_since(started).as_secs_f64();
+		self.draw_time += posed.elapsed().as_secs_f64();
 
 		// Save frames that tests asked for, before the buffers are swapped.
 		while self.next_capture < self.opts.capture_at.len() && self.t >= self.opts.capture_at[self.next_capture] {
@@ -400,13 +409,20 @@ impl App for StageApp {
 		self.frames_since_beat += 1;
 		let since = now.duration_since(self.last_beat).as_secs_f32();
 		if since >= 1.0 {
+			let per_frame = |total: f64| (total * 1000.0 / self.frames_since_beat.max(1) as f64 * 100.0).round() / 100.0;
 			self.events.emit(json!({
 				"event": "heartbeat",
 				"fps": (self.frames_since_beat as f64 / since as f64 * 10.0).round() / 10.0,
 				"state": self.behaviour.state().name(),
+				// Average milliseconds per frame on the processor: moving the character, and
+				// handing its drawing to the graphics chip (which then draws in parallel).
+				"update_ms": per_frame(self.update_time),
+				"draw_ms": per_frame(self.draw_time),
 			}));
 			self.frames_since_beat = 0;
 			self.last_beat = now;
+			self.update_time = 0.0;
+			self.draw_time = 0.0;
 		}
 
 		if let Some(limit) = self.opts.exit_after {
@@ -499,6 +515,8 @@ fn run(opts: Options) -> Result<(), String> {
 		last: Instant::now(),
 		frames_since_beat: 0,
 		last_beat: Instant::now(),
+		update_time: 0.0,
+		draw_time: 0.0,
 		next_capture: 0,
 		quit: false,
 	};
