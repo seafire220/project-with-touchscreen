@@ -11,6 +11,8 @@ from .audio import Detector, Microphone, Speaker, tone
 from .characters import Characters, split_persona
 from .conversation import Conversation
 from .memory import Memory
+from . import screen
+from .network import NetworkError, WiFi
 from .providers import ProviderError
 from .stage_link import StageLink
 from .store import Store, redact, write_atomic
@@ -22,7 +24,7 @@ NOTES_EVERY = 6          # update the memory notes after this many turns
 
 class Device:
     def __init__(self, data_dir, stage_socket=None, speaker=None, microphone=None, stage=None,
-                 provider_factory=None):
+                 provider_factory=None, wifi=None):
         self.data_dir = data_dir
         self.store = Store(os.path.join(data_dir, "config"))
         self.characters = Characters(os.path.join(data_dir, "characters"))
@@ -41,6 +43,8 @@ class Device:
         self.timers = {}
         self.started = time.time()
         self.log = []
+        self.wifi = wifi
+        self.card = os.path.join(data_dir, "card.inp")
 
     # ----- events for the console
     def emit(self, kind, data=None):
@@ -96,6 +100,22 @@ class Device:
         target = self.characters.file(cid, "visual/puppet.inp")
         if not os.path.exists(target):
             target = self.characters.file(cid, "visual/puppet.inx")
+        self._point_stage_at(target)
+
+    def show_card(self, png):
+        """Show a message on the screen instead of the character."""
+        write_atomic(self.card, screen.card_puppet(png))
+        self._point_stage_at(self.card)
+        self.stage.send({"quit": True})
+
+    def show_character(self):
+        cid = self.active_id()
+        if cid:
+            self._link_puppet(cid)
+            self.stage.send({"quit": True})
+        return cid
+
+    def _point_stage_at(self, target):
         tmp = self.current_puppet + ".new"
         if os.path.lexists(tmp):
             os.remove(tmp)
@@ -307,6 +327,58 @@ class Device:
         cid = self.active_id()
         if cid and not os.path.exists(self.current_puppet):
             self._link_puppet(cid)
+        if not cid:
+            write_atomic(self.card, screen.card_puppet(screen.setup_card("this device's address")))
+            self._point_stage_at(self.card)
         self.restore_timers()
         if self.microphone is not None:
             asyncio.ensure_future(self.listen_loop())
+        if self.wifi is not None:
+            asyncio.ensure_future(self.network_watch())
+
+    # ----- Wi-Fi
+    async def network_watch(self, wait=40.0):
+        """Open a setup hotspot if the device has no network a while after starting."""
+        deadline = time.time() + wait
+        while time.time() < deadline:
+            try:
+                if await self.wifi.connected():
+                    await self._connected()
+                    return
+            except NetworkError as error:
+                self.emit("error", {"message": "network: %s" % error})
+                return
+            await asyncio.sleep(2.0)
+        try:
+            suffix = (await self._serial())[-4:].upper() or "0000"
+            ssid, password = await self.wifi.start_hotspot(suffix)
+        except NetworkError as error:
+            self.emit("error", {"message": "could not open the setup hotspot: %s" % error})
+            return
+        self.emit("network", {"hotspot": ssid})
+        self.show_card(screen.hotspot_card(ssid, password))
+
+    async def _connected(self):
+        address = await self.wifi.address()
+        self.emit("network", {"connected": True, "address": address})
+        if not self.active_id():
+            self.show_card(screen.setup_card(address or "this device's address"))
+
+    async def _serial(self):
+        try:
+            with open("/proc/device-tree/serial-number", "rb") as f:
+                return f.read().strip(b"\0").decode() or "0000"
+        except OSError:
+            return "%04x" % (os.getpid() & 0xffff)
+
+    async def join_wifi(self, ssid, password):
+        self.show_card(screen.message_card("Joining Wi-Fi", "Connecting to %s…" % ssid))
+        try:
+            await self.wifi.join(ssid, password)
+        except NetworkError as error:
+            ssid_hs, pw = await self.wifi.start_hotspot((await self._serial())[-4:].upper() or "0000")
+            self.show_card(screen.hotspot_card(ssid_hs, pw))
+            raise
+        await self._connected()
+        if self.active_id():
+            self.show_character()

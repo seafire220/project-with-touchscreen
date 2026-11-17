@@ -3,7 +3,7 @@
     python -m companion --data /var/lib/companion --port 80
 
 The button is read from a Linux input device: the Pi's `gpio-key` overlay
-turns a GPIO press into a key press (see docs/14-install.md). On a desktop,
+turns a GPIO press into a key press (see docs/13-build-and-install.md). On a desktop,
 any keyboard device and key code can be used instead, and the console's
 "button" does the same job.
 """

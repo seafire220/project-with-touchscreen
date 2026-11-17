@@ -31,19 +31,29 @@ def loudness(frame):
     return max(0.0, min(1.0, (db + 50.0) / 35.0))
 
 
+def _alsa_device(kind):
+    """COMPANION_ALSA_PLAYBACK / COMPANION_ALSA_CAPTURE name an ALSA device, e.g. plughw:CARD=Lite."""
+    import os
+    value = os.environ.get("COMPANION_ALSA_" + kind, "")
+    return ["-D", value] if value else []
+
+
 def player_command(rate):
-    if shutil.which("pw-play"):
+    """The appliance plays through ALSA directly (lighter); a desktop with PipeWire uses pw-play."""
+    import os
+    if shutil.which("pw-play") and not os.environ.get("COMPANION_ALSA_PLAYBACK"):
         return ["pw-play", "--rate", str(rate), "--channels", "1", "--format", "s16", "-"]
     if shutil.which("aplay"):
-        return ["aplay", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-"]
+        return ["aplay", "-q"] + _alsa_device("PLAYBACK") + ["-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-"]
     return None
 
 
 def recorder_command(rate):
-    if shutil.which("pw-record"):
+    import os
+    if shutil.which("pw-record") and not os.environ.get("COMPANION_ALSA_CAPTURE"):
         return ["pw-record", "--rate", str(rate), "--channels", "1", "--format", "s16", "-"]
     if shutil.which("arecord"):
-        return ["arecord", "-q", "-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-"]
+        return ["arecord", "-q"] + _alsa_device("CAPTURE") + ["-t", "raw", "-f", "S16_LE", "-r", str(rate), "-c", "1", "-"]
     return None
 
 

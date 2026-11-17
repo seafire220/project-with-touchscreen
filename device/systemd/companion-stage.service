@@ -1,0 +1,32 @@
+[Unit]
+Description=Character device: the character on the screen
+After=systemd-user-sessions.service companion-core.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=companion
+Group=companion
+PAMName=companion-stage
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland
+# cage runs one full-screen program; the stage reads the current character
+# from /var/lib/companion/current.inp, which the core points at the active
+# character or at a setup card. When the core switches character it asks
+# the stage to exit, and this service starts it again.
+ExecStart=/usr/bin/cage -s -d -- /opt/companion/bin/stage /var/lib/companion/current.inp --fullscreen --socket /run/companion/stage.sock --no-stdin
+Restart=always
+RestartSec=0.5
+SupplementaryGroups=video render input
+MemoryMax=300M
+
+[Install]
+WantedBy=graphical.target

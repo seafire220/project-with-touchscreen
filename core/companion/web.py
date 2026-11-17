@@ -17,6 +17,7 @@ import time
 from aiohttp import web
 
 from . import package
+from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
 
 SESSION_COOKIE = "companion_session"
@@ -297,6 +298,30 @@ class Console:
         self.device.interrupt()
         return web.json_response({"ok": True})
 
+    # ----- Wi-Fi
+    async def wifi_status(self, request):
+        wifi = self.device.wifi
+        if wifi is None:
+            return web.json_response({"available": False})
+        try:
+            connected = await wifi.connected()
+            networks = await wifi.networks()
+            address = await wifi.address() if connected else ""
+        except NetworkError as error:
+            return web.json_response({"available": True, "error": str(error), "networks": []})
+        return web.json_response({"available": True, "connected": connected, "address": address,
+                                  "hotspot": bool(wifi.hotspot), "networks": networks})
+
+    async def wifi_join(self, request):
+        if self.device.wifi is None:
+            raise web.HTTPNotFound(text="this device has no Wi-Fi control")
+        body = await request.json()
+        try:
+            await self.device.join_wifi(str(body.get("ssid", "")), str(body.get("password", "")))
+        except NetworkError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        return web.json_response({"ok": True})
+
     async def index(self, request):
         return web.FileResponse(os.path.join(STATIC, "index.html"))
 
@@ -334,6 +359,8 @@ def make_app(device):
     r.add_post("/api/say", console.say)
     r.add_post("/api/button", console.press)
     r.add_post("/api/interrupt", console.interrupt)
+    r.add_get("/api/wifi", console.wifi_status)
+    r.add_post("/api/wifi", console.wifi_join)
     if os.path.isdir(STATIC):
         r.add_static("/static/", STATIC)
     return app

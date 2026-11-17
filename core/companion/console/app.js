@@ -65,6 +65,7 @@ function show(tab) {
   for (const s of document.querySelectorAll(".tab")) s.hidden = s.id !== tab;
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
   if (tab === "memory") loadMemory();
+  if (tab === "device") loadWifi().catch((e) => text($("wifi-status"), e.message));
 }
 for (const b of document.querySelectorAll("#tabs button")) b.addEventListener("click", () => show(b.dataset.tab));
 
@@ -285,6 +286,28 @@ $("pw-form").addEventListener("submit", async (e) => {
   try { await api("POST", "/api/password", { old: $("pw-old").value, new: $("pw-new").value }); text($("pw-msg"), "Changed."); }
   catch (err) { text($("pw-msg"), err.message); }
   $("pw-old").value = ""; $("pw-new").value = "";
+});
+
+// ----- Wi-Fi
+async function loadWifi() {
+  const w = await api("GET", "/api/wifi");
+  if (!w.available) { text($("wifi-status"), "Wi-Fi is managed outside this page on this machine."); $("wifi-form").hidden = true; return; }
+  text($("wifi-status"), w.error ? "Problem: " + w.error : w.connected ? "Connected" + (w.address ? " as " + w.address : "") + "." :
+       w.hotspot ? "Not on a network yet: you are connected through the device's own setup hotspot." : "Not connected.");
+  const sel = $("wifi-ssid");
+  sel.replaceChildren();
+  for (const n of w.networks || []) {
+    const o = document.createElement("option"); o.value = n.ssid;
+    text(o, n.ssid + " (" + n.signal + "%" + (n.secure ? ", secured" : ", open") + ")"); sel.append(o);
+  }
+}
+$("btn-wifi-scan").addEventListener("click", () => loadWifi().catch((e) => text($("wifi-msg"), e.message)));
+$("wifi-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  text($("wifi-msg"), "Joining… if this page stops answering, reconnect your phone to your home Wi-Fi and find the device's new address on its screen.");
+  try { await api("POST", "/api/wifi", { ssid: $("wifi-ssid").value, password: $("wifi-password").value }); text($("wifi-msg"), "Joined."); }
+  catch (err) { text($("wifi-msg"), err.message); }
+  $("wifi-password").value = "";
 });
 
 $("btn-logout").addEventListener("click", async () => { await api("POST", "/api/logout"); if (source) source.close(); showLogin(false); });

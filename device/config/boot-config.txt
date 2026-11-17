@@ -1,0 +1,12 @@
+# --- Character device (added by device/install.sh) ---
+# No rainbow screen at power-on.
+disable_splash=1
+# The listen button: GPIO17 (pin 11) to ground (pin 9). Sends key 148 (KEY_PROG1).
+dtoverlay=gpio-key,gpio=17,active_low=1,gpio_pull=up,keycode=148,label=listen
+# The power button: GPIO3 (pin 5) to ground (pin 14). Press to shut down; press again to start.
+dtoverlay=gpio-shutdown,gpio_pin=3,active_low=1,gpio_pull=up
+# Raspberry Pi Touch Display 2, 5 inch, on the DSI connector. For the 7 inch
+# version use vc4-kms-dsi-ili9881-7inch. Check the Raspberry Pi documentation
+# for your display; an HDMI screen needs neither line.
+dtoverlay=vc4-kms-dsi-ili9881-5inch
+# --- end of character device settings ---
