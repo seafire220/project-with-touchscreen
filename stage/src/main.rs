@@ -9,6 +9,7 @@ mod behaviour;
 mod capture;
 mod control;
 mod mapping;
+mod overrides;
 mod puppet_info;
 mod window;
 
@@ -28,6 +29,7 @@ use winit::window::{Fullscreen, WindowBuilder};
 use behaviour::Behaviour;
 use control::{Command, Events, Script};
 use mapping::Mapper;
+use overrides::Overrides;
 use puppet_info::PuppetInfo;
 use window::{App, AppFrame, GlPreference};
 
@@ -43,6 +45,7 @@ Usage: stage PUPPET.inp [options]
   --background RRGGBB   background colour (default 101014)
   --seed N              seed for blink timing (default 1)
   --still               no idle movement; only commanded mouth, blink and look
+  --view X0,Y0,X1,Y1    show this box of the puppet (puppet units) instead of all of it
 
 Testing:
   --script FILE         timed commands, one JSON object per line with \"at\"
@@ -64,6 +67,7 @@ struct Options {
 	background: [f32; 3],
 	seed: u64,
 	still: bool,
+	view: Option<[f32; 4]>,
 	script: Option<PathBuf>,
 	fixed_dt: Option<f32>,
 	capture_dir: Option<PathBuf>,
@@ -84,6 +88,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 		background: [0x10 as f32 / 255.0, 0x10 as f32 / 255.0, 0x14 as f32 / 255.0],
 		seed: 1,
 		still: false,
+		view: None,
 		script: None,
 		fixed_dt: None,
 		capture_dir: None,
@@ -123,6 +128,17 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 			}
 			"--seed" => o.seed = value("--seed")?.parse().map_err(|_| "--seed is not a number")?,
 			"--still" => o.still = true,
+			"--view" => {
+				let v: Vec<f32> = value("--view")?
+					.split(',')
+					.map(|t| t.trim().parse::<f32>())
+					.collect::<Result<_, _>>()
+					.map_err(|_| "--view must be four numbers: X0,Y0,X1,Y1")?;
+				if v.len() != 4 || v[2] <= v[0] || v[3] <= v[1] {
+					return Err("--view must be four numbers X0,Y0,X1,Y1 with X1 > X0 and Y1 > Y0".into());
+				}
+				o.view = Some([v[0], v[1], v[2], v[3]]);
+			}
 			"--script" => o.script = Some(value("--script")?.into()),
 			"--fixed-dt" => {
 				let dt: f32 = value("--fixed-dt")?.parse().map_err(|_| "--fixed-dt is not a number")?;
@@ -161,6 +177,7 @@ struct StageApp {
 	info: PuppetInfo,
 	mapper: Mapper,
 	behaviour: Behaviour,
+	overrides: Overrides,
 	commands: Receiver<Command>,
 	script: Option<Script>,
 	events: Events,
@@ -182,7 +199,7 @@ impl StageApp {
 			return;
 		};
 		let (w, h) = (self.width.max(1) as f32, self.height.max(1) as f32);
-		match self.info.bounds {
+		match self.opts.view.or(self.info.bounds) {
 			Some([x0, y0, x1, y1]) if x1 > x0 && y1 > y0 => {
 				let scale = 0.94 * (w / (x1 - x0)).min(h / (y1 - y0));
 				renderer.camera.scale = Vec2::splat(scale);
@@ -203,6 +220,13 @@ impl StageApp {
 			}
 			Command::Look(x, y) => self.behaviour.set_look(x, y),
 			Command::Blink => self.behaviour.blink_now(),
+			Command::Set(name, value, ease) => {
+				if !self.overrides.set(&name, value, ease) {
+					self.events.emit(json!({"event": "error", "message": format!("this puppet has no parameter '{name}'")}));
+				}
+			}
+			Command::Unset(name, ease) => self.overrides.clear(&name, ease),
+			Command::ClearAll(ease) => self.overrides.clear_all(ease),
 			Command::Quit => self.quit = true,
 		}
 	}
@@ -274,7 +298,8 @@ impl App for StageApp {
 		}
 
 		let pose = self.behaviour.update(dt);
-		let values = self.mapper.resolve(&pose);
+		let mut values = self.mapper.resolve(&pose);
+		self.overrides.apply(dt, &mut values);
 
 		let Some((renderer, aux)) = &mut self.on_window else {
 			return !self.quit;
@@ -380,6 +405,7 @@ fn run(opts: Options) -> Result<(), String> {
 	let mut behaviour = Behaviour::new(opts.seed);
 	behaviour.set_idle_motion(!opts.still);
 	let app = StageApp {
+		overrides: Overrides::new(&info.params),
 		behaviour,
 		opts,
 		model,
@@ -456,6 +482,8 @@ mod tests {
 			vec!["a.inp", "--capture-at", "1"],
 			vec!["a.inp", "--bogus"],
 			vec!["a.inp", "--seed"],
+			vec!["a.inp", "--view", "1,2,3"],
+			vec!["a.inp", "--view", "5,0,1,1"],
 		] {
 			assert!(parse_options(&args(&bad)).is_err(), "{bad:?}");
 		}

@@ -42,6 +42,8 @@ One JSON object per line, on standard input or the local socket:
 | `{"mouth": 0.7}` | Mouth openness from 0 to 1. The core sends the loudness of the voice being played, about 50 times a second. |
 | `{"look": [0.2, -0.1]}` | Turn the head; each axis from -1 to 1. |
 | `{"blink": true}` | Blink now. |
+| `{"set": {"ParamCheek": 1}, "ease": 0.3}` | Drive named puppet parameters directly, blending in over `ease` seconds (default 0.25). Used for expressions and previews. A value can be a number, `[x, y]`, or `null` to hand the parameter back to the built-in behaviour. |
+| `{"clear": true}` | Hand every directly set parameter back to the built-in behaviour. |
 | `{"quit": true}` | Exit. |
 
 Several fields can share one line.
@@ -93,3 +95,9 @@ rigger, including its built-in sample (`python -m image2live2d --sample
 character is drawn and framed, that opening the mouth and blinking each
 change only a small area in the right place, and that the picture returns to
 rest afterwards.
+
+Those checks have passed puppets that looked wrong, so they are not evidence
+of quality. For judging by eye, `tools/pose_sheet.py STAGE PUPPET OUT_DIR`
+renders the head close up (using `--view`) and the whole figure in nine
+poses (rest, turn, nod, tilt, blink, mouth open) into `sheet.png`, and a
+sweep through turn, nod and tilt into `motion.gif`.

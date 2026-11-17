@@ -8,8 +8,15 @@
 //! {"mouth": 0.7}
 //! {"look": [0.2, -0.1]}
 //! {"blink": true}
+//! {"set": {"ParamCheek": 1.0, "ParamAngleX": 20}, "ease": 0.3}
+//! {"set": {"ParamCheek": null}}
+//! {"clear": true}
 //! {"quit": true}
 //! ```
+//!
+//! `set` drives named puppet parameters directly, for expressions and
+//! previews; `null` or `clear` hands them back to the built-in behaviour.
+//! `ease` is the blend time in seconds (default 0.25).
 //!
 //! A script line also carries `"at": seconds`.
 
@@ -24,14 +31,22 @@ use serde_json::Value;
 
 use crate::behaviour::State;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Command {
 	Mouth(f32),
 	State(State),
 	Look(f32, f32),
 	Blink,
+	/// Drive a named parameter directly: name, value, blend time.
+	Set(String, [f32; 2], f32),
+	/// Hand a parameter back to the built-in behaviour: name, blend time.
+	Unset(String, f32),
+	/// Hand every parameter back.
+	ClearAll(f32),
 	Quit,
 }
+
+const DEFAULT_EASE: f32 = 0.25;
 
 /// Parse one line. Returns the optional `at` time and the commands it holds.
 pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
@@ -41,9 +56,35 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 	};
 	let mut at = None;
 	let mut out = Vec::new();
+	let ease = match obj.get("ease") {
+		Some(v) => v.as_f64().filter(|e| *e >= 0.0).ok_or("\"ease\" must be a number of seconds, 0 or more")? as f32,
+		None => DEFAULT_EASE,
+	};
 	for (key, val) in obj {
 		match key.as_str() {
 			"at" => at = Some(val.as_f64().ok_or("\"at\" must be a number")? as f32),
+			"ease" => {}
+			"set" => {
+				let items = val.as_object().ok_or("\"set\" must be an object of parameter names and values")?;
+				for (name, v) in items {
+					if v.is_null() {
+						out.push(Command::Unset(name.clone(), ease));
+					} else if let Some(x) = v.as_f64() {
+						out.push(Command::Set(name.clone(), [x as f32, 0.0], ease));
+					} else if let Some(xy) = v.as_array().filter(|a| a.len() == 2) {
+						let x = xy[0].as_f64().ok_or("a \"set\" value must be a number or [x, y]")? as f32;
+						let y = xy[1].as_f64().ok_or("a \"set\" value must be a number or [x, y]")? as f32;
+						out.push(Command::Set(name.clone(), [x, y], ease));
+					} else {
+						return Err("a \"set\" value must be a number, [x, y] or null".into());
+					}
+				}
+			}
+			"clear" => {
+				if val.as_bool() == Some(true) {
+					out.push(Command::ClearAll(ease));
+				}
+			}
 			"mouth" => out.push(Command::Mouth(val.as_f64().ok_or("\"mouth\" must be a number")? as f32)),
 			"state" => {
 				let s = val.as_str().ok_or("\"state\" must be a string")?;
@@ -97,7 +138,7 @@ impl Script {
 	pub fn take_due(&mut self, t: f32) -> Vec<Command> {
 		let mut out = Vec::new();
 		while self.next < self.items.len() && self.items[self.next].0 <= t {
-			out.push(self.items[self.next].1);
+			out.push(self.items[self.next].1.clone());
 			self.next += 1;
 		}
 		out
@@ -185,6 +226,21 @@ mod tests {
 		let (at, commands) = parse_line(r#"{"at": 1.5, "mouth": 1, "state": "speaking"}"#).unwrap();
 		assert_eq!(at, Some(1.5));
 		assert_eq!(commands.len(), 2);
+	}
+
+	#[test]
+	fn parses_direct_parameter_commands() {
+		let (_, c) = parse_line(r#"{"set": {"Cheek": 1}, "ease": 0.5}"#).unwrap();
+		assert_eq!(c, vec![Command::Set("Cheek".into(), [1.0, 0.0], 0.5)]);
+		let (_, c) = parse_line(r#"{"set": {"Head": [0.5, -1]}}"#).unwrap();
+		assert_eq!(c, vec![Command::Set("Head".into(), [0.5, -1.0], DEFAULT_EASE)]);
+		let (_, c) = parse_line(r#"{"set": {"Cheek": null}, "ease": 0}"#).unwrap();
+		assert_eq!(c, vec![Command::Unset("Cheek".into(), 0.0)]);
+		let (_, c) = parse_line(r#"{"clear": true}"#).unwrap();
+		assert_eq!(c, vec![Command::ClearAll(DEFAULT_EASE)]);
+		for bad in [r#"{"set": 3}"#, r#"{"set": {"Cheek": "pink"}}"#, r#"{"set": {"Cheek": 1}, "ease": -1}"#] {
+			assert!(parse_line(bad).is_err(), "{bad}");
+		}
 	}
 
 	#[test]

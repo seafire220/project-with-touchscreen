@@ -20,6 +20,7 @@ Output: a folder of full-canvas layers named `{order}_{role}.png` for the
 Usage: partsplit.py IMAGE MASKS.npz OUT_DIR
 """
 import json
+import math
 import os
 import sys
 
@@ -27,7 +28,7 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-from flatsplit import convex_hull_mask, fill_from_neighbours, pad_square
+from flatsplit import convex_hull_mask, pad_square
 
 PARTS = ["hair", "headwear", "face", "eyes", "eyewear", "ears", "earwear", "nose", "mouth", "neck",
          "neckwear", "topwear", "handwear", "bottomwear", "legwear", "footwear", "tail", "wings", "objects"]
@@ -77,6 +78,218 @@ def drop_strays(mask):
     return np.isin(labelled, keep)
 
 
+def soft_fill(rgb, known, wanted, radius):
+    """Colour hidden pixels from the visible ones next to them, smoothly.
+
+    Copying the nearest visible pixel draws streaks and drags dark outlines
+    inwards, which shows when a part moves and uncovers the fill. So the fill
+    is taken from slightly inside the visible area, then blurred.
+    """
+    out = rgb.copy()
+    if not known.any() or not wanted.any():
+        return out
+    core = ndimage.binary_erosion(known, iterations=2)
+    if core.sum() < 0.3 * known.sum():
+        core = known
+    idx = ndimage.distance_transform_edt(~core, return_distances=False, return_indices=True)
+    filled = rgb[idx[0], idx[1]].astype(np.float32)
+    area = (wanted | core).astype(np.float32)
+    sigma = max(1.5, radius / 3.0)
+    weight = ndimage.gaussian_filter(area, sigma)
+    for c in range(3):
+        blurred = ndimage.gaussian_filter(filled[..., c] * area, sigma)
+        out[..., c][wanted] = np.clip(blurred[wanted] / np.maximum(weight[wanted], 1e-6), 0, 255).astype(np.uint8)
+    return out
+
+
+def shadow_colour(rgb, mask, darken=0.92):
+    """A part's typical colour without its outline, a little darker, for areas in shadow."""
+    pixels = rgb[mask].astype(np.float32)
+    if len(pixels) == 0:
+        return np.array([200, 160, 140], np.float32)
+    lum = pixels.mean(axis=1)
+    lo, hi = np.percentile(lum, 30), np.percentile(lum, 90)
+    middle = pixels[(lum >= lo) & (lum <= hi)]
+    return np.median(middle if len(middle) else pixels, axis=0) * darken
+
+
+def neck_column(face, hair, neck, eye_line, face_width):
+    """Where the neck continues up under the face, so a moving head uncovers neck, not a hole.
+
+    A column under the lower face: as wide as the jaw, widened to take in
+    the top of the neck if one was found. It runs from the
+    eye line down and only where the face or hair hides it.
+    """
+    h, w = face.shape
+    face_rows = np.nonzero(face.any(axis=1))[0]
+    chin = face_rows[-1]
+    face_height = chin - face_rows[0] + 1
+    lower = face[max(chin - int(0.45 * face_height), 0):chin + 1]
+    xs = np.nonzero(lower.any(axis=0))[0]
+    x0, x1 = xs[0], xs[-1]
+    if neck.any():
+        rows = np.nonzero(neck.any(axis=1))[0]
+        top = rows[0] + max(1, (rows[-1] - rows[0]) // 4)
+        nx = np.nonzero(neck[rows[0]:top + 1].any(axis=0))[0]
+        x0, x1 = min(x0, nx[0]), max(x1, nx[-1])
+    yy, xx = np.mgrid[0:h, 0:w]
+    column = (xx >= x0) & (xx <= x1) & (yy >= eye_line)
+    return column & (face | hair)
+
+
+def feature_rim(rgb, feature, skin, reach, skin_colour):
+    """Drawn pixels just outside a feature's label, which belong with the feature.
+
+    The model's eye and mouth labels often stop a pixel or two short of the
+    drawing: dark lashes, or a light lower-lid line. Left on the face, those
+    pixels show as a ghost of the open eye when the eye closes. Anything near
+    the feature that is clearly not plain skin goes with the feature.
+    """
+    if not feature.any():
+        return np.zeros_like(feature)
+    ring = ndimage.binary_dilation(feature, iterations=reach) & skin & ~feature
+    differs = np.abs(rgb.astype(np.int32) - np.asarray(skin_colour, np.int32)).max(axis=-1) > 45
+    return ring & differs
+
+
+def upper_lash(dark, limit):
+    """Top row and thickness of the upper lash line in each column of an eye."""
+    columns, tops, widths = [], [], []
+    for x in np.nonzero(dark.any(axis=0))[0]:
+        ys = np.nonzero(dark[:, x])[0]
+        top, end = ys[0], ys[0]
+        for y in ys[1:]:
+            if y - end > 2 or y - top >= limit:
+                break
+            end = y
+        columns.append(x)
+        tops.append(top)
+        widths.append(end - top + 1)
+    return np.array(columns), np.array(tops, float), np.array(widths, float)
+
+
+def closed_eye(rgb, region, dark):
+    """A closed eye: a smooth lid line in the eye's own lash colour and weight.
+
+    It spans the eye's lash line, sits where the lid meets the lower lash,
+    curves gently upwards at the corners and tapers at both ends. Returns an
+    RGBA layer, empty if the eye has no lash line to measure.
+    """
+    from PIL import ImageDraw
+
+    h, w = region.shape
+    out = np.zeros((h, w, 4), np.uint8)
+    if dark.sum() < 6:
+        return out
+    rows = np.nonzero(region.any(axis=1))[0]
+    top, height = rows[0], rows[-1] - rows[0] + 1
+    xs = np.nonzero(dark)[1]
+    left, right = np.percentile(xs, 3), np.percentile(xs, 97)
+    width = right - left
+    if width < 3:
+        return out
+    _, _, runs = upper_lash(dark, max(2, int(0.3 * height)))
+    weight = float(np.clip(np.median(runs), 1.2, max(1.2, 0.16 * height)))
+    pixels = rgb[dark].astype(np.float32)
+    lum = pixels.mean(axis=1)
+    colour = tuple(int(c) for c in pixels[lum <= np.percentile(lum, 25)].mean(axis=0))
+
+    s = 4
+    pad = int(weight) + 3
+    x0, y0 = int(left) - pad, int(top + 0.62 * height - 0.15 * width) - pad
+    big = Image.new("L", ((int(width) + 2 * pad) * s, (int(0.3 * width) + 2 * pad + 2) * s), 0)
+    pen = ImageDraw.Draw(big)
+    steps = 32
+    upper, lower = [], []
+    for i in range(steps + 1):
+        t = -1 + 2 * i / steps
+        x = (left - x0 + width * i / steps) * s
+        y = (top + 0.62 * height - y0 + 0.12 * width * (1 - t * t) - 0.06 * width) * s
+        half = 0.5 * weight * s * (1 - 0.65 * t ** 4)
+        upper.append((x, y - half))
+        lower.append((x, y + half))
+    pen.polygon(upper + lower[::-1], fill=255)
+    alpha = np.asarray(big.resize((big.width // s, big.height // s), Image.BOX))
+    ys = slice(max(y0, 0), min(y0 + alpha.shape[0], h))
+    xs_ = slice(max(x0, 0), min(x0 + alpha.shape[1], w))
+    patch = alpha[ys.start - y0:ys.stop - y0, xs_.start - x0:xs_.stop - x0]
+    out[ys, xs_, 0], out[ys, xs_, 1], out[ys, xs_, 2] = colour
+    out[ys, xs_, 3] = patch
+    out[out[..., 3] == 0] = 0
+    return out
+
+
+def open_mouth(shape, centre_x, line_y, width, lip_colour):
+    """An open, talking mouth in the character's lip colour, hidden until the mouth opens.
+
+    A dark interior with a flat top edge and a round bottom, a band of upper
+    teeth and a tongue, outlined in the lip colour. Returns an RGBA layer.
+    """
+    import colorsys
+    from PIL import ImageDraw
+
+    s = 4
+    width = max(width, 4.0)
+    height = 0.7 * width
+    pad = 3
+    big_w, big_h = int((width + 2 * pad) * s), int((height + 2 * pad) * s)
+    r, g, b = [c / 255.0 for c in lip_colour]
+    hue, sat, val = colorsys.rgb_to_hsv(r, g, b)
+    if sat < 0.35 or 0.08 < hue < 0.85:
+        hue = 0.985                    # a brown, grey or black line: a plain red mouth inside
+    tone = lambda h_, sv: tuple(int(255 * c) for c in colorsys.hsv_to_rgb(h_, *sv))
+    cavity, tongue, teeth = tone(hue, (0.7, 0.38)), tone(0.97, (0.45, 0.85)), (252, 250, 248)
+    outline = tuple(int(c) for c in lip_colour)
+
+    def edge(u):
+        top = 0.15 * height * (2 * u - 1) ** 2
+        bottom = 0.15 * height + 0.85 * height * math.sqrt(max(0.0, 1 - (2 * u - 1) ** 2))
+        return top, bottom
+
+    steps = 40
+    upper = [(pad + width * i / steps, pad + edge(i / steps)[0]) for i in range(steps + 1)]
+    lower = [(pad + width * i / steps, pad + edge(i / steps)[1]) for i in range(steps, -1, -1)]
+    outline_pts = [(x * s, y * s) for x, y in upper + lower]
+    shape_mask = Image.new("L", (big_w, big_h), 0)
+    ImageDraw.Draw(shape_mask).polygon(outline_pts, fill=255)
+    art = Image.new("RGBA", (big_w, big_h), cavity + (255,))
+    pen = ImageDraw.Draw(art)
+    tongue_box = [(pad + 0.2 * width) * s, (pad + 0.62 * height) * s, (pad + 0.8 * width) * s, (pad + 1.25 * height) * s]
+    pen.ellipse(tongue_box, fill=tongue + (255,))
+    teeth_pts = [(x * s, y * s) for x, y in upper if pad + 0.12 * width <= x <= pad + 0.88 * width]
+    teeth_pts += [(x, y + 0.17 * height * s) for x, y in reversed(teeth_pts)]
+    if len(teeth_pts) >= 3:
+        pen.polygon(teeth_pts, fill=teeth + (255,))
+    art.putalpha(shape_mask)
+    stroke = max(1, int(round(0.07 * width * s)))
+    ImageDraw.Draw(art).line(outline_pts + [outline_pts[0]], fill=outline + (255,), width=stroke, joint="curve")
+    small = np.asarray(art.resize((big_w // s, big_h // s), Image.BOX))
+    out = np.zeros(shape + (4,), np.uint8)
+    x0 = int(round(centre_x - width / 2.0 - pad))
+    y0 = int(round(line_y - pad))
+    ys = slice(max(y0, 0), min(y0 + small.shape[0], shape[0]))
+    xs = slice(max(x0, 0), min(x0 + small.shape[1], shape[1]))
+    out[ys, xs] = small[ys.start - y0:ys.stop - y0, xs.start - x0:xs.stop - x0]
+    return out
+
+
+def find_mouth(rgb, face_skin, eye_centres, chin, skin_value):
+    """Look for a mouth line the model missed: dark pixels where a mouth belongs."""
+    (lx, ly), (rx, ry) = eye_centres
+    span = abs(rx - lx)
+    eye_y = (ly + ry) / 2.0
+    expected = eye_y + 0.64 * (chin - eye_y)
+    h, w = face_skin.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    window = (np.abs(xx - (lx + rx) / 2.0) <= 0.45 * span) & (np.abs(yy - expected) <= 0.16 * (chin - eye_y))
+    dark = window & face_skin & (rgb.max(axis=-1) < 0.72 * skin_value)
+    if dark.sum() >= 3:
+        labelled, count = ndimage.label(dark)
+        sizes = ndimage.sum(dark, labelled, range(1, count + 1))
+        return labelled == (int(np.argmax(sizes)) + 1), expected
+    return np.zeros_like(face_skin), expected
+
+
 def eye_parts(rgb, eye):
     """Divide one eye into white, iris and lash line by brightness."""
     value = rgb.max(axis=-1).astype(np.int32)
@@ -119,6 +332,14 @@ def split(image, masks):
     if not hair.any():
         warn("no hair was found; the head will move as one piece")
 
+    # Take in the dark outline just outside the eye and mouth labels.
+    skin_value = float(np.median(rgb[part("face")].max(axis=-1))) if part("face").any() else 230.0
+    plain_colour = np.median(rgb[part("face")], axis=0) if part("face").any() else np.median(rgb[face], axis=0)
+    face_size = np.nonzero(face.any(axis=0))[0]
+    reach = max(2, int(round(0.025 * (face_size[-1] - face_size[0] + 1))))
+    eye_rim = feature_rim(rgb, eyes, face_skin, reach, plain_colour)
+    mouth = mouth | feature_rim(rgb, mouth, face_skin, reach, plain_colour)
+
     # Left and right eye, by which side of the face's middle they sit on.
     face_x = np.nonzero(face.any(axis=0))[0]
     middle = (face_x[0] + face_x[-1]) / 2.0
@@ -132,10 +353,27 @@ def split(image, masks):
     for side, name in (("l", "left"), ("r", "right")):
         if sides[side].any():
             eye_layers[side] = eye_parts(rgb, sides[side])
+            near = ndimage.binary_dilation(sides[side], iterations=reach + 1)
+            eye_layers[side]["eye"] = eye_layers[side]["eye"] | (eye_rim & near)
         else:
             warn("no %s eye was found (profile view, or hidden by hair); it will not blink" % name)
-    if not mouth.any():
-        warn("no mouth was found (hidden, or too small); it will not move with speech")
+    chin = int(np.nonzero(face.any(axis=1))[0][-1])
+    drawn_mouth = False
+    if not mouth.any() and len(eye_layers) == 2:
+        centres = [tuple(np.argwhere(sides[side]).mean(axis=0)[::-1]) for side in ("l", "r")]
+        found, expected = find_mouth(rgb, face_skin, centres, chin, skin_value)
+        if found.any():
+            mouth = found
+            warn("the mouth was found by its colour, not by the model; check that it moves in the right place")
+        else:
+            span = abs(centres[1][0] - centres[0][0])
+            yy, xx = np.mgrid[0:h, 0:w]
+            half = max(1.5, 0.22 * span)
+            mouth = (np.abs(xx - (centres[0][0] + centres[1][0]) / 2.0) <= half) & (np.abs(yy - expected) <= 0.5) & face
+            drawn_mouth = True
+            warn("no mouth was found; a small one was added so the character can talk")
+    elif not mouth.any():
+        warn("no mouth was found (hidden, or the face is turned away); it will not move with speech")
 
     # --- face base: eyes and mouth painted over in skin colour, and extended
     # under the hair across the span of the face
@@ -144,18 +382,28 @@ def split(image, masks):
     face_span = convex_hull_mask(face) & body
     face_base_mask = face | (face_span & hair)
     face_rgb = rgb.copy()
-    face_rgb[eyes | mouth | (face_base_mask & ~face)] = skin_colour.astype(np.uint8)
+    # Painted over from the skin around them, so the face under a closed eye
+    # or an open mouth keeps its own shading.
+    hidden = eyes | eye_rim | mouth
+    face_rgb = soft_fill(rgb, face & ~hidden & ~hair, hidden | (face_base_mask & ~face), 2 * reach)
 
-    # --- neck, extended up under the chin so a moving head never uncovers a gap
+    # --- neck, continued up under the face so a turning or tilting head
+    # uncovers neck rather than a hole or a smear
     neck = part("neck")
-    neck_rgb = rgb.copy()
-    neck_mask = neck.copy()
+    if not neck.any():
+        warn("no neck was found; a plain one is added under the face")
+    face_rows = np.nonzero(face.any(axis=1))[0]
+    eye_rows = np.nonzero(eyes.any(axis=1))[0]
+    eye_line = int(eye_rows.mean()) if len(eye_rows) else int(face_rows[0] + 0.5 * (face_rows[-1] - face_rows[0]))
+    face_width = int(face_x[-1] - face_x[0] + 1)
+    under = neck_column(face, hair, neck, eye_line, face_width)
     if neck.any():
-        under = face & ndimage.binary_dilation(neck, iterations=underlap)
-        neck_rgb = fill_from_neighbours(rgb, neck, under)
-        neck_mask = neck | under
-    else:
-        warn("no neck was found; the head is cut directly against the body")
+        under |= face & ndimage.binary_dilation(neck, iterations=underlap)
+    under &= ~neck
+    neck_rgb = rgb.copy()
+    colour = shadow_colour(rgb, neck) if neck.any() else shadow_colour(rgb, plain_skin if plain_skin.any() else face, 0.82)
+    neck_rgb[under] = colour.astype(np.uint8)
+    neck_mask = neck | under
 
     # --- arms: each separate area on its own side of the body
     arms = part("handwear")
@@ -183,7 +431,7 @@ def split(image, masks):
     rest = body & ~hair & ~face & ~neck & ~arm_sides["l"] & ~arm_sides["r"]
     covering = body & ~rest
     covered = covering & ndimage.binary_dilation(rest, iterations=underlap)
-    rest_rgb = fill_from_neighbours(rgb, rest, covered)
+    rest_rgb = soft_fill(rgb, rest, covered, underlap)
     rest_mask = rest | covered
 
     def layer(mask, colours=rgb):
@@ -202,7 +450,27 @@ def split(image, masks):
         for side in ("l", "r"):
             if side in eye_layers:
                 layers.append(("%s_%s" % (role, side), layer(eye_layers[side][role])))
-    layers += [("mouth", layer(mouth)), ("hair_front", layer(hair))]
+    for side in ("l", "r"):
+        if side in eye_layers:
+            closed = closed_eye(rgb, sides[side] | eye_layers[side]["eye"], eye_layers[side]["eye"])
+            if closed[..., 3].any():
+                layers.append(("eye_closed_" + side, closed))
+            else:
+                warn("the %s eye has no clear lash line; its blink will be a plain squash" % ("left" if side == "l" else "right"))
+
+    # --- the mouth line, and an open mouth hidden until the character speaks
+    mouth_rgb = rgb.copy()
+    if mouth.any():
+        if drawn_mouth:
+            mouth_rgb[mouth] = (shadow_colour(rgb, plain_skin if plain_skin.any() else face, 0.55)
+                                * np.array([1.0, 0.8, 0.8])).astype(np.uint8)
+        ys, xs = np.nonzero(mouth)
+        lip = mouth_rgb[mouth].astype(np.float32)
+        lum = lip.mean(axis=1)
+        lip_colour = lip[lum <= np.percentile(lum, 35)].mean(axis=0)
+        width = float(np.clip(xs.max() - xs.min() + 1, 0.13 * face_width, 0.28 * face_width))
+        layers.append(("mouth_cavity", open_mouth((h, w), (xs.min() + xs.max()) / 2.0, ys.mean(), width, lip_colour)))
+    layers += [("mouth", layer(mouth, mouth_rgb)), ("hair_front", layer(hair))]
     layers = [(role, array) for role, array in layers if array[..., 3].any()]
 
     found = sorted({PARTS[i] for i in np.unique(labels) if i >= 0})
@@ -225,7 +493,27 @@ def split(image, masks):
     return layers, report
 
 
-ORDER = {"torso": 10, "neck": 14, "arm_l": 16, "arm_r": 17, "face_base": 24, "eye_white_l": 30, "eye_white_r": 31,
+# Layers drawn for poses the picture does not show; the rig keeps them hidden at rest.
+HIDDEN_AT_REST = ("eye_closed_l", "eye_closed_r", "mouth_cavity")
+
+def bleed(array, reach=4):
+    """Give transparent pixels next to a part the part's edge colour.
+
+    Transparent pixels are otherwise black, and when the device magnifies a
+    layer, its edge pixels blend with that black into a dark seam.
+    """
+    solid = array[..., 3] > 0
+    if not solid.any() or solid.all():
+        return array
+    near = ndimage.binary_dilation(solid, iterations=reach) & ~solid
+    idx = ndimage.distance_transform_edt(~solid, return_distances=False, return_indices=True)
+    out = array.copy()
+    out[near, :3] = array[idx[0][near], idx[1][near], :3]
+    return out
+
+
+ORDER = {"eye_closed_l": 52, "eye_closed_r": 53, "mouth_cavity": 58,
+         "torso": 10, "neck": 14, "arm_l": 16, "arm_r": 17, "face_base": 24, "eye_white_l": 30, "eye_white_r": 31,
          "pupil_l": 40, "pupil_r": 41, "eye_l": 50, "eye_r": 51, "mouth": 60, "hair_front": 80}
 
 
@@ -245,7 +533,7 @@ def main(argv):
         if old.endswith(".png"):
             os.remove(os.path.join(argv[3], old))
     for role, array in layers:
-        Image.fromarray(pad_square(array), "RGBA").save(os.path.join(argv[3], "%02d_%s.png" % (ORDER[role], role)))
+        Image.fromarray(bleed(pad_square(array)), "RGBA").save(os.path.join(argv[3], "%02d_%s.png" % (ORDER[role], role)))
     print(json.dumps(report, indent=1))
     return 0
 

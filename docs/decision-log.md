@@ -359,3 +359,51 @@ rejected. Settled entries are not reopened without new evidence.
   (the fine-tune is the anime-specific form of it).
 - Open: untested on Apple Silicon; closed-eye and mouth artwork is still
   poor on some faces.
+
+## D-031 — Character preparation runs on the laptop only
+
+- Date: 2026-11-17. Status: decided by the owner.
+- Decision: the device never runs the part-finding model. The owner's laptop
+  runs the whole preparation chain and the finished character package is
+  copied to the device over Wi-Fi (or by USB stick or microSD).
+- Why: measured here, the model needs 5.2 GB of memory at its peak and 32
+  seconds per picture on four fast cores; its weights alone (1.3 GB) exceed
+  the Pi 4's entire 1 GB of memory. The owner judged a shrunk on-device
+  version not worth pursuing.
+- Rejected: a quantised model on the device; running the model in the
+  browser that opens the console.
+
+## D-027 superseded — Head movement moves the whole head
+
+- Date: 2026-11-17. Status: implemented in `studio/refine.py`; replaces
+  `studio/headturn.py`.
+- The owner rejected the in-place warp of D-027: the eyes and mouth stretched
+  while the head itself stayed put ("it wasn't really head movement").
+- Now: a tilt leans the whole head, hair included, as one rigid piece about a
+  point in the neck, and the neck bends to follow. Turning and nodding slide
+  the middle of the face over a rounded surface while the head's outline
+  stays; eyes, eyebrows, nose and mouth move as rigid pieces and never change
+  shape.
+- The neck is continued up under the face in its own shadow colour, so a
+  moving head uncovers neck rather than a hole, a smear or the collar.
+
+## D-032 — Closed eyes and the open mouth are drawn from the character's own art
+
+- Date: 2026-11-17. Status: implemented in `studio/partsplit.py` and
+  `studio/refine.py`.
+- The rigger's own closed eye is an upward arc sized from the eye's box,
+  which reads as a happy squint and grew into a thick bar when the eye's box
+  was wrong. Its open mouth stretches the drawn mouth line, which on many
+  characters is a few pixels high, so the mouth barely moved.
+- Now `partsplit.py` draws, hidden at rest: a closed eye as a smooth lid line
+  in the eye's own lash colour and weight, curving up at the corners; and an
+  open mouth sized to the face (dark interior, teeth, tongue) in the lip
+  line's colour. As the mouth opens, the drawn line fades and the open mouth
+  grows down from it. The rigger only draws its own versions when these are
+  missing, so it now skips them.
+- Pixels just outside the model's eye and mouth labels that are clearly not
+  plain skin go with the feature, and the face underneath is filled from the
+  surrounding skin, so a closed eye leaves no ghost of the open one.
+- A mouth the model missed is looked for by colour where a mouth belongs; if
+  there is none, a small line is added so the character can talk. Both cases
+  are reported.

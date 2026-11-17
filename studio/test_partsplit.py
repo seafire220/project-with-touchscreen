@@ -67,6 +67,8 @@ class PartSplitTest(unittest.TestCase):
     def test_layers_put_back_together_give_the_original(self):
         canvas = Image.new("RGBA", self.image.size, (0, 0, 0, 0))
         for role in sorted(self.roles, key=partsplit.ORDER.get):
+            if role in partsplit.HIDDEN_AT_REST:
+                continue
             canvas.alpha_composite(Image.fromarray(self.roles[role], "RGBA"))
         original = np.asarray(self.image)
         solid = original[..., 3] > 128
@@ -82,11 +84,43 @@ class PartSplitTest(unittest.TestCase):
         self.assertEqual(self.roles["torso"][200, 30, 3], 0, "nothing is invented outside the figure")
         self.assertTrue(self.roles["hair_front"][54, 120, 3] > 0, "the hair ornament travels with the hair")
 
-    def test_the_neck_reaches_up_under_the_chin(self):
+    def test_the_neck_continues_up_under_the_face_in_shadow(self):
         neck = self.roles["neck"][..., 3] > 0
         self.assertTrue(neck[135, 120])
-        self.assertTrue(neck[126, 120], "extended under the face")
-        self.assertLess(np.abs(self.roles["neck"][126, 120, :3].astype(int) - np.array(SKIN)).max(), 12)
+        self.assertTrue(neck[126, 120], "extended under the chin")
+        self.assertTrue(neck[100, 120], "and up to the eye line, so a turning head uncovers neck")
+        self.assertFalse(neck[80, 120], "but not above the eyes")
+        self.assertTrue(neck[110, 95], "as wide as the jaw")
+        self.assertFalse(neck[100, 75], "but no wider")
+        shadow = np.array(SKIN) * 0.92
+        self.assertLess(np.abs(self.roles["neck"][110, 120, :3].astype(int) - shadow).max(), 6)
+
+    def test_a_missing_neck_is_replaced_by_a_plain_one_under_the_face(self):
+        masks = self.masks.copy()
+        neck = partsplit.PARTS.index("neck")
+        masks[partsplit.PARTS.index("face")] |= masks[neck]
+        masks[neck] = False
+        layers, report = partsplit.split(self.image, masks)
+        made = dict(layers)["neck"][..., 3] > 0
+        self.assertTrue(made[110, 120])
+        self.assertFalse(made[150, 120], "it stays hidden under the face, not over the clothes")
+        self.assertTrue(any("no neck" in w for w in report["warnings"]))
+
+    def test_transparent_pixels_next_to_a_part_take_its_colour(self):
+        array = np.zeros((20, 20, 4), np.uint8)
+        array[5:15, 5:15] = (200, 40, 40, 255)
+        bled = partsplit.bleed(array)
+        self.assertEqual(tuple(bled[10, 3]), (200, 40, 40, 0), "colour without opacity beside the part")
+        self.assertEqual(tuple(bled[0, 0]), (0, 0, 0, 0), "far away stays empty")
+        self.assertTrue(np.array_equal(bled[5:15, 5:15], array[5:15, 5:15]))
+
+    def test_hidden_body_areas_are_filled_without_outline_streaks(self):
+        torso = self.roles["torso"]
+        arms = (self.roles["arm_l"][..., 3] > 0) | (self.roles["arm_r"][..., 3] > 0)
+        hidden = (torso[..., 3] > 0) & arms
+        self.assertTrue(hidden.any(), "the body continues a little under the arms")
+        values = torso[hidden][:, :3].astype(int)
+        self.assertLess(np.abs(values - np.array(BODY)).max(), 40, "fills take the body's colour, not its outline")
 
     def test_capabilities_describe_what_the_character_can_do(self):
         caps = self.report["capabilities"]
@@ -94,15 +128,39 @@ class PartSplitTest(unittest.TestCase):
         self.assertTrue(caps["arm_left"] and caps["arm_right"])
         self.assertFalse(caps["legs"])
 
-    def test_a_missing_mouth_is_reported_not_fatal(self):
+    def test_a_mouth_the_model_missed_is_found_by_its_colour(self):
         masks = self.masks.copy()
         mouth = partsplit.PARTS.index("mouth")
         masks[partsplit.PARTS.index("face")] |= masks[mouth]
         masks[mouth] = False
         layers, report = partsplit.split(self.image, masks)
-        self.assertNotIn("mouth", dict(layers))
-        self.assertFalse(report["capabilities"]["speak"])
-        self.assertTrue(any("no mouth" in w for w in report["warnings"]))
+        found = dict(layers)["mouth"][..., 3] > 0
+        self.assertTrue(found[114, 120], "the drawn mouth line")
+        self.assertTrue(report["capabilities"]["speak"])
+        self.assertTrue(any("found by its colour" in w for w in report["warnings"]))
+
+    def test_a_face_without_a_mouth_gets_a_small_one_to_talk_with(self):
+        image = self.image.copy()
+        ImageDraw.Draw(image).rectangle([100, 110, 140, 118], fill=SKIN + (255,))   # paint the mouth out
+        masks = labels_for(image)
+        mouth = partsplit.PARTS.index("mouth")
+        masks[partsplit.PARTS.index("face")] |= masks[mouth]
+        masks[mouth] = False
+        layers, report = partsplit.split(image, masks)
+        self.assertIn("mouth", dict(layers))
+        self.assertIn("mouth_cavity", dict(layers))
+        self.assertTrue(any("a small one was added" in w for w in report["warnings"]))
+
+    def test_closed_eyes_and_an_open_mouth_are_drawn_but_hidden_at_rest(self):
+        for role in ("eye_closed_l", "eye_closed_r", "mouth_cavity"):
+            self.assertIn(role, self.roles)
+            self.assertIn(role, partsplit.HIDDEN_AT_REST)
+        closed = self.roles["eye_closed_l"][..., 3] > 0
+        ys, xs = np.nonzero(closed)
+        self.assertTrue(abs(xs.mean() - 104) < 4, "across the left eye")
+        self.assertTrue(88 <= ys.mean() <= 98, "low in the eye, where the lid closes")
+        cavity = self.roles["mouth_cavity"][..., 3] > 0
+        self.assertTrue(cavity[118, 120], "the open mouth hangs from the mouth line")
 
     def test_a_hidden_eye_is_reported(self):
         masks = self.masks.copy()

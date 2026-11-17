@@ -137,9 +137,11 @@ class FlatSplitTest(unittest.TestCase):
         self.assertIn("removed a plain background", notes[0])
         layers, report = flatsplit.split(cleared, MARKS)
         self.assertEqual(report["unassigned_pixels"], 0)
-        # The character itself is untouched apart from its outermost edge pixel.
+        # The character itself is untouched apart from its outermost edge pixels.
+        from scipy import ndimage
         kept = np.asarray(cleared)[..., 3] > 0
-        self.assertTrue(np.array_equal(np.asarray(cleared)[kept][:, :3], np.asarray(solid)[kept][:, :3]))
+        inside = ndimage.binary_erosion(kept, iterations=prepare.FRINGE)
+        self.assertTrue(np.array_equal(np.asarray(cleared)[inside][:, :3], np.asarray(solid)[inside][:, :3]))
         self.assertGreater(kept.sum(), 0.9 * (np.asarray(self.image)[..., 3] > 0).sum())
 
     def test_a_busy_background_is_refused_not_guessed(self):
