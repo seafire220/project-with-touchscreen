@@ -147,6 +147,7 @@ class Scene:
         uncovered = inner & ~pose.covered
         # Gaps: background the character encloses in the pose (between the head and neck, say).
         holes = ndimage.binary_fill_holes(pose.covered) & ~pose.covered
+        holes &= ~(ndimage.binary_fill_holes(rest.covered) & ~rest.covered)    # gaps already there at rest
         filler = pose.filler & ~rest.filler
         out = {"uncovered": round(uncovered.sum() * area), "holes": round(holes.sum() * area),
                "filler shown": round(filler.sum() * area), "filler at rest": round(rest.filler.sum() * area)}

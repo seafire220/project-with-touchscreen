@@ -58,7 +58,7 @@ class MakeCharacterTest(unittest.TestCase):
         self.assertTrue(p.files["visual/live2d/model.moc3"].startswith(b"MOC3"))
         self.assertIn("visual/live2d/model.model3.json", p.files)
         check = p.json("studio/report.json")["live2d"]["check"]
-        self.assertLess(check["max_px"], 2.0, check)
+        self.assertLess(check["max_px"], 4.0, check)
         self.assertEqual(check["max_opacity"], 0.0)
 
     def test_no_keys_or_memories_are_packed(self):

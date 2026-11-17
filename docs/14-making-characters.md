@@ -102,8 +102,9 @@ python studio/make_character.py picture.png --name "Aria" --live2d \
 The copy is converted from the finished puppet, movement for movement
 (`studio/live2d_export.py`), so it moves the same as the Inochi2D version,
 including the improved head movement. The tool replays both versions
-against each other and prints the largest difference; on the eleven test
-characters it was under 2 pixels. Players that read this format, such as
+against each other and prints the largest difference: a few pixels at
+most (under 4 on the test characters), in poses that combine a full body
+turn with a full head turn. Players that read this format, such as
 Ayagami, can then show the character. No Live2D software is used or needed.
 
 Read `19-live2d-format-licensing.md` before selling or sharing characters in

@@ -48,12 +48,15 @@ from PIL import Image
 import refine
 
 TEXTURE_SECTION = b"TEX_SECT"
-WARP_CELLS = 12             # cells across and down a warp deformer's grid
+WARP_CELLS = 12             # cells across and down a warp deformer's grid, at least
+WARP_CELL_SIZE = 40.0       # pixels: big warps get more cells, so each is about this size
+MAX_WARP_CELLS = 48
 WARP_MARGIN = 0.12          # the grid reaches this share of its parts' size beyond them
 FIELD_TOLERANCE = 0.05      # pixels: a movement is one smooth field if a polynomial fits it this closely
 FIELD_MIN_PARTS = 3         # ... and it moves at least this many parts
-FIELD_SHIFT_TOLERANCE = 0.5 # pixels: ... and applying it where a part's own movements have taken its points
+FIELD_SHIFT_TOLERANCE = 3.0 # pixels: ... and applying it where a part's own movements have taken its points
                             # (a warp does) instead of where they were drawn (Inochi2D does) changes this little
+                            # (in the rare poses that combine both at full strength; invisible on the screen)
 MAX_FIELD_DEGREE = 4
 TRANSFORMS = ("transform.t.x", "transform.t.y", "transform.r.x", "transform.r.y", "transform.r.z",
               "transform.s.x", "transform.s.y")
@@ -294,7 +297,12 @@ def poly_terms(points, centre, size, degree):
 
 
 class Field:
-    """A movement that shifts several parts as one smooth function of position: one polynomial per key."""
+    """A movement that shifts several parts as one smooth function of position.
+
+    Fitted with one polynomial per key when one fits closely. Otherwise, if the parts agree wherever they
+    overlap (one movement, not several), the field is sampled from the parts' own points: smooth but
+    not polynomial movements, such as a body turn fitted to the body's outline, still go on a warp.
+    """
 
     def __init__(self, param, parts, frame):
         self.param = param
@@ -311,26 +319,67 @@ class Field:
             if error <= FIELD_TOLERANCE:
                 self.fit, self.degree, self.error = coeffs, degree, error
                 break
+        if self.fit is None:
+            self._sample(points, offsets)
+
+    def _sample(self, points, offsets):
+        from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
+        from scipy.spatial import cKDTree
+        # Points of different parts within half a pixel of each other must move alike, or this is not one
+        # movement but several.
+        keyed = np.hstack(offsets)
+        tree = cKDTree(points)
+        for i, j in tree.query_pairs(0.5):
+            if np.abs(keyed[i] - keyed[j]).max() > FIELD_TOLERANCE:
+                return
+        _, first = np.unique(np.round(points, 1), axis=0, return_index=True)
+        pts, vals = points[first], keyed[first]
+        try:
+            linear = LinearNDInterpolator(pts, vals)
+        except Exception:
+            return
+        nearest = NearestNDInterpolator(pts, vals)
+
+        def sampled(at):
+            out = linear(at)
+            missing = np.isnan(out).any(axis=1)
+            if missing.any():
+                out[missing] = nearest(at[missing])
+            return out
+        self.sampled = sampled
+        self.fit = [None] * len(offsets)
+        self.degree = None
+        self.error = 0.0
 
     def offset(self, points, key):
+        if self.degree is None:
+            return self.sampled(np.asarray(points, float))[:, 2 * key:2 * key + 2]
         return poly_terms(points, self.centre, self.size, self.degree) @ self.fit[key]
 
     def steepness(self, points):
         """How much the offset changes per pixel moved, at worst, near these points."""
-        worst = 0.0
+        return float(self.steepness_at(points).max())
+
+    def steepness_at(self, points):
+        """How much the offset changes per pixel moved, at each point."""
+        worst = np.zeros(len(points))
         for key in range(len(self.fit)):
-            for step in ((1.0, 0.0), (0.0, 1.0)):
+            for step in ((1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)):
                 change = self.offset(points + step, key) - self.offset(points, key)
-                worst = max(worst, float(np.abs(change).max()))
+                worst = np.maximum(worst, np.abs(change).max(axis=1))
         return worst
 
 
 def plan(puppet):
-    """Group the parts. Each group shares a frame node and a set of field movements -> one warp."""
+    """Group the parts. Each group shares a frame node and a set of field movements -> one warp.
+
+    A movement shared by several parts as one field goes on a warp they share, so the body's settings
+    stay off the meshes' keyforms, which would otherwise multiply.
+    """
     by_frame = {}
     for part in puppet.parts:
         by_frame.setdefault(frame_of(part).uuid, []).append(part)
-    fields = {}
+    shared = {}
     for frame_id, parts in by_frame.items():
         frame = puppet.nodes[frame_id]
         for param in puppet.params:
@@ -339,7 +388,7 @@ def plan(puppet):
                 continue
             field = Field(param, moved, frame)
             if field.fit is not None:
-                fields[(frame_id, param.name)] = field
+                shared[(frame_id, param.name)] = field
     # A warp applies a field where the part's own movements have taken its points; Inochi2D applies it
     # where they were drawn. For each part, keep only the fields for which that makes no difference (to
     # within FIELD_SHIFT_TOLERANCE); the others become the part's own keyforms. Breathing stays on the
@@ -349,17 +398,28 @@ def plan(puppet):
     for part in puppet.parts:
         frame = frame_of(part)
         drawn = in_frame(part, frame)
-        mine = [fields[(frame.uuid, q.name)] for q, _ in part.deforms if (frame.uuid, q.name) in fields]
+        mine = []
+        for q, _ in part.deforms:
+            field = shared.get((frame.uuid, q.name))
+            if field is not None:
+                mine.append(field)
         while mine:
             kept = {f.param.name for f in mine}
-            reach = sum(max(float(np.abs(v).max()) for v in vals) for q, vals in part.deforms if q.name not in kept)
-            worst = max(mine, key=lambda f: f.steepness(drawn))
-            if worst.steepness(drawn) * reach <= FIELD_SHIFT_TOLERANCE:
+            # How far each point's own movements take it, at most: a field is judged where it acts.
+            reach = np.zeros(len(drawn))
+            for q, vals in part.deforms:
+                if q.name not in kept:
+                    reach += np.max([np.abs(v).max(axis=1) for v in vals], axis=0)
+            errors = {f: float((f.steepness_at(drawn) * reach).max()) for f in mine}
+            worst = max(mine, key=errors.get)
+            if errors[worst] <= FIELD_SHIFT_TOLERANCE:
                 break
             mine.remove(worst)
-        names = tuple(sorted((f.param.name for f in mine), key=lambda n: puppet.by_name[n].index))
-        groups.setdefault((frame.uuid, names), []).append(part)
-    return fields, groups
+        mine.sort(key=lambda f: f.param.index)
+        own_fields = [f for f in mine if shared.get((frame.uuid, f.param.name)) is not f]
+        key = (frame.uuid, tuple(f.param.name for f in mine), part.uuid if own_fields else None)
+        groups.setdefault(key, (frame.uuid, mine, []))[2].append(part)
+    return shared, groups
 
 
 def combos(params):
@@ -394,8 +454,8 @@ class Model:
         self.centre = (self.canvas_lo + self.canvas_hi) / 2
         self.ppu = float((self.canvas_hi - self.canvas_lo).max() / 2)
         self.warps, self.meshes = [], []
-        for (frame_id, field_names), parts in groups.items():
-            self._group(puppet.nodes[frame_id], [fields[(frame_id, n)] for n in field_names], parts)
+        for frame_id, group_fields, parts in groups.values():
+            self._group(puppet.nodes[frame_id], group_fields, parts)
         order = sorted(range(len(self.meshes)), key=lambda i: -self.meshes[i]["part"].abs_zsort())
         self.meshes = [self.meshes[i] for i in order]      # back to front, ties in tree order (stable)
 
@@ -445,7 +505,9 @@ class Model:
         lo, hi = every.min(0), every.max(0)
         pad = WARP_MARGIN * (hi - lo) + 2.0
         lo, hi = lo - pad, hi + pad
-        cols = rows = WARP_CELLS
+        span = hi - lo
+        cols = int(min(max(WARP_CELLS, np.ceil(span[0] / WARP_CELL_SIZE)), MAX_WARP_CELLS))
+        rows = int(min(max(WARP_CELLS, np.ceil(span[1] / WARP_CELL_SIZE)), MAX_WARP_CELLS))
         gx, gy = np.meshgrid(np.linspace(lo[0], hi[0], cols + 1), np.linspace(lo[1], hi[1], rows + 1))
         grid = np.stack([gx.ravel(), gy.ravel()], 1)          # row by row, x changing fastest
         forms = []

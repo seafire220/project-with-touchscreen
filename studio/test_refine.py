@@ -172,8 +172,14 @@ class RefineTest(unittest.TestCase):
         self.assertEqual(self.report["body"], ["ParamBodyAngleX"])
         head = self.offsets("ParamBodyAngleX", "face_base", 1)
         neck = self.offsets("ParamBodyAngleX", "neck", 1)
-        shift = head[0][0]
-        self.assertTrue(all(m == head[0] for m in head + neck), "head and neck move as one")
+        shift = sum(dx for dx, _ in head) / len(head)
+        self.assertTrue(all(abs(dx - shift) < 2.5 and abs(dy) < 1e-6 for dx, dy in head + neck),
+                        "head and neck move together, by about the same few pixels")
+        chin = max(y for _, y in mesh_points(self.p, "face_base"))
+        at_chin = [dx for (x, y), (dx, _) in zip(mesh_points(self.p, "face_base"), head) if y == chin and abs(x) < 10]
+        neck_top = min(y for _, y in mesh_points(self.p, "neck"))
+        top = [dx for (x, y), (dx, _) in zip(mesh_points(self.p, "neck"), neck) if y == neck_top and abs(x) < 10]
+        self.assertLess(abs(sum(at_chin) / len(at_chin) - sum(top) / len(top)), 0.5, "no gap where they meet")
         self.assertTrue(0 < shift < 0.1 * 80, "a few pixels, not the rigger's 40")
         torso = self.offsets("ParamBodyAngleX", "torso", 1)
         self.assertGreater(max(dx for dx, _ in torso), shift, "the chest moves more than the spine")

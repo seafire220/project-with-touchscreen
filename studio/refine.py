@@ -364,6 +364,9 @@ SPINE_DEPTH = 0.3
 # of the range, as a share of the body's half-width.
 BODY_LEAN = 0.05
 BODY_BANDS = 40
+# The body's outline is held with a wide, gentle fade (the share of the half-width's depth over which
+# movement fades out towards the outline): smooth enough for a Live2D-format warp grid to follow.
+BODY_OUTLINE_HOLD = 0.9
 
 
 def body_geometry(parts):
@@ -414,13 +417,17 @@ def body_moved(x, y, b, turn, lean, spine_only=False):
     movement at that height, which the neck and head follow.
     """
     up = 1.0 - smoothstep((y - b["shoulders"]) / max(b["hips"] - b["shoulders"], 1e-6))
-    middle, rb = body_width_at(b, y)
-    u = (x - middle) / rb
+    # Above the shoulders (neck, head, hair on the head) everything moves as the shoulder line does there,
+    # which near the middle is the spine's movement. Kept continuous, so it is one smooth field.
+    y = max(y, b["shoulders"])
     if spine_only:
         u, s, hold, front = 0.0, 0.0, 1.0, 0.0
+        rb = body_width_at(b, y)[1]
     else:
+        middle, rb = body_width_at(b, y)
+        u = (x - middle) / rb
         s = math.sqrt(max(0.0, 1.0 - u * u))
-        hold = smoothstep(s / OUTLINE_HOLD)
+        hold = smoothstep(s / BODY_OUTLINE_HOLD)
         front = smoothstep((y - b["shoulders"]) / max(0.3 * (b["hips"] - b["shoulders"]), 1e-6))
     z = SPINE_DEPTH + (1.0 - SPINE_DEPTH) * s * front
     a = BODY_TURN_ANGLE * turn * up
@@ -432,16 +439,13 @@ def body_moved(x, y, b, turn, lean, spine_only=False):
 def refine_body(puppet, parts, g):
     """Body turn and lean: replace the rigger's, which slid the whole head sideways or up and down.
 
-    The upper body turns as a cylinder about the spine; the neck and head ride on the spine, so they
-    move a little, together; each arm moves with its shoulder.
+    The upper body turns as a cylinder about the spine; above the shoulders everything rides on the
+    spine, so the neck and head move a little, together. Every part follows the same field.
     """
     b = body_geometry(parts)
     params = {p["name"]: p for p in puppet.get("param", [])}
     if b is None:
         return {"body": "left as rigged"}
-    rides = {p["node"]["uuid"] for p in g["head_parts"]}
-    if g["neck"] is not None:
-        rides.add(g["neck"]["node"]["uuid"])
     done = []
     for name in BODY_PARAMS:
         param = params.get(name)
@@ -455,25 +459,10 @@ def refine_body(puppet, parts, g):
             for position in (-1.0, 0.0, 1.0):
                 turn = position if name == "ParamBodyAngleX" else 0.0
                 lean = position if name == "ParamBodyAngleY" else 0.0
-                if uid in rides and part["role"].startswith("hair"):
-                    # Hair rides on the head down to the chin; below the shoulders it lies on the chest
-                    # and moves with it, so the body under it is not uncovered.
-                    spine = body_moved(b["centre"], b["shoulders"], b, turn, lean, spine_only=True)
-                    span = max(b["shoulders"] - g["chin"], 1e-6)
-                    offsets = []
-                    for x, y in pts:
-                        t = smoothstep((y - g["chin"]) / span)
-                        chest = body_moved(x, max(y, b["shoulders"]), b, turn, lean)
-                        offsets.append((spine[0] + (chest[0] - spine[0]) * t, spine[1] + (chest[1] - spine[1]) * t))
-                elif uid in rides:
-                    # The head and neck move as one with the top of the spine.
-                    offsets = [body_moved(b["centre"], b["shoulders"], b, turn, lean, spine_only=True)] * len(pts)
-                elif part["role"].startswith("arm"):
-                    # An arm moves as one with its shoulder.
-                    ax0, ay0, ax1, _ = box(pts)
-                    offsets = [body_moved((ax0 + ax1) / 2.0, ay0, b, turn, lean)] * len(pts)
-                else:
-                    offsets = [body_moved(x, y, b, turn, lean) for x, y in pts]
+                # One movement for the whole body, a smooth function of position, so parts that overlap
+                # (hair on the chest, arms by the body, the head on the neck) move alike and nothing
+                # behind them is uncovered. Above the shoulders it is the spine's movement.
+                offsets = [body_moved(x, y, b, turn, lean) for x, y in pts]
                 columns.append([[[round(dx, 3), round(dy, 3)] for dx, dy in offsets]])
             if any(abs(v) > 1e-9 for column in columns for pair in column[0] for v in pair):
                 kept.append({"node": uid, "param_name": "deform", "values": columns,
