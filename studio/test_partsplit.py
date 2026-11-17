@@ -87,7 +87,8 @@ class PartSplitTest(unittest.TestCase):
     def test_hair_carries_on_behind_the_face_in_hair_colours(self):
         back = self.roles["hair_back"]
         self.assertTrue(back[100, 120, 3] > 0, "behind the middle of the face, so a turning face uncovers hair")
-        self.assertLess(np.abs(back[100, 120, :3].astype(int) - np.array(HAIR)).max(), 40)
+        shade = np.array(HAIR) * 0.8
+        self.assertLess(np.abs(back[100, 120, :3].astype(int) - shade).max(), 12, "in the hair's shadow tone")
         self.assertEqual(back[135, 120, 3], 0, "not over the neck")
 
     def test_the_neck_continues_up_under_the_face_in_shadow(self):

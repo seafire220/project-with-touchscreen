@@ -472,7 +472,11 @@ def split(image, masks, invented=None):
     lower[cheek_line:below_chin] = True
     if head_hair.any() and (hair & lower & ~face).sum() > 0.02 * hair.sum():
         back_mask |= (face | hair) & lower & ~ndimage.binary_dilation(neck_mask, iterations=2)
-    back_rgb = soft_fill(rgb, head_hair, back_mask & ~head_hair, 4 * reach) if back_mask.any() else rgb
+    # In the hair's shadow tone, as back hair is drawn: blurring the visible hair into it averaged
+    # highlights and outlines into a flat grey or a pale patch.
+    back_rgb = rgb.copy()
+    if back_mask.any():
+        back_rgb[back_mask & ~head_hair] = shadow_colour(rgb, head_hair, 0.8).astype(np.uint8)
 
     # --- arms: each separate area on its own side of the body
     arms = part("handwear")
