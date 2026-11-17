@@ -68,6 +68,27 @@ def label_map(masks, body):
     return labels, int(unlabelled.sum())
 
 
+def hair_over_eyes(rgb, masks, labels):
+    """Fringe hair the model also marked as eye goes back to the hair.
+
+    On small faces the eye labels are rough boxes that take in strands of
+    fringe lying over the eyes. Those strands belong to the hair: left with
+    the eye, they would vanish when it blinks and leave the box's edge
+    visible. A pixel marked both eye and hair goes to the hair when it has
+    the hair's colour.
+    """
+    eye_i, hair_i = PARTS.index("eyes"), PARTS.index("hair")
+    hair_only = labels == hair_i
+    both = masks[eye_i] & masks[hair_i] & (labels == eye_i)
+    if not both.any() or hair_only.sum() < 20:
+        return labels
+    colour = np.median(rgb[hair_only].astype(np.float32), axis=0)
+    near = np.abs(rgb.astype(np.float32) - colour).max(axis=-1) < 40
+    out = labels.copy()
+    out[both & near] = hair_i
+    return out
+
+
 def drop_strays(mask):
     """Remove specks that are far smaller than the part they claim to belong to."""
     labelled, count = ndimage.label(mask)
@@ -291,7 +312,7 @@ def find_mouth(rgb, face_skin, eye_centres, chin, skin_value):
 
 
 def eye_parts(rgb, eye):
-    """Divide one eye into white, iris and lash line by brightness."""
+    """Divide one eye into white, iris and lash line by brightness (used to measure the lash)."""
     value = rgb.max(axis=-1).astype(np.int32)
     chroma = value - rgb.min(axis=-1).astype(np.int32)
     white = eye & (rgb.min(axis=-1) > 185) & (chroma < 45)
@@ -312,6 +333,7 @@ def split(image, masks):
     height = int(rows[-1] - rows[0] + 1)
     underlap = max(4, int(round(UNDERLAP_SHARE * height)))
     labels, relabelled = label_map(masks, body)
+    labels = hair_over_eyes(rgb, masks, labels)
     report = {"outline_from": outline_source, "pixels_given_nearest_label": relabelled, "warnings": []}
     warn = report["warnings"].append
 
@@ -352,9 +374,12 @@ def split(image, masks):
     eye_layers = {}
     for side, name in (("l", "left"), ("r", "right")):
         if sides[side].any():
-            eye_layers[side] = eye_parts(rgb, sides[side])
             near = ndimage.binary_dilation(sides[side], iterations=reach + 1)
-            eye_layers[side]["eye"] = eye_layers[side]["eye"] | (eye_rim & near)
+            rim = eye_rim & near
+            # One solid layer per eye: split into white, iris and lash, a small
+            # eye becomes scattered pixels that the rigger's meshes partly drop.
+            # The lash line is still measured, to draw the closed eye from.
+            eye_layers[side] = {"all": sides[side] | rim, "lash": eye_parts(rgb, sides[side])["eye"] | rim}
         else:
             warn("no %s eye was found (profile view, or hidden by hair); it will not blink" % name)
     chin = int(np.nonzero(face.any(axis=1))[0][-1])
@@ -384,7 +409,15 @@ def split(image, masks):
     face_rgb = rgb.copy()
     # Painted over from the skin around them, so the face under a closed eye
     # or an open mouth keeps its own shading.
-    hidden = eyes | eye_rim | mouth
+    # Only the drawn pixels of each feature are painted over: plain skin inside
+    # the model's blocky labels is kept, so no outline of the label shows
+    # round an open eye when the picture is magnified.
+    differs = np.abs(rgb.astype(np.int32) - plain_colour.astype(np.int32)).max(axis=-1) > 35
+
+    def drawn(region):
+        return ndimage.binary_dilation(region & differs, iterations=1) & region
+
+    hidden = drawn(eyes | eye_rim) | drawn(mouth)
     face_rgb = soft_fill(rgb, face & ~hidden & ~hair, hidden | (face_base_mask & ~face), 2 * reach)
 
     # --- neck, continued up under the face so a turning or tilting head
@@ -446,13 +479,12 @@ def split(image, masks):
     layers = [("torso", layer(rest_mask, rest_rgb)), ("neck", layer(neck_mask, neck_rgb)),
               ("arm_l", layer(arm_sides["l"])), ("arm_r", layer(arm_sides["r"])),
               ("face_base", layer(face_base_mask, face_rgb))]
-    for role in ("eye_white", "pupil", "eye"):
-        for side in ("l", "r"):
-            if side in eye_layers:
-                layers.append(("%s_%s" % (role, side), layer(eye_layers[side][role])))
     for side in ("l", "r"):
         if side in eye_layers:
-            closed = closed_eye(rgb, sides[side] | eye_layers[side]["eye"], eye_layers[side]["eye"])
+            layers.append(("eye_" + side, layer(eye_layers[side]["all"])))
+    for side in ("l", "r"):
+        if side in eye_layers:
+            closed = closed_eye(rgb, eye_layers[side]["all"], eye_layers[side]["lash"])
             if closed[..., 3].any():
                 layers.append(("eye_closed_" + side, closed))
             else:
@@ -496,22 +528,6 @@ def split(image, masks):
 # Layers drawn for poses the picture does not show; the rig keeps them hidden at rest.
 HIDDEN_AT_REST = ("eye_closed_l", "eye_closed_r", "mouth_cavity")
 
-def bleed(array, reach=4):
-    """Give transparent pixels next to a part the part's edge colour.
-
-    Transparent pixels are otherwise black, and when the device magnifies a
-    layer, its edge pixels blend with that black into a dark seam.
-    """
-    solid = array[..., 3] > 0
-    if not solid.any() or solid.all():
-        return array
-    near = ndimage.binary_dilation(solid, iterations=reach) & ~solid
-    idx = ndimage.distance_transform_edt(~solid, return_distances=False, return_indices=True)
-    out = array.copy()
-    out[near, :3] = array[idx[0][near], idx[1][near], :3]
-    return out
-
-
 ORDER = {"eye_closed_l": 52, "eye_closed_r": 53, "mouth_cavity": 58,
          "torso": 10, "neck": 14, "arm_l": 16, "arm_r": 17, "face_base": 24, "eye_white_l": 30, "eye_white_r": 31,
          "pupil_l": 40, "pupil_r": 41, "eye_l": 50, "eye_r": 51, "mouth": 60, "hair_front": 80}
@@ -533,7 +549,7 @@ def main(argv):
         if old.endswith(".png"):
             os.remove(os.path.join(argv[3], old))
     for role, array in layers:
-        Image.fromarray(bleed(pad_square(array)), "RGBA").save(os.path.join(argv[3], "%02d_%s.png" % (ORDER[role], role)))
+        Image.fromarray(pad_square(array), "RGBA").save(os.path.join(argv[3], "%02d_%s.png" % (ORDER[role], role)))
     print(json.dumps(report, indent=1))
     return 0
 

@@ -294,6 +294,13 @@ def refine_mouth(puppet, parts):
     return {"mouth": "line fades, open mouth grows from it"}
 
 
+def finish(data):
+    """Refine a rigger puppet file. Returns (new file bytes, report)."""
+    puppet, rest = read_puppet(data)
+    report = refine(puppet)
+    return write_puppet(puppet, rest), report
+
+
 def _nodes(node):
     yield node
     for child in node.get("children") or []:
@@ -305,14 +312,14 @@ def main(argv):
         print(__doc__)
         return 2
     with open(argv[1], "rb") as f:
-        puppet, rest = read_puppet(f.read())
+        data = f.read()
     try:
-        report = refine(puppet)
+        data, report = finish(data)
     except (ValueError, StopIteration) as error:
         print("cannot refine this puppet: %s" % error, file=sys.stderr)
         return 1
     with open(argv[2], "wb") as f:
-        f.write(write_puppet(puppet, rest))
+        f.write(data)
     print(json.dumps(report))
     return 0
 

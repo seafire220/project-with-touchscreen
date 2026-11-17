@@ -57,8 +57,8 @@ class PartSplitTest(unittest.TestCase):
         cls.roles = dict(cls.layers)
 
     def test_all_expected_layers_are_cut(self):
-        for role in ("torso", "neck", "arm_l", "arm_r", "face_base", "eye_white_l", "eye_white_r",
-                     "pupil_l", "pupil_r", "mouth", "hair_front"):
+        for role in ("torso", "neck", "arm_l", "arm_r", "face_base", "eye_l", "eye_r",
+                     "mouth", "hair_front"):
             self.assertIn(role, self.roles)
         self.assertEqual(self.report["warnings"], [])
         self.assertEqual(self.report["unassigned_pixels"], 0)
@@ -106,13 +106,15 @@ class PartSplitTest(unittest.TestCase):
         self.assertFalse(made[150, 120], "it stays hidden under the face, not over the clothes")
         self.assertTrue(any("no neck" in w for w in report["warnings"]))
 
-    def test_transparent_pixels_next_to_a_part_take_its_colour(self):
-        array = np.zeros((20, 20, 4), np.uint8)
-        array[5:15, 5:15] = (200, 40, 40, 255)
-        bled = partsplit.bleed(array)
-        self.assertEqual(tuple(bled[10, 3]), (200, 40, 40, 0), "colour without opacity beside the part")
-        self.assertEqual(tuple(bled[0, 0]), (0, 0, 0, 0), "far away stays empty")
-        self.assertTrue(np.array_equal(bled[5:15, 5:15], array[5:15, 5:15]))
+    def test_fringe_hair_marked_as_eye_goes_back_to_the_hair(self):
+        masks = self.masks.copy()
+        eyes, hair = partsplit.PARTS.index("eyes"), partsplit.PARTS.index("hair")
+        masks[eyes][70:80, 96:112] = True            # a rough eye box reaching up into the fringe
+        layers, _ = partsplit.split(self.image, masks)
+        roles = dict(layers)
+        self.assertTrue(roles["hair_front"][75, 104, 3] > 0, "the fringe stays hair")
+        self.assertEqual(roles["eye_l"][75, 104, 3], 0)
+        self.assertTrue(roles["eye_l"][91, 104, 3] > 0, "the eye itself stays an eye")
 
     def test_hidden_body_areas_are_filled_without_outline_streaks(self):
         torso = self.roles["torso"]
@@ -167,8 +169,8 @@ class PartSplitTest(unittest.TestCase):
         eyes = partsplit.PARTS.index("eyes")
         masks[eyes][:, 120:] = False
         layers, report = partsplit.split(self.image, masks)
-        self.assertNotIn("pupil_r", dict(layers))
-        self.assertIn("pupil_l", dict(layers))
+        self.assertNotIn("eye_r", dict(layers))
+        self.assertIn("eye_l", dict(layers))
         self.assertTrue(any("no right eye" in w for w in report["warnings"]))
 
     def test_arms_joined_across_the_body_stay_with_the_body(self):

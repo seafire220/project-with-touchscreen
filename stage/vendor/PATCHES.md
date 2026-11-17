@@ -45,3 +45,10 @@ mouth interior, depend on it.
    a parameter whose value is exactly (0, 0), assuming zero is neutral. It is
    not neutral for rigs where zero means "eye closed" or "layer hidden"; a
    blush layer that should have been off was showing.
+
+9. **Premultiplied textures** (`inox2d/src/texture.rs`). The renderer blends
+   with premultiplied alpha (`ONE, ONE_MINUS_SRC_ALPHA`), as Inochi2D does,
+   and Inochi2D premultiplies texture colour by alpha when it loads a
+   puppet; Inox2D did not, so every half-transparent edge (anti-aliased
+   outlines, soft blush, a character's cut-out edge) was drawn too bright,
+   showing as pale halos. Textures are now premultiplied on load.

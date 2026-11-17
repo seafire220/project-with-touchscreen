@@ -255,6 +255,7 @@ impl App for StageApp {
 					"puppet": self.info.name,
 					"parts": self.info.part_count,
 					"params": self.info.params.len(),
+					"param_names": self.info.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
 					"controls": controls,
 					"opengl": format!("{}{}.{}", if version.is_embedded { "ES " } else { "" }, version.major, version.minor),
 				}));

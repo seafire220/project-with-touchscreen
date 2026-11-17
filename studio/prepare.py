@@ -29,7 +29,7 @@ BACKGROUND_TOLERANCE = 30.0
 # Share of the picture's edge that must be one colour to call it plain.
 PLAIN_EDGE_SHARE = 0.9
 # Width of the character's edge, in pixels, that is checked for blending.
-FRINGE = 2
+FRINGE = 3
 # Below this colour difference between the character and the background, an
 # edge pixel's blend cannot be measured, and it is kept as it is.
 CONTRAST = 40.0
@@ -80,8 +80,6 @@ def remove_flat_background(image, tolerance=BACKGROUND_TOLERANCE, keep=None):
     # from the nearest solid pixel inside) and part background. Work out how
     # much of each, make it that transparent, and take the background out.
     fringe = ndimage.binary_dilation(background, iterations=FRINGE) & ~background
-    if keep is not None:
-        fringe &= ~ndimage.binary_erosion(keep, iterations=FRINGE)
     solid = ~background & ~fringe
     if fringe.any() and solid.any():
         idx = ndimage.distance_transform_edt(~solid, return_distances=False, return_indices=True)

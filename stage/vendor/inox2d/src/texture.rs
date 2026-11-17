@@ -74,12 +74,40 @@ enum DecodeTextureError {
 }
 
 fn decode_texture(mtex: ModelTexture) -> Result<ShallowTexture, DecodeTextureError> {
-	if mtex.format == ImageFormat::Tga {
+	let mut texture = if mtex.format == ImageFormat::Tga {
 		let tga_texture = read_tga(&mut io::Cursor::new(&mtex.data))?;
-		Ok(ShallowTexture::from(tga_texture))
+		ShallowTexture::from(tga_texture)
 	} else {
 		let img_buf = image::load_from_memory_with_format(&mtex.data, mtex.format)?;
-		Ok(ShallowTexture::from(img_buf.into_rgba8()))
+		ShallowTexture::from(img_buf.into_rgba8())
+	};
+	// Patched: the renderer blends with premultiplied alpha (ONE, ONE_MINUS_SRC_ALPHA)
+	// and Inochi2D premultiplies textures when it loads them; without this,
+	// half-transparent edges are drawn too bright.
+	premultiply(&mut texture.pixels);
+	Ok(texture)
+}
+
+/// Multiply each pixel's colour by its alpha, in place (RGBA8).
+pub fn premultiply(pixels: &mut [u8]) {
+	for px in pixels.chunks_exact_mut(4) {
+		let a = px[3] as u16;
+		if a == 255 {
+			continue;
+		}
+		for c in &mut px[..3] {
+			*c = ((*c as u16 * a + 127) / 255) as u8;
+		}
+	}
+}
+
+#[cfg(test)]
+mod premultiply_tests {
+	#[test]
+	fn colour_is_scaled_by_alpha() {
+		let mut px = vec![200, 100, 50, 255, 200, 100, 50, 128, 255, 255, 255, 0];
+		super::premultiply(&mut px);
+		assert_eq!(px, vec![200, 100, 50, 255, 100, 50, 25, 128, 0, 0, 0, 0]);
 	}
 }
 
