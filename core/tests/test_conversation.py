@@ -193,6 +193,44 @@ class ConversationTest(unittest.TestCase):
                                                                    {"role": "user", "content": "hello"}])
         self.assertEqual(greeting_first["messages"][0]["role"], "user", "a conversation must start with the person")
 
+    def test_gestures_play_with_the_sentence_they_belong_to(self):
+        llm = FakeLLM("[nod] Yes, that's right. [embarrassed] [tilt] Oh, you noticed?")
+        run(self.make(llm=llm).respond("is it?"))
+        cmds = self.stage.commands
+        self.assertIn({"gesture": "nod"}, cmds)
+        self.assertIn({"gesture": "tilt"}, cmds)
+        self.assertIn({"express": "embarrassed"}, cmds)
+        self.assertEqual(self.actions, [], "gestures are not timers or alarms")
+
+    def test_a_gesture_skips_parameters_the_puppet_lacks(self):
+        from companion.stage_link import StageLink
+
+        class Capture(StageLink):
+            def __init__(self):
+                super().__init__("/nonexistent")
+                self.sent = []
+                self.params = {"ParamAngleY"}
+
+            def send(self, command):
+                self.sent.append(command)
+
+        async def go():
+            link = Capture()
+            await link.gesture("bow")
+            return link.sent
+        sent = run(go())
+        self.assertTrue(sent)
+        for command in sent:
+            self.assertEqual(set(command["set"]), {"ParamAngleY"}, "no body parameter on a head-only puppet")
+        self.assertEqual(sent[-1]["set"], {"ParamAngleY": None}, "and control goes back to the idle movement")
+
+        async def during_sadness():
+            link = Capture()
+            link.expression = "sad"
+            await link.gesture("nod")
+            return link.sent
+        self.assertEqual(run(during_sadness())[-1]["set"], {"ParamAngleY": -12.0}, "a nod ends in the sad pose")
+
     def test_the_greeting_is_spoken(self):
         tts = FakeTTS()
         run(self.make(tts=tts).greet())

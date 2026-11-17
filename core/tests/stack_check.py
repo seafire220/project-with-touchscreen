@@ -23,8 +23,8 @@ from companion.memory import Memory  # noqa: E402
 from companion.stage_link import StageLink  # noqa: E402
 from fakes import FakeLLM, FakeTTS  # noqa: E402
 
-REPLY = ("[happy] Hello! It is lovely to meet you, and I am glad you came to talk with me today. "
-         "Shall we chat for a while about anything you like?")
+REPLY = ("[happy] [nod] Hello! It is lovely to meet you, and I am glad you came to talk with me today. "
+         "[embarrassed] Shall we chat for a while about anything you like?")
 
 
 async def main(stage, puppet, out):

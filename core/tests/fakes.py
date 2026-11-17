@@ -74,5 +74,8 @@ class FakeStage:
     def blink(self):
         self.commands.append({"blink": True})
 
+    def gesture(self, name):
+        self.commands.append({"gesture": name})
+
     def states(self):
         return [c["state"] for c in self.commands if "state" in c]

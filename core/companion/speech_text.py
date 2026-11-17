@@ -9,6 +9,7 @@ start on the first sentence while the rest is still being written.
 import re
 
 EMOTIONS = ("neutral", "happy", "sad", "angry", "surprised", "embarrassed", "thinking")
+GESTURES = ("nod", "shake", "bow", "tilt")
 
 TAG = re.compile(r"\[([^\[\]]{1,80})\]")
 SENTENCE_END = re.compile(r"([.!?…]+[\"'”’)\]]*)(\s+)")
@@ -44,6 +45,8 @@ def parse_tag(body):
     rest = words[1] if len(words) > 1 else ""
     if head in EMOTIONS and not rest:
         return ("emotion", head)
+    if head in GESTURES and not rest:
+        return ("action", {"kind": "gesture", "name": head})
     if head == "timer":
         m = re.match(r"((?:\d+(?:\.\d+)?\s*[a-z]*\s*)+)(.*)", rest.strip(), re.I)
         if m:
@@ -150,6 +153,8 @@ SPEECH_RULES = """Your words are spoken aloud by a voice, so:
 - Keep replies short unless asked for detail: usually one to three sentences.
 - You may show a feeling by putting one of these tags before a sentence:
   [happy] [sad] [angry] [surprised] [embarrassed] [thinking] [neutral]
+- You may move with [nod] [shake] (your head) [bow] or [tilt] (your head, curious).
+  Use them sparingly, where a person would.
 - To set a timer, include a tag like [timer 5m tea]. For an alarm, [alarm 07:30 wake up].
   To cancel one, [cancel tea]. Say in words what you did as well.
 - Tags are never read out."""

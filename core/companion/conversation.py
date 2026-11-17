@@ -167,6 +167,8 @@ class Conversation:
                         if action.get("kind") == "search":
                             if queries is not None:
                                 queries.append(action["query"])
+                        elif action.get("kind") == "gesture":
+                            await audio_queue.put(("gesture", action["name"]))   # in step with the speech
                         else:
                             self.on_action(action)
                     if emotion:
@@ -202,6 +204,9 @@ class Conversation:
                     yield value
                 elif kind == "emotion":
                     self.stage.express(value)
+                elif kind == "gesture":
+                    if hasattr(self.stage, "gesture"):
+                        self.stage.gesture(value)
                 elif kind == "text":
                     reply.spoken.append(value)
                     self.on_event("saying", {"text": value})

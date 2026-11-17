@@ -425,3 +425,16 @@ rejected. Settled entries are not reopened without new evidence.
   never learned the puppet's parameters: the stage announced them once at
   start, before the core connected. The stage now sends the latest "ready"
   to each client as it connects.
+
+## D-035 — Body language through head, body and blush; arms only gently
+
+- Date: 2026-11-17. Status: implemented (core/companion/stage_link.py).
+- Rendered on two characters: the rig's body lean, bow and blush look
+  right; its arm swings uncover the blurred fill behind the arm and leave a
+  smear, like the first head movement did. So emotions now carry posture
+  (sad looks down and slumps, embarrassed blushes and looks away, thinking
+  tilts the head), and the language model can ask for short gestures with
+  tags: [nod], [shake], [bow], [tilt]. Arm gestures wait for a better fill
+  behind the arms, or for alternative drawings (D-029).
+- Controls a character lacks are skipped, so a head-only character still
+  nods and blushes: this is the partial mapping the owner asked for.
