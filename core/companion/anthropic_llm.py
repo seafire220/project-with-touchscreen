@@ -18,15 +18,18 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 # Models that accept server-side fallbacks ("default" lets the API choose the fallback).
 FALLBACK_MODELS = ("claude-fable-5-2", "claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
+# Anthropic's own web search, run on Anthropic's side; a couple of searches at most per reply.
+WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 2}
 
 
 class AnthropicLLM:
-    def __init__(self, key, model="", max_tokens=400, effort="low"):
+    def __init__(self, key, model="", max_tokens=400, effort="low", web_search=False):
         if not key:
             raise ProviderError("no Anthropic key is set")
         self.model = model or DEFAULT_MODEL
         self.max_tokens = max(64, int(max_tokens or 400))
         self.effort = effort if effort in EFFORTS else "low"
+        self.web_search = web_search
         self.client = anthropic.AsyncAnthropic(api_key=key, timeout=60.0, max_retries=1)
 
     def _request(self, system, messages):
@@ -42,6 +45,8 @@ class AnthropicLLM:
             "messages": messages,
             "output_config": {"effort": self.effort},
         }
+        if self.web_search:
+            request["tools"] = [dict(WEB_SEARCH_TOOL)]
         if self.model in FALLBACK_MODELS:
             request["betas"] = [FALLBACK_BETA]
             request["fallbacks"] = "default"

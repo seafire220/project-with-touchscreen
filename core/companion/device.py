@@ -142,7 +142,19 @@ class Device:
             speaker=self.speaker, stage=self.stage, memory=self.memory(cid),
             persona=self.characters.persona(cid),
             history_turns=int(settings["conversation"].get("history_turns", 12)),
-            on_event=self._conversation_event, on_action=self.action)
+            on_event=self._conversation_event, on_action=self.action, search=self._search_function(settings))
+
+    def _search_function(self, settings):
+        """Search for models without their own: only with a search key, and not for Claude (it has its own)."""
+        if not settings["conversation"].get("web_search", True) or settings["llm"].get("provider") == "anthropic":
+            return None
+        if self.provider_factory:
+            return self.provider_factory("search", self)
+        key = self.store.secret("search")
+        if not key:
+            return None
+        from .search import TavilySearch
+        return TavilySearch(key).search
 
     def _conversation_event(self, kind, data):
         if kind == "heard":

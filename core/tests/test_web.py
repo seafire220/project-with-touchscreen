@@ -22,7 +22,7 @@ H = {"X-Companion": "1"}
 
 
 def fakes(which, device):
-    return {"llm": FakeLLM("[happy] Nice to meet you. I'm Aria."), "tts": FakeTTS(), "stt": None}[which]
+    return {"llm": FakeLLM("[happy] Nice to meet you. I'm Aria."), "tts": FakeTTS()}.get(which)
 
 
 class WebTest(unittest.IsolatedAsyncioTestCase):

@@ -152,6 +152,47 @@ class ConversationTest(unittest.TestCase):
             conversation.FIRST_WORDS_TIMEOUT = old
         self.assertIn("did not answer", reply.error)
 
+    def test_a_search_request_is_answered_from_the_results(self):
+        llm = FakeLLM(["[thinking] Let me check that for you. [search weather in Brisbane]",
+                       "It is sunny and twenty five degrees in Brisbane."])
+        searched = []
+
+        async def search(query):
+            searched.append(query)
+            return [{"title": "Brisbane weather", "url": "https://example.com", "content": "Sunny, 25 C."}]
+
+        conv = self.make(llm=llm)
+        conv.search = search
+        reply = run(conv.respond("what's the weather?"))
+        self.assertIsNone(reply.error)
+        self.assertEqual(searched, ["weather in Brisbane"])
+        self.assertEqual(reply.spoken, ["Let me check that for you.", "It is sunny and twenty five degrees in Brisbane."])
+        system, messages = llm.calls[1]
+        self.assertIn("Sunny, 25 C.", messages[-1]["content"])
+        self.assertIn("[search", llm.calls[0][0], "the model is told how to search")
+        self.assertTrue(any(k == "searching" for k, _ in self.events))
+        self.assertIn("Brisbane", self.memory.history()[-1]["reply"])
+
+    def test_without_search_the_tag_is_dropped_and_not_mentioned(self):
+        llm = FakeLLM("I can't look that up right now. [search something]")
+        reply = run(self.make(llm=llm).respond("look it up"))
+        self.assertEqual(reply.spoken, ["I can't look that up right now."])
+        self.assertEqual(len(llm.calls), 1)
+        self.assertNotIn("[search", llm.calls[0][0])
+
+    def test_claude_gets_its_own_web_search_tool_when_enabled(self):
+        from companion.anthropic_llm import AnthropicLLM, WEB_SEARCH_TOOL
+        on = AnthropicLLM("test-key", web_search=True)._request("sys", [{"role": "user", "content": "hi"}])
+        off = AnthropicLLM("test-key", web_search=False)._request("sys", [{"role": "user", "content": "hi"}])
+        self.assertEqual(on["tools"], [WEB_SEARCH_TOOL])
+        self.assertNotIn("tools", off)
+        self.assertEqual(on["model"], "claude-opus-5-5")
+        self.assertEqual(on["fallbacks"], "default")
+        self.assertNotIn("temperature", on)
+        greeting_first = AnthropicLLM("test-key")._request("sys", [{"role": "assistant", "content": "Hi!"},
+                                                                   {"role": "user", "content": "hello"}])
+        self.assertEqual(greeting_first["messages"][0]["role"], "user", "a conversation must start with the person")
+
     def test_the_greeting_is_spoken(self):
         tts = FakeTTS()
         run(self.make(tts=tts).greet())

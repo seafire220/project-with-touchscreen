@@ -22,6 +22,8 @@ def providers(which, device):
         return FakeLLM("[happy] Hello! I'm a stand-in reply, so the console can be tried without keys. [timer 2m test]")
     if which == "tts":
         return FakeTTS()
+    if which == "search":
+        return None
     raise RuntimeError("no stand-in for " + which)
 
 

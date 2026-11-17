@@ -16,17 +16,21 @@ class FakeLLM:
         self.calls = []
 
     async def stream(self, system, messages):
+        """Streams `reply`; if `reply` is a list, each call takes the next one."""
         self.calls.append((system, list(messages)))
+        reply = self.reply
+        if isinstance(reply, list):
+            reply = reply[min(len(self.calls) - 1, len(reply) - 1)]
         if self.hang:
             await asyncio.sleep(3600)
         if self.fail == "start":
             raise ProviderError("the fake model failed", retry=True)
-        step = max(1, len(self.reply) // self.pieces)
-        for i in range(0, len(self.reply), step):
+        step = max(1, len(reply) // self.pieces)
+        for i in range(0, len(reply), step):
             if self.delay:
                 await asyncio.sleep(self.delay)
-            yield self.reply[i:i + step]
-            if self.fail == "middle" and i > len(self.reply) // 2:
+            yield reply[i:i + step]
+            if self.fail == "middle" and i > len(reply) // 2:
                 raise ProviderError("the fake model broke off")
 
 

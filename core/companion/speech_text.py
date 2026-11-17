@@ -153,3 +153,6 @@ SPEECH_RULES = """Your words are spoken aloud by a voice, so:
 - To set a timer, include a tag like [timer 5m tea]. For an alarm, [alarm 07:30 wake up].
   To cancel one, [cancel tea]. Say in words what you did as well.
 - Tags are never read out."""
+
+SEARCH_RULE = """- To look something up on the web, say briefly that you will check, then include a
+  tag like [search weather in Brisbane today]. You will be given the results to answer from."""

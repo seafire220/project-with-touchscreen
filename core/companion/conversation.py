@@ -16,7 +16,8 @@ import logging
 from .audio import tone
 from .characters import split_persona
 from .providers import ProviderError
-from .speech_text import SPEECH_RULES, Splitter
+from .search import results_for_model
+from .speech_text import SEARCH_RULE, SPEECH_RULES, Splitter
 
 log = logging.getLogger("companion.conversation")
 
@@ -24,10 +25,11 @@ FIRST_WORDS_TIMEOUT = 20.0   # seconds to wait for the model's first sentence
 REPLY_TIMEOUT = 90.0         # longest a whole reply may take
 
 
-def system_prompt(persona, notes, now=None):
+def system_prompt(persona, notes, now=None, search_tag=False):
     body, _ = split_persona(persona)
     now = now or datetime.datetime.now()
-    parts = [body, SPEECH_RULES, "It is now %s." % now.strftime("%A %d %B %Y, %H:%M")]
+    rules = SPEECH_RULES + ("\n" + SEARCH_RULE if search_tag else "")
+    parts = [body, rules, "It is now %s." % now.strftime("%A %d %B %Y, %H:%M")]
     if notes.strip():
         parts.append("What you remember about the person you are talking with:\n" + notes.strip())
     return "\n\n".join(p for p in parts if p)
@@ -45,7 +47,7 @@ class Reply:
 
 class Conversation:
     def __init__(self, *, llm, tts, speaker, stage, memory, persona, history_turns=12,
-                 on_event=None, on_action=None, on_audio=None):
+                 on_event=None, on_action=None, on_audio=None, search=None):
         self.llm = llm
         self.tts = tts
         self.speaker = speaker
@@ -56,6 +58,7 @@ class Conversation:
         self.on_event = on_event or (lambda kind, data: None)
         self.on_action = on_action or (lambda action: None)
         self.on_audio = on_audio
+        self.search = search            # async query -> results, for models without their own search
         self.current = None
         self._task = None
 
@@ -82,11 +85,22 @@ class Conversation:
         self.on_event("heard", {"text": heard})
         self.stage.state("thinking")
         messages = self.memory.recent(self.history_turns) + [{"role": "user", "content": heard}]
-        system = system_prompt(self.persona, self.memory.notes())
-        sentences = asyncio.Queue()
-        writer = asyncio.ensure_future(self._write(system, messages, sentences, reply))
+        system = system_prompt(self.persona, self.memory.notes(), search_tag=self.search is not None)
+        writer = None
         try:
-            await asyncio.wait_for(self._speak(sentences, reply), REPLY_TIMEOUT)
+            queries = []
+            for round_ in range(2):          # a reply, and at most one answer from search results
+                sentences = asyncio.Queue()
+                writer = asyncio.ensure_future(self._write(system, messages, sentences, reply))
+                queries = []
+                await asyncio.wait_for(self._speak(sentences, reply, queries), REPLY_TIMEOUT)
+                if not (queries and self.search) or round_ == 1:
+                    break
+                self.stage.state("thinking")
+                self.on_event("searching", {"query": queries[0]})
+                found = await asyncio.wait_for(self.search(queries[0]), 25)
+                messages = messages + [{"role": "assistant", "content": " ".join(reply.spoken) or "Let me check."},
+                                       {"role": "user", "content": results_for_model(queries[0], found)}]
         except asyncio.TimeoutError:
             reply.error = "the reply took too long"
         except asyncio.CancelledError:
@@ -94,7 +108,8 @@ class Conversation:
         except ProviderError as error:
             reply.error = str(error)
         finally:
-            writer.cancel()
+            if writer is not None:
+                writer.cancel()
             if reply.interrupted:
                 self.speaker.stop()
             self.stage.mouth(0.0)
@@ -135,7 +150,7 @@ class Conversation:
             raise item
         return item
 
-    async def _speak(self, sentences, reply):
+    async def _speak(self, sentences, reply, queries=None):
         """Speak sentences as they come, fetching the next one's audio while one plays."""
         try:
             item = await self._next(sentences, True)
@@ -149,7 +164,11 @@ class Conversation:
                 while item is not None:
                     text, emotion, actions = item
                     for action in actions:
-                        self.on_action(action)
+                        if action.get("kind") == "search":
+                            if queries is not None:
+                                queries.append(action["query"])
+                        else:
+                            self.on_action(action)
                     if emotion:
                         await audio_queue.put(("emotion", emotion))
                     if text:

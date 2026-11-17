@@ -19,7 +19,7 @@ DEFAULT_SETTINGS = {
     "stt": {"provider": "local", "model": "", "base_url": "", "language": "en"},
     "tts": {"provider": "", "model": "", "voice": "", "base_url": ""},
     "listening": {"mode": "auto", "end_silence": 0.8, "max_turn": 30.0},
-    "conversation": {"history_turns": 12, "memory": True},
+    "conversation": {"history_turns": 12, "memory": True, "web_search": True},
     "active_character": "",
     "volume": 0.8,
 }

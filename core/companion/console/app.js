@@ -93,6 +93,7 @@ function onEvent(e) {
   else if (e.kind === "replied" && e.text) addLog("Character:", e.text + (e.interrupted ? " (interrupted)" : ""));
   else if (e.kind === "error" || e.kind === "stage_error") addLog("Problem:", e.message, "error");
   else if (e.kind === "timer") addLog("Timer:", e.label + (e.did ? " " + e.did : " set"));
+  else if (e.kind === "searching") addLog("Searching:", e.query);
   else if (e.kind === "character") refreshCharacters();
   else if (e.kind === "button") text($("btn-listen"), e.did === "listen on" ? "Stop listening" : "Start listening");
 }
@@ -216,6 +217,7 @@ async function loadSettings() {
   $("dev-mode").value = s.listening.mode;
   $("dev-end_silence").value = s.listening.end_silence;
   $("dev-memory").checked = !!s.conversation.memory;
+  $("dev-search").checked = s.conversation.web_search !== false;
   renderKeys(await api("GET", "/api/keys"));
 }
 
@@ -275,7 +277,7 @@ $("btn-save-device").addEventListener("click", async () => {
     await api("PUT", "/api/settings", {
       volume: Number($("dev-volume").value),
       listening: { mode: $("dev-mode").value, end_silence: Number($("dev-end_silence").value) },
-      conversation: { memory: $("dev-memory").checked },
+      conversation: { memory: $("dev-memory").checked, web_search: $("dev-search").checked },
     });
     text($("device-msg"), "Saved.");
   } catch (err) { text($("device-msg"), err.message); }

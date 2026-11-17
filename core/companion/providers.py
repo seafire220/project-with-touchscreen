@@ -329,7 +329,8 @@ def build_llm(settings, store):
     if provider == "anthropic":
         from .anthropic_llm import AnthropicLLM
         return AnthropicLLM(store.secret("anthropic"), llm.get("model", ""), llm.get("max_tokens", 400),
-                            llm.get("effort", "low"))
+                            llm.get("effort", "low"),
+                            web_search=bool(settings.get("conversation", {}).get("web_search", True)))
     if provider in OPENAI_COMPATIBLE:
         known = OPENAI_COMPATIBLE[provider]
         return OpenAICompatibleLLM(llm.get("base_url") or known["base_url"], store.secret(known["secret"]),
