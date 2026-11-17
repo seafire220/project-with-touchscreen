@@ -58,6 +58,8 @@ FIELD_SHIFT_TOLERANCE = 3.0 # pixels: ... and applying it where a part's own mov
                             # (a warp does) instead of where they were drawn (Inochi2D does) changes this little
                             # (in the rare poses that combine both at full strength; invisible on the screen)
 MAX_FIELD_DEGREE = 4
+ATLAS_MAX = 4096            # pixels: the largest texture page written
+ATLAS_PAD = 8               # pixels kept around the area a mesh samples, so mipmaps do not bleed
 TRANSFORMS = ("transform.t.x", "transform.t.y", "transform.r.x", "transform.r.y", "transform.r.z",
               "transform.s.x", "transform.s.y")
 # Live2D's standard groups, filled when the puppet has these settings.
@@ -624,8 +626,65 @@ def safe_id(text, used):
     return name
 
 
-def moc3_bytes(model):
-    """The .moc3 file, built with image2live2d's from-scratch writer."""
+def pack_textures(model):
+    """Crop each part's picture to the area its mesh samples and pack the crops into square pages,
+    the way Live2D-format models are laid out, instead of a whole-canvas picture per part (which
+    costs tens of megabytes of memory on the device for nothing). Returns the pages as RGBA
+    pictures and, for each mesh in order, its page number and its texture coordinates there."""
+    puppet = model.puppet
+    pictures, boxes = {}, []
+    for mesh in model.meshes:
+        part = mesh["part"]
+        if part.texture not in pictures:
+            with Image.open(io.BytesIO(puppet.textures[part.texture][1])) as im:
+                pictures[part.texture] = im.convert("RGBA")
+        w, h = pictures[part.texture].size
+        px = part.uvs * [w, h]
+        x0 = max(int(np.floor(px[:, 0].min())) - ATLAS_PAD, 0)
+        y0 = max(int(np.floor(px[:, 1].min())) - ATLAS_PAD, 0)
+        x1 = min(int(np.ceil(px[:, 0].max())) + ATLAS_PAD, w)
+        y1 = min(int(np.ceil(px[:, 1].max())) + ATLAS_PAD, h)
+        boxes.append((x0, y0, max(x1, x0 + 1), max(y1, y0 + 1)))
+    biggest = max(max(b[2] - b[0], b[3] - b[1]) for b in boxes)
+    scale = min(1.0, ATLAS_MAX / biggest)
+    sizes = [(max(1, int(round((b[2] - b[0]) * scale))), max(1, int(round((b[3] - b[1]) * scale)))) for b in boxes]
+    order = sorted(range(len(boxes)), key=lambda k: (-sizes[k][1], -sizes[k][0]))
+
+    def shelves(side):
+        spots, page, x, y, row = [None] * len(boxes), 0, 0, 0, 0
+        for k in order:
+            w, h = sizes[k]
+            if x + w > side:
+                x, y, row = 0, y + row, 0
+            if y + h > side:
+                page, x, y, row = page + 1, 0, 0, 0
+            spots[k] = (page, x, y)
+            x, row = x + w, max(row, h)
+        return spots, page + 1
+
+    for side in (512, 1024, 2048, ATLAS_MAX):
+        spots, pages = shelves(side)
+        if pages == 1:
+            break
+    images = [Image.new("RGBA", (side, side), (0, 0, 0, 0)) for _ in range(pages)]
+    layout = []
+    for k, mesh in enumerate(model.meshes):
+        part, box = mesh["part"], boxes[k]
+        page, ax, ay = spots[k]
+        crop = pictures[part.texture].crop(box)
+        if crop.size != sizes[k]:
+            crop = crop.resize(sizes[k], Image.LANCZOS)
+        images[page].paste(crop, (ax, ay))
+        w, h = pictures[part.texture].size
+        px = part.uvs * [w, h]
+        uvs = np.column_stack([(ax + (px[:, 0] - box[0]) * scale) / side, (ay + (px[:, 1] - box[1]) * scale) / side])
+        layout.append((page, uvs))
+    return images, layout
+
+
+def moc3_bytes(model, layout=None):
+    """The .moc3 file, built with image2live2d's from-scratch writer. With a layout from
+    pack_textures, meshes use its pages and texture coordinates."""
     from image2live2d.backends.live2d.moc3_binary import write_moc3
     from image2live2d.backends.live2d.moc3_emit import EmitMesh, EmitParam, EmitPart, EmitWarp, build_moc3
 
@@ -641,13 +700,17 @@ def moc3_bytes(model):
         part = mesh["part"]
         # Draw order: back to front, spread over Live2D's usual 0..1000.
         parts.append(EmitPart(id=safe_id("Part_" + part.name, used), draw_order=float(round(100 + 800 * rank / max(n - 1, 1)))))
-        if part.texture not in textures:
-            textures.append(part.texture)
+        if layout is None:
+            if part.texture not in textures:
+                textures.append(part.texture)
+            texture_no, uvs = textures.index(part.texture), part.uvs
+        else:
+            texture_no, uvs = layout[rank]
         mesh_id = safe_id("ArtMesh_" + part.name, used)
         mesh["id"] = mesh_id
         meshes.append(EmitMesh(
-            id=mesh_id, part_index=len(parts) - 1, texture_no=textures.index(part.texture),
-            uvs=[(float(u), float(v)) for u, v in part.uvs],
+            id=mesh_id, part_index=len(parts) - 1, texture_no=int(texture_no),
+            uvs=[(float(u), float(v)) for u, v in uvs],
             triangles=[tuple(part.indices[i:i + 3]) for i in range(0, len(part.indices), 3)],
             param_indices=[p.index for p in mesh["params"]],
             keyforms=[[(float(x), float(y)) for x, y in form] for form in mesh["forms"]],
@@ -672,29 +735,24 @@ def moc3_bytes_checked(data):
     return data
 
 
-def texture_png(encoding, data):
-    if encoding == 0:
-        return data
-    with Image.open(io.BytesIO(data)) as im:
-        out = io.BytesIO()
-        im.convert("RGBA").save(out, "PNG")
-        return out.getvalue()
-
-
 def export(inp_bytes, name=None, extras=None, check=True):
     """The Live2D-format files for a puppet, as {relative path: bytes}, and a report."""
     puppet = Puppet(inp_bytes)
     name = name or puppet.name
     model = Model(puppet)
-    moc, texture_ids = moc3_bytes(model)
-    files = {"%s.moc3" % name: moc}
-    texture_paths = []
-    for i, tex in enumerate(texture_ids):
+    for mesh in model.meshes:
+        tex = mesh["part"].texture
         if tex is None or tex >= len(puppet.textures):
             raise ValueError("a part uses a missing texture")
-        owner = next(m["part"].name for m in model.meshes if m["part"].texture == tex)
-        path = "textures/%02d_%s.png" % (i, safe_id(owner, set()))
-        files[path] = texture_png(*puppet.textures[tex])
+    pages, layout = pack_textures(model)
+    moc, _ = moc3_bytes(model, layout)
+    files = {"%s.moc3" % name: moc}
+    texture_paths = []
+    for i, page in enumerate(pages):
+        path = "textures/texture_%02d.png" % i
+        out = io.BytesIO()
+        page.save(out, "PNG", optimize=True)
+        files[path] = out.getvalue()
         texture_paths.append(path)
     refs = {"Moc": "%s.moc3" % name, "Textures": texture_paths, "DisplayInfo": "%s.cdi3.json" % name}
     extras = extras or {}
@@ -732,6 +790,7 @@ def export(inp_bytes, name=None, extras=None, check=True):
         "most_keyforms": max((len(m["forms"]), m["part"].name) for m in model.meshes),
         "moc3_bytes": len(moc),
         "textures": len(texture_paths),
+        "texture_side": pages[0].size[0],
     }
     if check:
         report["check"] = model.check()

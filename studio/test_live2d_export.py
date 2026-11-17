@@ -141,6 +141,23 @@ class Live2DExportTest(unittest.TestCase):
         arm = next(m for m in self.model.meshes if m["part"].name == "16_arm_l")
         self.assertEqual([p.name for p in arm["params"]], ["ParamArmLA"], "two parts are too few for a shared field")
 
+    def test_part_pictures_are_packed_into_one_page(self):
+        pages, layout = L.pack_textures(self.model)
+        self.assertEqual(len(pages), 1)
+        self.assertLessEqual(pages[0].size[0], L.ATLAS_MAX)
+        self.assertEqual([p for p in self.files if p.startswith("textures/")], ["textures/texture_00.png"])
+        page = np.asarray(pages[0])
+        for mesh, (number, uvs) in zip(self.model.meshes, layout):
+            self.assertEqual(number, 0)
+            self.assertTrue((uvs >= 0).all() and (uvs <= 1).all())
+            # Each mesh still samples its own picture: compare colours just inside its points.
+            inner = 0.9 * uvs + 0.1 * uvs.mean(0)
+            px = np.clip((inner * page.shape[1]).astype(int), 0, page.shape[1] - 1)
+            colours = {tuple(page[y, x]) for x, y in px}
+            with Image.open(io.BytesIO(self.model.puppet.textures[mesh["part"].texture][1])) as im:
+                own = tuple(np.asarray(im.convert("RGBA"))[1, 1])
+            self.assertEqual(colours, {own}, mesh["part"].name)
+
     def test_the_model_file_is_well_formed(self):
         from image2live2d.backends.live2d.moc3_binary import read_moc3
         moc = self.files["model.moc3"]
