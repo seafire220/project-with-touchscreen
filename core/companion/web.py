@@ -8,6 +8,7 @@ Rules:
   which a web page on another site cannot add, so it cannot act for you.
 """
 import asyncio
+import io
 import ipaddress
 import json
 import os
@@ -152,11 +153,17 @@ class Console:
         return web.json_response(self.device.store.settings())
 
     async def put_settings(self, request):
+        changes = await request.json()
+        if not isinstance(changes, dict):
+            raise web.HTTPBadRequest(text="settings must be an object")
+        before = self.device.store.settings().get("character_format")
         try:
-            merged = self.device.store.update_settings(await request.json())
+            merged = self.device.store.update_settings(changes)
         except ValueError as error:
             raise web.HTTPBadRequest(text=str(error))
         self.device.conversation = None
+        if merged.get("character_format") != before:
+            self.device.show_character()          # the other drawing of the same character, if it has one
         return web.json_response(merged)
 
     async def get_keys(self, request):
@@ -206,6 +213,9 @@ class Console:
         data = await request.read()
         replace = request.query.get("replace") == "1"
         try:
+            if package.is_live2d_zip(data):
+                # A buyer's own Live2D-format model, zipped as it comes for VTube Studio and the like.
+                data = package.from_live2d_zip(io.BytesIO(data), name=request.query.get("name") or None)
             cid = self.device.characters.install(data, replace=replace)
         except package.PackageError as error:
             raise web.HTTPBadRequest(text=str(error))

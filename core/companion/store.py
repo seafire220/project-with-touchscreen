@@ -21,6 +21,9 @@ DEFAULT_SETTINGS = {
     "listening": {"mode": "auto", "end_silence": 0.8, "max_turn": 30.0, "voice_interrupt": False},
     "conversation": {"history_turns": 12, "memory": True, "web_search": True},
     "active_character": "",
+    # Which drawing to show when a character has both: "live2d" (the Live2D-format copy, played
+    # with Ayagami) or "inochi2d" (the Inochi2D puppet). Either is used when it is the only one.
+    "character_format": "live2d",
     "volume": 0.8,
 }
 
@@ -84,6 +87,8 @@ class Store:
         for key, value in changes.items():
             if isinstance(DEFAULT_SETTINGS[key], dict) and not isinstance(value, dict):
                 raise ValueError("%s must be an object" % key)
+        if changes.get("character_format", "live2d") not in ("live2d", "inochi2d"):
+            raise ValueError("character_format must be live2d or inochi2d")
         with self._lock:
             merged = _merge(self.settings(), changes)
             write_atomic(self.settings_path, json.dumps(merged, indent=1))

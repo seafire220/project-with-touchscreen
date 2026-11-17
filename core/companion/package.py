@@ -23,6 +23,7 @@ to escape the package or looks like a secret. Nothing in a package is run.
 """
 import io
 import json
+import posixpath
 import re
 import zipfile
 
@@ -302,3 +303,183 @@ def slug(name):
     """A package id made from a character's name."""
     s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:48]
     return s or "character"
+
+
+# --------------------------------------------------------------------------------------------------
+# Importing a Live2D-format model folder (as made for VTube Studio and similar programs)
+# --------------------------------------------------------------------------------------------------
+
+IMPORT_LICENCE = ("Imported Live2D-format model. The person who imported it is responsible for having the "
+                  "right to use it on this device.")
+
+IMPORT_PERSONA = """# {name}
+
+You are {name}, a character who lives on a small screen on the user's desk and talks with them
+by voice.
+
+Describe {name} here: personality, background, likes and dislikes, and how they treat the user.
+Keep it in the second person ("You are...").
+
+## How you speak
+
+Your replies are spoken aloud, so keep them short and natural: one to three sentences unless
+asked for more. No lists, headings or emoji.
+"""
+
+
+def _unsafe_path(name):
+    return (not isinstance(name, str) or not name or name.startswith("/") or "\\" in name or "\x00" in name
+            or ".." in name.split("/"))
+
+
+def is_live2d_zip(data):
+    """A zip holding a Live2D-format model rather than a character package."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            names = archive.namelist()
+    except (zipfile.BadZipFile, OSError):
+        return False
+    return "manifest.json" not in names and any(_is_model_index(n) for n in names)
+
+
+def _is_model_index(name):
+    base = name.rsplit("/", 1)[-1]
+    return base.lower().endswith(".model3.json") and not base.startswith("._") and not name.startswith("__MACOSX/")
+
+
+def _stem(text, used):
+    stem = re.sub(r"[^A-Za-z0-9_\-]+", "_", posixpath.basename(str(text)).split(".")[0])[:60].strip("_") or "item"
+    candidate, n = stem, 2
+    while candidate.lower() in used:
+        candidate, n = "%s_%d" % (stem, n), n + 1
+    used.add(candidate.lower())
+    return candidate
+
+
+def from_live2d_zip(source, name=None):
+    """Make a character package from a zip of a Live2D-format model's folder: its .model3.json
+    and the files that names (model, textures, physics, pose, display names, expressions,
+    motions). Only those files are read; sounds and user data are left out, and everything
+    gets the package's fixed names. Returns package bytes. Raises PackageError."""
+    try:
+        archive = zipfile.ZipFile(source)
+    except (zipfile.BadZipFile, OSError):
+        raise PackageError("this is not a zip file")
+    with archive:
+        infos = {}
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            if _unsafe_path(info.filename):
+                raise PackageError("the zip contains a file path that points outside it: %r" % info.filename)
+            if (info.external_attr >> 16) & 0o170000 == 0o120000:
+                raise PackageError("the zip contains a link (%s); links are not allowed" % info.filename)
+            infos[info.filename] = info
+        if len(infos) > MAX_FILES:
+            raise PackageError("the zip holds too many files")
+        indexes = sorted(n for n in infos if _is_model_index(n))
+        if not indexes:
+            raise PackageError("there is no Live2D-format model in the zip (no .model3.json file)")
+        if len(indexes) > 1:
+            raise PackageError("the zip holds several models (%s); put one model in each zip" % ", ".join(indexes[:4]))
+        index = indexes[0]
+        folder = posixpath.dirname(index)
+        total = [0]
+        read_already = {}
+
+        def read(rel, limit):
+            if _unsafe_path(rel):
+                raise PackageError("the model names a file outside its folder: %r" % (rel,))
+            path = posixpath.normpath(posixpath.join(folder, rel))
+            if path.startswith("../") or path == "..":
+                raise PackageError("the model names a file outside its folder: %r" % (rel,))
+            info = infos.get(path)
+            if info is None:
+                raise PackageError("the model names %s, which is not in the zip" % rel)
+            if info.file_size > limit:
+                raise PackageError("%s is too large" % rel)
+            if info.compress_size and info.file_size / max(info.compress_size, 1) > MAX_RATIO:
+                raise PackageError("%s is suspiciously compressed; it was refused" % rel)
+            with archive.open(info) as f:
+                data = f.read(limit + 1)
+            if len(data) > limit:
+                raise PackageError("%s is too large" % rel)
+            total[0] += len(data)
+            if total[0] > MAX_TOTAL:
+                raise PackageError("the model is too large")
+            return path, data
+
+        try:
+            model = json.loads(read(posixpath.basename(index), 4 * 1024 * 1024)[1].decode("utf-8-sig"))
+            refs = model["FileReferences"]
+            moc = refs["Moc"]
+            textures = list(refs.get("Textures") or [])
+            motions = dict(refs.get("Motions") or {})
+            expressions = list(refs.get("Expressions") or [])
+        except (ValueError, KeyError, TypeError, AttributeError, UnicodeDecodeError):
+            raise PackageError("%s is not a Live2D-format model index" % posixpath.basename(index))
+        if not textures:
+            raise PackageError("the model lists no textures")
+
+        files, out_refs = {}, {"Moc": "model.moc3", "Textures": []}
+
+        def put(rel, limit, target):
+            path, data = read(rel, limit)
+            if path in read_already:
+                return read_already[path]
+            if target.endswith(".json") and data.startswith(b"\xef\xbb\xbf"):
+                data = data[3:]              # some tools write a byte-order mark; JSON readers here do not want one
+            files["visual/live2d/" + target] = data
+            read_already[path] = target
+            return target
+
+        put(moc, 64 * 1024 * 1024, "model.moc3")
+        for i, texture in enumerate(textures):
+            if not isinstance(texture, str) or not texture.lower().endswith(".png"):
+                raise PackageError("texture %r is not a PNG picture" % (texture,))
+            out_refs["Textures"].append(put(texture, 32 * 1024 * 1024, "textures/%02d.png" % i))
+        for key, fixed in (("Physics", "model.physics3.json"), ("Pose", "model.pose3.json"),
+                           ("DisplayInfo", "model.cdi3.json")):
+            if refs.get(key):
+                out_refs[key] = put(refs[key], 4 * 1024 * 1024, fixed)
+        used = set()
+        try:
+            out_expressions = []
+            for e in expressions:
+                target = "expressions/%s.exp3.json" % _stem(e.get("Name") or e["File"], used)
+                out_expressions.append({"Name": str(e.get("Name") or target)[:96], "File": put(e["File"], MAX_TEXT, target)})
+            out_motions = {}
+            for group, items in motions.items():
+                entries = []
+                for m in items:
+                    target = "motions/%s.motion3.json" % _stem(m["File"], used)
+                    entry = {k: m[k] for k in ("FadeInTime", "FadeOutTime") if isinstance(m.get(k), (int, float))}
+                    entry["File"] = put(m["File"], 4 * 1024 * 1024, target)
+                    entries.append(entry)
+                out_motions[str(group)[:64]] = entries
+        except (KeyError, TypeError, AttributeError):
+            raise PackageError("%s lists its motions or expressions in a way this device cannot read"
+                               % posixpath.basename(index))
+        if out_expressions:
+            out_refs["Expressions"] = out_expressions
+        if out_motions:
+            out_refs["Motions"] = out_motions
+        out_model = {"Version": 3, "FileReferences": out_refs}
+        for key in ("Groups", "HitAreas", "Layout"):
+            if key in model:
+                out_model[key] = model[key]
+        files[LIVE2D_MODEL] = json.dumps(out_model, indent=1, ensure_ascii=False)
+
+    name = (name or posixpath.basename(index)[:-len(".model3.json")]).strip()[:60] or "Character"
+    groups = {g.get("Name"): g.get("Ids") for g in model.get("Groups") or [] if isinstance(g, dict)}
+    manifest = {
+        "format": FORMAT,
+        "id": slug(name),
+        "name": name,
+        "kind": "puppet",
+        "licence": IMPORT_LICENCE,
+        "capabilities": {"blink": bool(groups.get("EyeBlink")), "speak": bool(groups.get("LipSync"))},
+    }
+    files["persona.md"] = IMPORT_PERSONA.format(name=name)
+    files["voice.json"] = json.dumps({"note": "Choose the voice on the device. No keys are stored here."}, indent=1)
+    return build(files, manifest)

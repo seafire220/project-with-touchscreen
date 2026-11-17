@@ -176,3 +176,93 @@ class Live2DPackageTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def model_folder_zip(refs_changes=None, extra=None, top="Aria Model/"):
+    """A Live2D-format model folder zipped the way models for VTube Studio are shared, with the
+    extra files such folders often hold (sounds, user data, a program's own settings)."""
+    png = io.BytesIO()
+    from PIL import Image
+    Image.new("RGBA", (4, 4), (0, 0, 255, 255)).save(png, "PNG")
+    refs = {"Moc": "aria.moc3", "Textures": ["aria.4096/texture_00.png"], "Physics": "aria.physics3.json",
+            "Pose": "aria.pose3.json", "DisplayInfo": "aria.cdi3.json",
+            "Expressions": [{"Name": "Smile", "File": "expressions/smile.exp3.json"}],
+            "Motions": {"Idle": [{"File": "motions/idle.motion3.json", "Sound": "sounds/hello.wav", "FadeInTime": 0.5}],
+                        "TapBody": [{"File": "./motions/idle.motion3.json"}]},
+            "UserData": "aria.userdata3.json"}
+    refs.update(refs_changes or {})
+    index = {"Version": 3, "FileReferences": refs,
+             "Groups": [{"Target": "Parameter", "Name": "EyeBlink", "Ids": ["ParamEyeLOpen", "ParamEyeROpen"]}]}
+    entries = {
+        top + "aria.model3.json": json.dumps(index),
+        top + "aria.moc3": b"MOC3\x04" + b"\0" * 123,
+        top + "aria.4096/texture_00.png": png.getvalue(),
+        top + "aria.physics3.json": "{}",
+        top + "aria.pose3.json": "{}",
+        top + "aria.cdi3.json": "\ufeff{}",
+        top + "expressions/smile.exp3.json": "{}",
+        top + "motions/idle.motion3.json": "{}",
+        top + "sounds/hello.wav": b"RIFF" + b"\0" * 40,
+        top + "aria.userdata3.json": "{}",
+        top + "aria.vtube.json": "{}",
+        "__MACOSX/Aria Model/._aria.model3.json": b"\0\x05\x16\x07",
+    }
+    entries.update(extra or {})
+    return raw_zip(entries).getvalue()
+
+
+class Live2DImportTest(unittest.TestCase):
+    def test_a_model_folder_becomes_a_character(self):
+        data = model_folder_zip()
+        self.assertTrue(package.is_live2d_zip(data))
+        self.assertFalse(package.is_live2d_zip(package.build(good_files(), manifest())))
+        pkg = package.open_package(io.BytesIO(package.from_live2d_zip(io.BytesIO(data), name="Aria")))
+        self.assertEqual((pkg.id, pkg.manifest["name"], pkg.kind), ("aria", "Aria", "puppet"))
+        self.assertEqual(pkg.manifest["capabilities"], {"blink": True, "speak": False})
+        self.assertIn("Aria", pkg.persona)
+        live2d = sorted(n for n in pkg.files if n.startswith("visual/live2d/"))
+        self.assertEqual(live2d, [
+            "visual/live2d/expressions/Smile.exp3.json", "visual/live2d/model.cdi3.json",
+            "visual/live2d/model.moc3", "visual/live2d/model.model3.json", "visual/live2d/model.physics3.json",
+            "visual/live2d/model.pose3.json", "visual/live2d/motions/idle.motion3.json",
+            "visual/live2d/textures/00.png"])
+        self.assertFalse(any("sound" in n or "userdata" in n or "vtube" in n for n in pkg.files),
+                         "sounds, user data and other programs' settings are left out")
+        refs = pkg.json(package.LIVE2D_MODEL)["FileReferences"]
+        self.assertEqual(refs["Textures"], ["textures/00.png"])
+        self.assertEqual(refs["Motions"]["Idle"], [{"FadeInTime": 0.5, "File": "motions/idle.motion3.json"}])
+        self.assertEqual(refs["Motions"]["TapBody"], [{"File": "motions/idle.motion3.json"}], "one copy of a shared motion")
+        self.assertNotIn("UserData", refs)
+        self.assertEqual(pkg.json(package.LIVE2D_MODEL)["Groups"][0]["Name"], "EyeBlink")
+        self.assertEqual(pkg.files["visual/live2d/model.cdi3.json"], b"{}", "a byte-order mark is removed")
+
+    def test_the_name_defaults_to_the_model_file(self):
+        pkg = package.open_package(io.BytesIO(package.from_live2d_zip(io.BytesIO(model_folder_zip()))))
+        self.assertEqual(pkg.manifest["name"], "aria")
+
+    def test_unusable_or_unsafe_model_folders_are_refused(self):
+        cases = {
+            "no model": raw_zip({"readme.txt": "hello"}).getvalue(),
+            "two models": model_folder_zip(extra={"Other/other.model3.json": json.dumps({"FileReferences": {}})}),
+            "escaping texture": model_folder_zip({"Textures": ["../../etc/secret.png"]}),
+            "absolute moc": model_folder_zip({"Moc": "/etc/passwd"}),
+            "missing file": model_folder_zip({"Physics": "nowhere.physics3.json"}),
+            "not a png": model_folder_zip({"Textures": ["aria.moc3"]}),
+            "no textures": model_folder_zip({"Textures": []}),
+            "bad index": raw_zip({"m/m.model3.json": "not json"}).getvalue(),
+            "bad motions": model_folder_zip({"Motions": {"Idle": "motions/idle.motion3.json"}}),
+            "not a moc3": model_folder_zip(extra={"Aria Model/aria.moc3": b"PK" + b"\0" * 100}),
+        }
+        for label, data in cases.items():
+            with self.assertRaises(package.PackageError, msg=label):
+                package.from_live2d_zip(io.BytesIO(data))
+
+    def test_links_inside_the_zip_are_refused(self):
+        out = io.BytesIO()
+        with zipfile.ZipFile(out, "w") as z:
+            z.writestr("m/m.model3.json", json.dumps({"FileReferences": {"Moc": "m.moc3", "Textures": ["t.png"]}}))
+            link = zipfile.ZipInfo("m/m.moc3")
+            link.external_attr = (0o120777 << 16)
+            z.writestr(link, "/etc/passwd")
+        with self.assertRaises(package.PackageError):
+            package.from_live2d_zip(io.BytesIO(out.getvalue()))

@@ -58,6 +58,35 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         r = await self.client.put("/api/settings", json={"volume": 0.5})
         self.assertEqual(r.status, 403, "changes need the X-Companion header")
 
+    async def test_choosing_the_character_drawing_relinks_the_stage(self):
+        from test_package import live2d_files
+        await self.login()
+        files = good_files()
+        files.update(live2d_files())
+        self.device.characters.install(package.build(files, manifest()))
+        self.device.activate("aria")
+        self.assertTrue(os.path.realpath(self.device.current_puppet).endswith("model.model3.json"))
+        self.stage.commands.clear()
+        r = await self.client.put("/api/settings", json={"character_format": "inochi2d"}, headers=H)
+        self.assertEqual(r.status, 200)
+        self.assertTrue(os.path.realpath(self.device.current_puppet).endswith("puppet.inp"))
+        self.assertIn({"quit": True}, self.stage.commands, "the stage restarts with the other drawing")
+        r = await self.client.put("/api/settings", json={"character_format": "png"}, headers=H)
+        self.assertEqual(r.status, 400)
+        r = await self.client.put("/api/settings", json=["not", "an", "object"], headers=H)
+        self.assertEqual(r.status, 400)
+
+    async def test_a_zipped_live2d_model_folder_can_be_uploaded(self):
+        from test_package import model_folder_zip
+        await self.login()
+        r = await self.client.post("/api/characters?name=Aria", data=model_folder_zip(), headers=H)
+        self.assertEqual(r.status, 200, await r.text())
+        self.assertEqual((await r.json())["id"], "aria")
+        self.assertTrue(os.path.realpath(self.device.current_puppet).endswith("model.model3.json"),
+                        "the first character is shown at once, with its Live2D-format model")
+        r = await self.client.post("/api/characters", data=b"PK\x05\x06" + b"\0" * 18, headers=H)
+        self.assertEqual(r.status, 400)
+
     async def test_wrong_passwords_are_slowed_and_then_locked_out(self):
         await self.login()
         await self.client.post("/api/logout", headers=H)

@@ -78,7 +78,7 @@ class OutOfBoxTest(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(("nmcli", "connection", "delete", "companion-setup"), cmds.calls)
             self.assertNotIn(("nmcli", "connection", "delete", "Wired connection 1"), cmds.calls)
 
-    async def test_a_character_the_stage_cannot_draw_yet_gets_an_explanation(self):
+    async def test_a_live2d_only_character_is_shown_with_its_live2d_model(self):
         from test_package import live2d_files
         with tempfile.TemporaryDirectory() as d:
             cmds, restarted = Commands(), []
@@ -87,7 +87,23 @@ class OutOfBoxTest(unittest.IsolatedAsyncioTestCase):
             files.update(live2d_files())
             device.characters.install(package.build(files, manifest()))
             device.activate("aria")
-            self.assertEqual(os.path.realpath(device.current_puppet), os.path.realpath(device.card))
+            linked = os.path.realpath(device.current_puppet)
+            self.assertEqual(linked, os.path.realpath(device.characters.file("aria", package.LIVE2D_MODEL)))
+
+    async def test_a_character_with_both_formats_shows_the_chosen_one(self):
+        from test_package import live2d_files
+        with tempfile.TemporaryDirectory() as d:
+            cmds, restarted = Commands(), []
+            device = device_in(d, cmds, restarted)
+            files = good_files()
+            files.update(live2d_files())
+            device.characters.install(package.build(files, manifest()))
+            device.activate("aria")
+            self.assertTrue(os.path.realpath(device.current_puppet).endswith("model.model3.json"),
+                            "the Live2D-format copy is shown by default")
+            device.store.update_settings({"character_format": "inochi2d"})
+            device.activate("aria")
+            self.assertTrue(os.path.realpath(device.current_puppet).endswith("puppet.inp"))
 
     async def test_a_setup_reset_forgets_the_password_and_wifi_but_keeps_characters(self):
         with tempfile.TemporaryDirectory() as d:

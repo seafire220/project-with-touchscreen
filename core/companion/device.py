@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import time
 
-from . import providers
+from . import package, providers
 from .audio import Detector, Microphone, Speaker, tone
 from .characters import Characters, split_persona
 from .conversation import Conversation
@@ -195,15 +195,18 @@ class Device:
         self.emit("character", {"id": cid})
 
     def _link_puppet(self, cid):
-        for name in ("visual/puppet.inp", "visual/puppet.inx"):
+        """Point the stage at the character's drawing. The stage tells the formats apart by content."""
+        inochi = ("visual/puppet.inp", "visual/puppet.inx")
+        live2d = (package.LIVE2D_MODEL,)
+        prefer_inochi = self.store.settings().get("character_format") == "inochi2d"
+        for name in (inochi + live2d) if prefer_inochi else (live2d + inochi):
             target = self.characters.file(cid, name)
             if os.path.exists(target):
                 self._point_stage_at(target)
                 return
-        # Only a Live2D-format model: the character program cannot draw that yet, so say so on the screen.
         write_atomic(self.card, screen.card_puppet(screen.message_card(
-            "Can't show this character yet",
-            "It only has a Live2D-format model, which this device's character program cannot draw yet.")))
+            "Can't show this character",
+            "Its package has no drawing this device can show. Try installing it again.")))
         self._point_stage_at(self.card)
 
     def show_card(self, png):

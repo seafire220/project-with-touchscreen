@@ -54,8 +54,10 @@
     <h2>Characters</h2>
     <ul id="char-list" class="cards"></ul>
     <h3>Add a character</h3>
-    <p>Choose a <code>.char</code> file made with the character maker on your computer.</p>
-    <p><input type="file" id="char-file" accept=".char"> <label><input type="checkbox" id="char-replace"> replace if it exists</label></p>
+    <p>Choose a <code>.char</code> file made with the character maker on your computer, or a <code>.zip</code>
+      of a Live2D-format model's folder (the folder with its <code>.model3.json</code>, as used by VTube Studio).
+      Only add models you have the right to use; some model licences say which programs may show them.</p>
+    <p><input type="file" id="char-file" accept=".char,.zip"> <label><input type="checkbox" id="char-replace"> replace if it exists</label></p>
     <p class="error" id="char-error"></p>
     <div id="char-edit" hidden>
       <h3>Edit <span id="edit-name"></span></h3>
@@ -136,6 +138,9 @@
     <label>Pause that ends your turn (seconds) <input type="number" id="dev-end_silence" min="0.3" max="3" step="0.1"></label>
     <label><input type="checkbox" id="dev-voice_interrupt"> Let me interrupt it by speaking (only with a sound card that cancels the device's own voice, such as the ReSpeaker Lite)</label>
     <label><input type="checkbox" id="dev-memory"> Keep long-term memory notes</label>
+    <label>Character drawing <select id="dev-format">
+      <option value="live2d">Live2D-format copy when the character has one (recommended)</option>
+      <option value="inochi2d">Inochi2D puppet when the character has one</option></select></label>
     <label><input type="checkbox" id="dev-search"> Allow web search (Claude searches by itself; other services need a free "Web search" key from tavily.com, under AI services → All saved keys)</label>
     <p><button id="btn-save-device">Save</button> <span id="device-msg"></span></p>
     <h3>Wi-Fi</h3>

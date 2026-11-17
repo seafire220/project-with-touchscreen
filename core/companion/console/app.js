@@ -272,6 +272,7 @@ async function loadSettings() {
   $("dev-voice_interrupt").checked = !!s.listening.voice_interrupt;
   $("dev-memory").checked = !!s.conversation.memory;
   $("dev-search").checked = s.conversation.web_search !== false;
+  $("dev-format").value = s.character_format || "live2d";
   renderKeys(await api("GET", "/api/keys"));
 }
 
@@ -387,6 +388,7 @@ $("btn-save-device").addEventListener("click", async () => {
       listening: { mode: $("dev-mode").value, end_silence: Number($("dev-end_silence").value),
                    voice_interrupt: $("dev-voice_interrupt").checked },
       conversation: { memory: $("dev-memory").checked, web_search: $("dev-search").checked },
+      character_format: $("dev-format").value,
     });
     text($("device-msg"), "Saved.");
   } catch (err) { text($("device-msg"), err.message); }
