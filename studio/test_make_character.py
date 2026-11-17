@@ -2,10 +2,14 @@
 import argparse
 import importlib.util
 import io
+import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 
 import numpy as np
 
@@ -15,6 +19,8 @@ from companion import package
 from test_partsplit import figure_with_arms, labels_for
 
 HAVE_RIGGER = importlib.util.find_spec("image2live2d") is not None
+STAGE = os.path.join(os.path.dirname(__file__), "..", "stage", "target", "release", "stage")
+HAVE_STAGE = os.path.exists(STAGE) and shutil.which("xvfb-run") is not None
 
 
 @unittest.skipUnless(HAVE_RIGGER, "the image2live2d rigger is not installed")
@@ -60,6 +66,17 @@ class MakeCharacterTest(unittest.TestCase):
         check = p.json("studio/report.json")["live2d"]["check"]
         self.assertLess(check["max_px"], 4.0, check)
         self.assertEqual(check["max_opacity"], 0.0)
+
+    @unittest.skipUnless(HAVE_STAGE, "the stage is not built, or Xvfb is missing")
+    def test_the_stage_draws_both_formats_alike(self):
+        folder = os.path.join(self.dir.name, "unpacked")
+        with zipfile.ZipFile(io.BytesIO(self.data)) as z:
+            z.extractall(folder)
+        tool = os.path.join(os.path.dirname(__file__), "..", "stage", "tools", "compare_formats.py")
+        run = subprocess.run([sys.executable, tool, STAGE, folder, os.path.join(self.dir.name, "compare.png")],
+                             capture_output=True, text=True, timeout=1800)
+        self.assertEqual(run.returncode, 0, run.stdout[-800:] + run.stderr[-800:])
+        self.assertGreaterEqual(json.loads(run.stdout)["worst_overlap"], 0.98)
 
     def test_no_keys_or_memories_are_packed(self):
         names = set(package.open_package(io.BytesIO(self.data)).files)
