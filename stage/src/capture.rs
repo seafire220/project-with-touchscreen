@@ -29,3 +29,14 @@ pub fn save_frame(gl: &glow::Context, width: u32, height: u32, path: &Path) -> R
 	image::save_buffer(path, &flipped, width, height, image::ExtendedColorType::Rgba8)
 		.map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
+
+#[cfg(test)]
+mod tests {
+	/// The vendored renderer premultiplies textures on load (patch 9 in vendor/PATCHES.md).
+	#[test]
+	fn textures_are_premultiplied_by_alpha() {
+		let mut px = vec![200, 100, 50, 255, 200, 100, 50, 128, 255, 255, 255, 0];
+		inox2d::texture::premultiply(&mut px);
+		assert_eq!(px, vec![200, 100, 50, 255, 100, 50, 25, 128, 0, 0, 0, 0]);
+	}
+}

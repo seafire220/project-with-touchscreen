@@ -108,7 +108,7 @@ def make(image_path, name, args, work):
     step = report["steps"].append
     original = Image.open(image_path)
     original.load()
-    masks, how = find_labels(original.convert("RGB"), args)
+    masks, how = find_labels(original, args)
     step("parts " + how)
     image, notes = prepare.prepare(original, masks)
     for note in notes:

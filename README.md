@@ -6,7 +6,7 @@ talk to. Built from commodity hardware and original software, using the
 owner's own AI service keys, with no lock-in to one AI or voice provider.
 
 Two tiers: **Lite** plays pre-rendered 2D animation; **Standard** drives a
-rigged 2D puppet.
+rigged 2D puppet. Standard is being built first.
 
 ## Status
 
@@ -15,25 +15,41 @@ rigged 2D puppet.
 | 1. Reference product research | First pass done |
 | 2. Requirements interview | Answered |
 | 3. Requirements specification | Draft 2 |
-| 4. Hardware selection and BOM | Prototype board chosen: Raspberry Pi 4, 1 GB |
-| 5. Architecture | Revision 2, after review and testing |
-| 6. Software implementation | Started. Stage (character drawing) works. Character preparation now separates the parts correctly on all six test images using an existing model; blink and mouth artwork still poor on some. Core service, console and installer not started |
-| 7. Install, boot and appliance behaviour | Designed; not implemented |
-| 8. Build guide, test plan | Not started |
+| 4. Hardware selection and BOM | Prototype board chosen: Raspberry Pi 4, 1 GB. Nothing bought yet |
+| 5. Architecture | Revision 2 |
+| 6. Software | Written and tested off the device: the stage (character drawing), the core service (conversation, providers, memory, characters, timers, Wi-Fi setup), the web settings page, and character making from one picture |
+| 7. Install, boot and appliance behaviour | Installer, services, setup screens and update/rollback written; tested in a Debian 13 environment, not on a Pi |
+| 8. Guides | Build and install, making characters, hardware test plan |
+
+**Tested so far:** 24 stage tests, 48 character-making tests, 46 core tests,
+11 browser checks of the settings page, the installer run in a Debian 13
+environment, and the Pi build of the stage started under ARM emulation.
+Characters were judged by eye on eleven pictures, on software graphics.
+**Not yet tested:** anything on real hardware; live AI services (no keys
+here); the character maker on a Mac.
 
 Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 (Radxa Zero 3W option), against roughly A$850 for the reference product.
 
 ## Code
 
-- [`stage/`](stage/README.md) — draws and animates the character on the
-  device screen.
-- [`studio/`](studio/) — character preparation. `parts_model.py` labels a
-  picture's body parts with an existing open model; `partsplit.py` cuts the
-  original picture along those labels without repainting it; `headturn.py`
-  gives the rigged puppet an in-place head turn; `prepare.py` removes a
-  plain background. `flatsplit.py` is an older colour-based cutter kept as
-  a fallback.
+- [`stage/`](stage/README.md): draws and animates the character on the
+  device screen (Rust, Inochi2D puppets, OpenGL ES). Cross-builds for the
+  Pi from a PC.
+- [`core/`](core/): the device's service (Python): conversation pipeline,
+  provider adapters (OpenAI-compatible chat, speech and transcription;
+  Anthropic; ElevenLabs with voice cloning; on-device speech recognition),
+  character store and package checks, memory, timers and alarms, Wi-Fi
+  setup, and the web settings page. Run it without hardware or keys with
+  `core/tests/virtual_device.py`.
+- [`studio/`](studio/): character making on a laptop.
+  `make_character.py` turns one picture into a `.char` package: it finds
+  the body parts with the See-through model (`parts_model.py`), removes a
+  plain background (`prepare.py`), cuts the picture into layers and draws
+  the closed eyes and open mouth it lacks (`partsplit.py`), rigs it with
+  image2live2d, and refines head movement and the mouth (`refine.py`).
+- [`device/`](device/): installer, services and system settings for
+  Raspberry Pi OS Lite.
 
 ## Documents
 
@@ -48,20 +64,34 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 9. [Experiment: flat image to puppet without repainting](docs/09-flat-image-experiment.md)
 10. [Trial on five unfamiliar images](docs/10-generalisation-trial.md)
 11. [Finding the parts with an existing model](docs/11-part-labelling-model.md)
+12. [Trial on five fresh images, and the third head-movement design](docs/12-fresh-image-trial.md)
+13. [Building and installing the device](docs/13-build-and-install.md)
+14. [Making a character from a picture](docs/14-making-characters.md)
+15. [Hardware test plan and troubleshooting](docs/15-hardware-test-plan.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner
 
-- The owner's verdict on the revised head movement.
-- A run of `studio/parts_model.py` on the owner's Mac, to confirm it works
-  there and how long it takes.
-- A fresh set of images for an unbiased test.
+- A verdict on the new head movement, blinks and mouths (review images and
+  motion clips sent on 2026-11-17).
+- Buying the prototype parts, so the hardware test plan can start.
+- AI service keys, to test the providers against the real services (they
+  are entered on the device, never in this repository).
 
 ## Known gaps
 
-- No part has been bought or tested; every hardware compatibility statement
-  is from documentation or search results. Inochi2D rendering has been
-  tested, on software graphics only.
-- Memory use, boot time and on-device speech recognition speed are estimates.
-- Several prices are estimates, marked in the hardware document.
+- No part has been bought or tested; every hardware statement is from
+  documentation. The display overlay line and the sound card's name must be
+  checked on first build.
+- Memory use, boot time, frame rate and speech-recognition speed on the Pi
+  are estimates until measured.
+- The provider adapters follow each service's documentation and are tested
+  against stand-ins only.
+- Speaking cannot yet interrupt the character (the button does); this needs
+  the sound card's echo cancellation confirmed first.
+- Faces partly in profile show a small patch beside the face at the far
+  ends of a head turn; tiny, heavily compressed pictures show faint lines
+  round the eyes when enlarged.
+- Lite tier, web search, and a background-removal model for busy
+  backgrounds are not started.
 - Compliance cost for selling in Australia has not been researched.

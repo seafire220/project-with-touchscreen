@@ -101,15 +101,7 @@ pub fn premultiply(pixels: &mut [u8]) {
 	}
 }
 
-#[cfg(test)]
-mod premultiply_tests {
-	#[test]
-	fn colour_is_scaled_by_alpha() {
-		let mut px = vec![200, 100, 50, 255, 200, 100, 50, 128, 255, 255, 255, 0];
-		super::premultiply(&mut px);
-		assert_eq!(px, vec![200, 100, 50, 255, 100, 50, 25, 128, 0, 0, 0, 0]);
-	}
-}
+
 
 #[cfg(target_arch = "wasm32")]
 pub fn decode_model_textures<'a>(
