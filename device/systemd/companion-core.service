@@ -2,6 +2,7 @@
 Description=Character device: conversation, settings page and Wi-Fi setup
 After=network.target sound.target NetworkManager.service
 Wants=NetworkManager.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

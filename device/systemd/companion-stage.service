@@ -2,6 +2,8 @@
 Description=Character device: the character on the screen
 After=systemd-user-sessions.service companion-core.service
 Conflicts=getty@tty1.service
+# Never give up restarting: the screen must always come back.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -24,7 +26,7 @@ Environment=XDG_SESSION_TYPE=wayland
 # the stage to exit, and this service starts it again.
 ExecStart=/usr/bin/cage -s -d -- /opt/companion/bin/stage /var/lib/companion/current.inp --fullscreen --socket /run/companion/stage.sock --no-stdin
 Restart=always
-RestartSec=0.5
+RestartSec=1
 SupplementaryGroups=video render input
 MemoryMax=300M
 

@@ -109,6 +109,17 @@ if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/stt" ]; then
     fi
 fi
 
+say "Preparing the first screen"
+# The screen shows this setup card from the very first start, before the
+# core service has run; the service replaces it as soon as it starts.
+if [ ! -e "$DATA/current.inp" ]; then
+    runuser -u companion -- "$APP/venv/bin/python" -c "
+import sys; sys.path.insert(0, '$APP/core')
+from companion import screen
+open('$DATA/card.inp', 'wb').write(screen.card_puppet(screen.setup_card('this device')))"
+    runuser -u companion -- ln -sfn "$DATA/card.inp" "$DATA/current.inp"
+fi
+
 say "Installing system settings"
 install -m 0644 "$REPO/device/systemd/companion-core.service" /etc/systemd/system/
 install -m 0644 "$REPO/device/systemd/companion-stage.service" /etc/systemd/system/
