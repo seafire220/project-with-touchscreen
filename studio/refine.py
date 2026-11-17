@@ -62,6 +62,10 @@ BACK_DEPTH = 0.6
 # moves a little and nothing behind the head is uncovered. This is the depth
 # below the surface (0 at the outline, 1 at the middle) where holding stops.
 OUTLINE_HOLD = 0.35
+# Where the head turns and nods about: this far behind its middle (in head half-widths), so the whole
+# head shifts a little with the turn, as Live2D artists move the outline "slightly towards the turn".
+TURN_AXIS = 0.35
+NOD_AXIS = 0.2
 # Each part follows a coarse grid of points, the way a Live2D artist puts each
 # part in its own warp deformer: small parts and features keep their shape.
 GRIDS = {"eye": (3, 3), "mouth": (3, 2), "nose": (2, 2), "blush": (2, 2)}
@@ -221,7 +225,13 @@ def turned(x, y, g, turn, nod, depth=(1.0, 0.0)):
     u2 = u * math.cos(a) + z * math.sin(a)
     z2 = z * math.cos(a) - u * math.sin(a)
     v2 = v * math.cos(b) - z2 * math.sin(b)
-    return ((u2 - u) * rx * hold, (v2 - v) * ry * hold)
+    # The head turns about the neck, which is behind its middle: the whole head, outline and all, also
+    # shifts a little towards the turn (and the nod), so the far side stays round instead of being
+    # squeezed against an outline that does not move. Hair hanging below the chin is left out.
+    hang = 1.0 - smoothstep((v - 0.9) / 0.4) if dy > 0 else 1.0
+    shift_x = TURN_AXIS * math.sin(a) * rx * hang
+    shift_y = -NOD_AXIS * math.sin(b) * ry * hang
+    return ((u2 - u) * rx * hold + shift_x, (v2 - v) * ry * hold + shift_y)
 
 
 def kind_of(role):

@@ -131,15 +131,17 @@ class RefineTest(unittest.TestCase):
         self.assertTrue(all(n < middle for n in near))
         hair_pts = mesh_points(self.p, "hair_front")
         hair_moves = self.offsets("ParamAngleX", "hair_front", 1)
-        rim = [abs(m[0]) for m, (x, y) in zip(hair_moves, hair_pts) if abs(x) >= 69]
-        self.assertTrue(all(r < 1e-6 for r in rim), "the outline of the head stays put")
+        rim = [m[0] for m, (x, y) in zip(hair_moves, hair_pts) if abs(x) >= 69]
+        self.assertTrue(all(0 < r < 0.4 * middle for r in rim),
+                        "the outline moves slightly towards the turn: the head turns about the neck behind it")
 
     def test_hair_behind_the_head_moves_the_other_way(self):
         pts = mesh_points(self.p, "hair_back")
         moves = self.offsets("ParamAngleX", "hair_back", 1)
         middle = [dx for (x, _), (dx, _) in zip(pts, moves) if abs(x) < 10]
-        self.assertTrue(all(dx <= 1e-9 for dx in middle), "none moves with the face")
-        self.assertLess(min(middle), -1.0, "it moves the other way (points on the outline are held)")
+        face = max(dx for dx, _ in self.offsets("ParamAngleX", "face_base", 1))
+        self.assertLess(min(middle), -1.0, "its middle, behind the neck's axis, moves the other way")
+        self.assertTrue(all(dx < 0.4 * face for dx in middle), "and none of it moves as far as the face")
 
     def test_turning_the_other_way_mirrors_and_rest_is_untouched(self):
         def mean_dx(position):
