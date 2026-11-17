@@ -82,44 +82,49 @@
 
   <section id="services" class="tab" hidden>
     <h2>AI services</h2>
-    <p>Keys are stored only on this device. They can be replaced or removed here but never shown again.</p>
-    <fieldset>
-      <legend>Language model</legend>
+    <p>The device talks through AI services you choose, with your own accounts. Paste each key here: it is
+       stored only on this device, used only to reach that service, and never shown again.</p>
+    <fieldset data-group="llm">
+      <legend>1. Language model (the character's mind)</legend>
       <label>Service <select id="llm-provider">
         <option value="">choose…</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic (Claude)</option>
         <option value="groq">Groq</option><option value="openrouter">OpenRouter</option><option value="gemini">Google Gemini</option>
         <option value="custom">Other (OpenAI-compatible)</option></select></label>
-      <label>Model <input id="llm-model" list="llm-models"> <button type="button" id="btn-models">List models</button></label>
+      <div class="keybox" data-key-for="llm"></div>
+      <label class="for-custom">Address <input id="llm-base_url" placeholder="https://…/v1"></label>
+      <label>Model <input id="llm-model" list="llm-models" placeholder="press “List models” after saving the key">
+        <button type="button" id="btn-models">List models</button></label>
       <datalist id="llm-models"></datalist>
-      <label>Address (only for "Other") <input id="llm-base_url" placeholder="https://…/v1"></label>
-      <label>Effort (Claude only; lower is faster) <select id="llm-effort"><option>low</option><option>medium</option><option>high</option></select></label>
+      <label class="for-anthropic">Effort (lower answers faster) <select id="llm-effort"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>
       <label>Longest reply (tokens) <input id="llm-max_tokens" type="number" min="64" max="4000"></label>
-      <button type="button" data-test="llm">Test</button> <span id="test-llm"></span>
+      <button type="button" data-test="llm">Save and test</button> <span id="test-llm"></span>
     </fieldset>
-    <fieldset>
-      <legend>Speech recognition</legend>
-      <label>Service <select id="stt-provider">
-        <option value="local">On this device (free)</option><option value="groq">Groq</option><option value="openai">OpenAI</option>
-        <option value="custom">Other (OpenAI-compatible)</option></select></label>
-      <label>Model <input id="stt-model" placeholder="e.g. whisper-large-v3-turbo"></label>
-      <label>Address (only for "Other") <input id="stt-base_url"></label>
-      <button type="button" data-test="stt">Test</button> <span id="test-stt"></span>
-    </fieldset>
-    <fieldset>
-      <legend>Voice</legend>
+    <fieldset data-group="tts">
+      <legend>2. Voice</legend>
       <label>Service <select id="tts-provider">
-        <option value="">choose…</option><option value="elevenlabs">ElevenLabs</option><option value="openai">OpenAI</option>
+        <option value="">choose…</option><option value="elevenlabs">ElevenLabs (includes cloned voices)</option><option value="openai">OpenAI</option>
         <option value="custom">Other (OpenAI-compatible)</option></select></label>
+      <div class="keybox" data-key-for="tts"></div>
+      <label class="for-custom">Address <input id="tts-base_url"></label>
       <label>Model <input id="tts-model"></label>
-      <label>Default voice <input id="tts-voice"></label>
-      <label>Address (only for "Other") <input id="tts-base_url"></label>
-      <button type="button" data-test="tts">Test</button> <span id="test-tts"></span>
+      <label>Voice <input id="tts-voice" list="tts-voices"> <button type="button" id="btn-voices" class="for-elevenlabs">List my voices</button></label>
+      <datalist id="tts-voices"></datalist>
+      <button type="button" data-test="tts">Save and test</button> <span id="test-tts"></span>
     </fieldset>
-    <p><button id="btn-save-services">Save services</button> <span id="services-msg"></span></p>
-    <fieldset>
-      <legend>Keys</legend>
+    <fieldset data-group="stt">
+      <legend>3. Speech recognition (hearing you)</legend>
+      <label>Service <select id="stt-provider">
+        <option value="local">On this device (free, private)</option><option value="groq">Groq</option><option value="openai">OpenAI</option>
+        <option value="custom">Other (OpenAI-compatible)</option></select></label>
+      <div class="keybox" data-key-for="stt"></div>
+      <label class="for-custom">Address <input id="stt-base_url"></label>
+      <label class="for-cloud">Model <input id="stt-model"></label>
+      <button type="button" data-test="stt">Save and test</button> <span id="test-stt"></span>
+    </fieldset>
+    <details>
+      <summary>All saved keys</summary>
       <div id="keys"></div>
-    </fieldset>
+    </details>
   </section>
 
   <section id="device" class="tab" hidden>
@@ -131,7 +136,7 @@
     <label>Pause that ends your turn (seconds) <input type="number" id="dev-end_silence" min="0.3" max="3" step="0.1"></label>
     <label><input type="checkbox" id="dev-voice_interrupt"> Let me interrupt it by speaking (only with a sound card that cancels the device's own voice, such as the ReSpeaker Lite)</label>
     <label><input type="checkbox" id="dev-memory"> Keep long-term memory notes</label>
-    <label><input type="checkbox" id="dev-search"> Allow web search (Claude uses its own; other services need a "Web search" key from tavily.com)</label>
+    <label><input type="checkbox" id="dev-search"> Allow web search (Claude searches by itself; other services need a free "Web search" key from tavily.com, under AI services → All saved keys)</label>
     <p><button id="btn-save-device">Save</button> <span id="device-msg"></span></p>
     <h3>Wi-Fi</h3>
     <p id="wifi-status">Checking…</p>

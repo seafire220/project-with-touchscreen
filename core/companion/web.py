@@ -187,6 +187,16 @@ class Console:
             return web.json_response({"ok": False, "message": str(error) or "timed out", "models": []})
         return web.json_response({"ok": True, "models": names})
 
+    async def voices(self, request):
+        try:
+            tts = self.device.build("tts")
+            names = await asyncio.wait_for(tts.voices(), 30)
+        except AttributeError:
+            return web.json_response({"ok": False, "message": "this voice service has no voice list", "voices": []})
+        except (ProviderError, asyncio.TimeoutError) as error:
+            return web.json_response({"ok": False, "message": str(error) or "timed out", "voices": []})
+        return web.json_response({"ok": True, "voices": names})
+
     # ----- characters
     async def list_characters(self, request):
         return web.json_response({"active": self.device.active_id(), "characters": self.device.characters.list()})
@@ -362,6 +372,7 @@ def make_app(device):
     r.add_put("/api/keys/{name}", console.put_key)
     r.add_post("/api/test/{which}", console.test_provider)
     r.add_get("/api/models", console.models)
+    r.add_get("/api/voices", console.voices)
     r.add_get("/api/characters", console.list_characters)
     r.add_post("/api/characters", console.upload_character)
     r.add_post("/api/characters/{cid}/activate", console.activate)

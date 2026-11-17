@@ -33,3 +33,10 @@ fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 14px 0; p
 .start li { margin: 6px 0; }
 .start li.done { color: var(--muted); text-decoration: line-through; }
 .start a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.keybox { margin: 8px 0; padding: 8px 10px; border-radius: 8px; background: var(--bg); }
+.keybox .hint { color: var(--muted); font-size: 0.9rem; display: block; margin-bottom: 6px; }
+.keybox .ok { color: #2e7d32; }
+@media (prefers-color-scheme: dark) { .keybox .ok { color: #81c784; } }
+details { margin: 14px 0; }
+summary { cursor: pointer; color: var(--muted); }
+[hidden] { display: none !important; }

@@ -1,7 +1,10 @@
 #!/bin/bash
 # Turn a fresh Raspberry Pi OS Lite (64-bit) into the character device.
 #
-#   sudo ./device/install.sh [--stage-binary PATH] [--no-model]
+#   sudo ./device/install.sh [--stage-binary PATH] [--no-model] [--image]
+#
+# --image prepares a ready-made device image (device/build-image.sh uses it):
+# no login prompt, no cloud-init, hostname "companion".
 #
 # Run it from a copy of this repository on the Pi. It installs the packages
 # the device needs, the core service, the stage program and the system
@@ -19,6 +22,7 @@ APP=/opt/companion
 DATA=/var/lib/companion
 STAGE_BINARY="$REPO/stage/target/aarch64-unknown-linux-gnu/release/stage"
 GET_MODEL=1
+IMAGE=0
 # On-device speech recognition model: Moonshine tiny, English, 8-bit (MIT
 # licence, Useful Sensors), packaged for sherpa-onnx. About 120 MB.
 MODEL_URL="https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main"
@@ -28,7 +32,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --stage-binary) STAGE_BINARY="$2"; shift 2 ;;
         --no-model) GET_MODEL=0; shift ;;
-        -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+        --image) IMAGE=1; shift ;;
+        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
 done
@@ -45,7 +50,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
     cage python3 python3-venv python3-numpy python3-aiohttp python3-pil \
-    alsa-utils network-manager polkitd fonts-dejavu-core \
+    alsa-utils network-manager polkitd fonts-dejavu-core python3-qrcode avahi-daemon \
     libegl1 libgles2 libgl1-mesa-dri libwayland-client0 libwayland-egl1 libxkbcommon0 \
     ca-certificates curl
 
@@ -126,8 +131,28 @@ fi
 say "Enabling the services"
 systemctl daemon-reload || true
 systemctl disable getty@tty1.service 2>/dev/null || true
-systemctl enable NetworkManager.service companion-core.service companion-stage.service
+systemctl enable NetworkManager.service avahi-daemon.service companion-core.service companion-stage.service
 systemctl set-default graphical.target
+
+if [ "$IMAGE" = 1 ]; then
+    say "Preparing a ready-made device image"
+    # Raspberry Pi OS asks for a user name on the screen at first boot; the
+    # device has no keyboard and needs no login, so that is switched off.
+    systemctl mask userconfig.service 2>/dev/null || true
+    # cloud-init could create a user with a default password from the boot
+    # partition; the device does not use it.
+    if [ -d /etc/cloud ]; then touch /etc/cloud/cloud-init.disabled; fi
+    # No remote login on a sold unit.
+    systemctl disable ssh.service sshswitch.service 2>/dev/null || true
+    # http://companion.local reaches the settings page.
+    echo companion > /etc/hostname
+    if grep -q "^127.0.1.1" /etc/hosts; then
+        sed -i 's/^127.0.1.1.*/127.0.1.1\tcompanion/' /etc/hosts
+    else
+        printf '127.0.1.1\tcompanion\n' >> /etc/hosts
+    fi
+    apt-get clean
+fi
 
 say "Done. Restart the device with: sudo reboot"
 echo "After it restarts, the screen shows how to reach its settings page."

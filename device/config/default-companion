@@ -1,5 +1,7 @@
 # Settings for the character device's core service (read by companion-core.service).
-# The sound device, as ALSA names it. "plughw:CARD=Lite" suits the Seeed ReSpeaker Lite;
-# run "aplay -L" and "arecord -L" to list what is connected.
-COMPANION_ALSA_PLAYBACK=plughw:CARD=Lite
-COMPANION_ALSA_CAPTURE=plughw:CARD=Lite
+#
+# The sound card is found automatically (a ReSpeaker first, then any USB sound
+# card). To choose one yourself, run "aplay -l" and "arecord -l" and set, for
+# example:
+#COMPANION_ALSA_PLAYBACK=plughw:CARD=Lite
+#COMPANION_ALSA_CAPTURE=plughw:CARD=Lite

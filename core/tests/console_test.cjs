@@ -29,11 +29,13 @@ const check = (name, ok) => { checks.push([name, ok]); console.log((ok ? "PASS "
   check("the timer tag is acted on, not read out", (await page.textContent("#log")).includes("Timer:") && !(await page.textContent("#log")).includes("[timer"));
   await page.screenshot({ path: shots + "/console-home.png", fullPage: true });
   await page.click("#tabs button[data-tab=services]");
-  await page.waitForSelector("#keys .key");
-  const row = page.locator("#keys .key").first();
-  await row.locator("input").fill("sk-very-secret-test-key-123");
-  await row.locator("button").first().click();
-  await page.waitForFunction(() => document.querySelector("#keys").textContent.includes("(set)"));
+  await page.selectOption("#llm-provider", "openai");
+  const box = page.locator('[data-key-for="llm"]');
+  check("choosing a service shows where to get its key", (await box.textContent()).includes("platform.openai.com"));
+  check("an option for another service stays hidden", await page.locator("#llm-effort").isHidden());
+  await box.locator("input").fill("sk-very-secret-test-key-123");
+  await box.locator("button").click();
+  await page.waitForFunction(() => document.querySelector('[data-key-for="llm"]').textContent.includes("Key saved"));
   check("a saved key shows as set", true);
   const html = await page.content();
   check("the key itself never comes back to the page", !html.includes("sk-very-secret"));

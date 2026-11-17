@@ -28,6 +28,15 @@ The buttons need no resistors: the Pi's own pull-ups are switched on in the
 boot settings. Pressing the power button shuts the Pi down cleanly; pressing
 it again starts it.
 
+## Two ways to set up a card
+
+- **Ready-made image (simplest; the way to make units for sale).** On a
+  Linux PC, `device/build-image.sh` turns the official Raspberry Pi OS Lite
+  image into a device image with everything installed. Flash it with
+  Raspberry Pi Imager ("Use custom"), without Imager's customisation
+  settings, and skip to step 6. See `18-out-of-the-box.md`.
+- **By hand on the Pi (for development):** steps 3 to 5 below.
+
 ## 3. Prepare the microSD card
 
 1. Install Raspberry Pi Imager on your computer.
@@ -91,9 +100,10 @@ sudo reboot
   the 5" Touch Display 2. Check this against the Raspberry Pi documentation
   for your display; the 7" version uses `...-7inch`, and an HDMI screen needs
   neither line. Remove or change the line in `/boot/firmware/config.txt`.
-- **Sound device names.** `/etc/default/companion` names the ReSpeaker Lite
-  as `plughw:CARD=Lite`. Run `aplay -l` and `arecord -l` and put the card's
-  real name there, then run `sudo systemctl restart companion-core`.
+- **Sound card.** The device finds a ReSpeaker (or any USB sound card) by
+  itself. If it picks the wrong one, run `aplay -l` and `arecord -l` and name
+  the card in `/etc/default/companion`, then run
+  `sudo systemctl restart companion-core`.
 
 ## 6. First start
 

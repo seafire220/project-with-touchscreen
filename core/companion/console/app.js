@@ -247,12 +247,25 @@ $("btn-clear-memory").addEventListener("click", () => confirm("Forget the whole 
 // ----- services and keys
 const FIELDS = { llm: ["provider", "model", "base_url", "effort", "max_tokens"], stt: ["provider", "model", "base_url"],
                  tts: ["provider", "model", "voice", "base_url"] };
+// For each service: which saved key it uses, where to get one, and a typical model.
+const SERVICES = {
+  openai: { key: "openai", hint: "Get a key at platform.openai.com → API keys.", llm: "e.g. gpt-4.1-mini", stt: "e.g. gpt-4o-mini-transcribe", tts: "e.g. gpt-4o-mini-tts" },
+  anthropic: { key: "anthropic", hint: "Get a key at console.anthropic.com → API keys.", llm: "claude-opus-5-5 (or claude-haiku-5-5: faster, cheaper)" },
+  groq: { key: "groq", hint: "Get a free key at console.groq.com → API keys.", llm: "press List models", stt: "whisper-large-v3-turbo" },
+  openrouter: { key: "openrouter", hint: "Get a key at openrouter.ai → Keys.", llm: "press List models" },
+  gemini: { key: "openai_compatible", hint: "Get a key at aistudio.google.com → Get API key.", llm: "e.g. gemini-2.5-flash" },
+  custom: { key: "openai_compatible", hint: "The key for the service at the address below, if it needs one.", llm: "", stt: "", tts: "" },
+  elevenlabs: { key: "elevenlabs", hint: "Get a key at elevenlabs.io → Developers → API keys.", tts: "eleven_flash_v2_5" },
+  local: { key: "", hint: "Runs on the device: no key and no cost." },
+};
+let keyStatus = {};
 
 async function loadSettings() {
   const s = state.settings = await api("GET", "/api/settings");
   for (const [group, names] of Object.entries(FIELDS)) {
     for (const n of names) { const el = $(group + "-" + n); if (el) el.value = s[group][n] ?? ""; }
   }
+  if (!$("llm-effort").value) $("llm-effort").value = "low";
   $("dev-volume").value = s.volume;
   $("dev-mode").value = s.listening.mode;
   $("dev-end_silence").value = s.listening.end_silence;
@@ -262,7 +275,47 @@ async function loadSettings() {
   renderKeys(await api("GET", "/api/keys"));
 }
 
+// Show only what the chosen service needs: its key, its address, its options.
+function shapeGroup(group) {
+  const provider = $(group + "-provider").value;
+  const info = SERVICES[provider] || {};
+  const box = document.querySelector('fieldset[data-group="' + group + '"]');
+  for (const el of box.querySelectorAll(".for-custom")) el.hidden = provider !== "custom";
+  for (const el of box.querySelectorAll(".for-anthropic")) el.hidden = provider !== "anthropic";
+  for (const el of box.querySelectorAll(".for-elevenlabs")) el.hidden = provider !== "elevenlabs";
+  for (const el of box.querySelectorAll(".for-cloud")) el.hidden = provider === "local";
+  const model = $(group + "-model");
+  if (model && info[group] !== undefined) model.placeholder = info[group];
+  const keybox = box.querySelector(".keybox");
+  keybox.replaceChildren();
+  keybox.hidden = !provider;
+  if (!provider) return;
+  const hint = document.createElement("span"); hint.className = "hint"; text(hint, info.hint || "");
+  keybox.append(hint);
+  if (!info.key) return;
+  const saved = !!keyStatus[info.key];
+  const status = document.createElement("span"); status.className = saved ? "ok" : "";
+  text(status, saved ? "Key saved ✓ " : "No key yet. ");
+  const input = document.createElement("input"); input.type = "password"; input.autocomplete = "off";
+  input.placeholder = saved ? "paste a new key to replace it" : "paste the key here";
+  input.className = "key-input";
+  const save = document.createElement("button"); save.type = "button"; text(save, "Save key");
+  save.addEventListener("click", async () => {
+    try { keyStatus = await api("PUT", "/api/keys/" + info.key, { value: input.value.trim() }); refreshKeys(); }
+    catch (err) { text(status, err.message + " "); }
+  });
+  keybox.append(status, input, save);
+}
+
+function refreshKeys() {
+  for (const g of Object.keys(FIELDS)) shapeGroup(g);
+  renderKeys(keyStatus);
+}
+
+for (const g of Object.keys(FIELDS)) $(g + "-provider").addEventListener("change", () => shapeGroup(g));
+
 function renderKeys(status) {
+  keyStatus = status;
   const box = $("keys");
   box.replaceChildren();
   for (const [name, set] of Object.entries(status)) {
@@ -271,18 +324,19 @@ function renderKeys(status) {
     const input = document.createElement("input"); input.type = "password"; input.autocomplete = "off";
     input.placeholder = set ? "replace key" : "paste key";
     const save = document.createElement("button"); text(save, "Save");
-    save.addEventListener("click", async () => { await api("PUT", "/api/keys/" + name, { value: input.value }).then(renderKeys); });
+    save.addEventListener("click", async () => { keyStatus = await api("PUT", "/api/keys/" + name, { value: input.value }); refreshKeys(); });
     row.append(label, input, save);
     if (set) {
       const clear = document.createElement("button"); clear.className = "danger"; text(clear, "Remove");
-      clear.addEventListener("click", () => api("PUT", "/api/keys/" + name, { value: "" }).then(renderKeys));
+      clear.addEventListener("click", async () => { keyStatus = await api("PUT", "/api/keys/" + name, { value: "" }); refreshKeys(); });
       row.append(clear);
     }
     box.append(row);
   }
+  for (const g of Object.keys(FIELDS)) shapeGroup(g);
 }
 
-$("btn-save-services").addEventListener("click", async () => {
+async function saveServices() {
   const changes = {};
   for (const [group, names] of Object.entries(FIELDS)) {
     changes[group] = {};
@@ -291,25 +345,38 @@ $("btn-save-services").addEventListener("click", async () => {
       if (el) changes[group][n] = el.type === "number" ? Number(el.value) : el.value.trim();
     }
   }
-  try { await api("PUT", "/api/settings", changes); text($("services-msg"), "Saved."); }
-  catch (err) { text($("services-msg"), err.message); }
-});
+  await api("PUT", "/api/settings", changes);
+}
 
 for (const b of document.querySelectorAll("[data-test]")) {
   b.addEventListener("click", async () => {
     const out = $("test-" + b.dataset.test);
-    text(out, "Testing…");
-    try { const r = await api("POST", "/api/test/" + b.dataset.test); text(out, (r.ok ? "OK: " : "Failed: ") + r.message); }
-    catch (err) { text(out, "Failed: " + err.message); }
+    text(out, "Saving and testing…");
+    try {
+      await saveServices();
+      const r = await api("POST", "/api/test/" + b.dataset.test);
+      text(out, (r.ok ? "Working: " : "Not working yet: ") + r.message);
+      api("GET", "/api/status").then(setStatus).catch(() => {});
+    } catch (err) { text(out, "Not working yet: " + err.message); }
   });
 }
 
 $("btn-models").addEventListener("click", async () => {
+  try { await saveServices(); } catch (err) { return text($("test-llm"), err.message); }
   const r = await api("GET", "/api/models");
   const list = $("llm-models");
   list.replaceChildren();
   for (const m of r.models) { const o = document.createElement("option"); o.value = m; list.append(o); }
-  text($("test-llm"), r.ok ? r.models.length + " models found" : "Failed: " + r.message);
+  text($("test-llm"), r.ok ? r.models.length + " models found: click the Model box to choose" : "Could not list models: " + r.message);
+});
+
+$("btn-voices").addEventListener("click", async () => {
+  try { await saveServices(); } catch (err) { return text($("test-tts"), err.message); }
+  const r = await api("GET", "/api/voices");
+  const list = $("tts-voices");
+  list.replaceChildren();
+  for (const v of r.voices) { const o = document.createElement("option"); o.value = v.id; o.label = v.name; list.append(o); }
+  text($("test-tts"), r.ok ? r.voices.length + " voices found: click the Voice box to choose" : "Could not list voices: " + r.message);
 });
 
 // ----- device
