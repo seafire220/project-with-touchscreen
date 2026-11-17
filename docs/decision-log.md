@@ -529,3 +529,28 @@ rejected. Settled entries are not reopened without new evidence.
 - Still visible at full body turn: smears where the long hair moves off the
   chest, which the picture never showed. That is the same problem as the
   arms, for the alternative-drawings work.
+
+## D-042 — Heads turn about the neck, Live2D style; the body turns as a cylinder
+
+- Date: 2026-11-17. Status: implemented (`studio/refine.py`,
+  `studio/partsplit.py`); the owner judged the turn "a massive
+  improvement" and pointed out a concave look at a strong turn, since fixed.
+- Replaces v3 (D-029 era): features moved unchanged inside a fixed
+  outline, and the rigger's body turn slid the head 40 px. Now each part is
+  turned on a rounded head about an axis behind it (the far side narrows,
+  the near side widens, the outline shifts slightly, parts in front move
+  more, hair behind moves the other way), with hair behind the head and a
+  tapered neck so nothing behind shows. The body turns as a cylinder about
+  the spine, one smooth field for every part. Details and measurements in
+  `20-head-turns.md`; tools: `studio/reveal.py`, `stage/tools/pose_strips.py`.
+
+## D-043 — 90° turns later, with drawn profile artwork
+
+- Date: 2026-11-17. Status: planned.
+- A side profile cannot come from warping the front picture: the tutorial
+  the owner pointed to draws a side nose, side lips and a fill behind the
+  profile, splits the hair with draw-order changes, and uses inverse masks.
+  For us that artwork must be generated per character (drawing workflow),
+  and the converter and device drawing code must carry masks and draw-order
+  changes. The techniques are summarised in `20-head-turns.md`.
+
