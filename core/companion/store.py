@@ -18,7 +18,7 @@ DEFAULT_SETTINGS = {
     "llm": {"provider": "", "model": "", "base_url": "", "temperature": 0.8, "max_tokens": 400},
     "stt": {"provider": "local", "model": "", "base_url": "", "language": "en"},
     "tts": {"provider": "", "model": "", "voice": "", "base_url": ""},
-    "listening": {"mode": "auto", "end_silence": 0.8, "max_turn": 30.0},
+    "listening": {"mode": "auto", "end_silence": 0.8, "max_turn": 30.0, "voice_interrupt": False},
     "conversation": {"history_turns": 12, "memory": True, "web_search": True},
     "active_character": "",
     "volume": 0.8,

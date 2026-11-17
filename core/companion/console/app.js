@@ -216,6 +216,7 @@ async function loadSettings() {
   $("dev-volume").value = s.volume;
   $("dev-mode").value = s.listening.mode;
   $("dev-end_silence").value = s.listening.end_silence;
+  $("dev-voice_interrupt").checked = !!s.listening.voice_interrupt;
   $("dev-memory").checked = !!s.conversation.memory;
   $("dev-search").checked = s.conversation.web_search !== false;
   renderKeys(await api("GET", "/api/keys"));
@@ -276,7 +277,8 @@ $("btn-save-device").addEventListener("click", async () => {
   try {
     await api("PUT", "/api/settings", {
       volume: Number($("dev-volume").value),
-      listening: { mode: $("dev-mode").value, end_silence: Number($("dev-end_silence").value) },
+      listening: { mode: $("dev-mode").value, end_silence: Number($("dev-end_silence").value),
+                   voice_interrupt: $("dev-voice_interrupt").checked },
       conversation: { memory: $("dev-memory").checked, web_search: $("dev-search").checked },
     });
     text($("device-msg"), "Saved.");

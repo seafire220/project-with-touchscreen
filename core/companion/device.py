@@ -261,10 +261,17 @@ class Device:
                     if self.recording is not None:
                         self.recording.append(frame)
                         continue
-                    if not self.listening or self.state in ("thinking", "speaking"):
-                        detector.reset()          # no echo cancellation assumed: ignore our own voice
+                    busy = self.state in ("thinking", "speaking")
+                    barge_in = self.store.settings()["listening"].get("voice_interrupt", False)
+                    if not self.listening or (busy and not barge_in):
+                        detector.reset()          # without echo cancellation, ignore our own voice
                         continue
+                    was_speaking = detector.speaking
                     pcm = detector.feed(frame)
+                    if busy and detector.speaking and not was_speaking:
+                        # The person started talking over the character: stop it and keep listening.
+                        self.interrupt()
+                        self.emit("button", {"did": "interrupted by voice"})
                     if pcm:
                         asyncio.ensure_future(self.hear(pcm))
             except Exception as error:

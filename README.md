@@ -17,11 +17,11 @@ rigged 2D puppet. Standard is being built first.
 | 3. Requirements specification | Draft 2 |
 | 4. Hardware selection and BOM | Prototype board chosen: Raspberry Pi 4, 1 GB. Nothing bought yet |
 | 5. Architecture | Revision 2 |
-| 6. Software | Written and tested off the device: the stage (character drawing), the core service (conversation, providers, memory, characters, timers, Wi-Fi setup), the web settings page, and character making from one picture |
+| 6. Software | Written and tested off the device: the stage (character drawing), the core service (conversation, providers, memory, characters, timers and alarms, web search, emotions and gestures, Wi-Fi setup), the web settings page, and character making from one picture |
 | 7. Install, boot and appliance behaviour | Installer, services, setup screens and update/rollback written; tested in a Debian 13 environment, not on a Pi |
 | 8. Guides | Build and install, making characters, hardware test plan |
 
-**Tested so far:** 25 stage tests, 48 character-making tests, 48 core tests (one with the real on-device speech model),
+**Tested so far:** 25 stage tests, 48 character-making tests, 54 core tests (one with the real on-device speech model),
 11 browser checks of the settings page, the real core driving the real stage through a spoken reply (`core/tests/stack_check.py`), the installer run in a Debian 13
 environment, and the Pi build of the stage started under ARM emulation.
 Characters were judged by eye on eleven pictures, on software graphics.
@@ -88,11 +88,14 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
   are estimates until measured.
 - The provider adapters follow each service's documentation and are tested
   against stand-ins only.
-- Speaking cannot yet interrupt the character (the button does); this needs
-  the sound card's echo cancellation confirmed first.
+- Interrupting by speaking is an option, off by default, until the sound
+  card's echo cancellation is confirmed on the device (the button always
+  interrupts).
+- Arm gestures are left out: the rig's arm swings leave smears behind the
+  arm (D-035). Head, body and blush gestures work.
 - Faces partly in profile show a small patch beside the face at the far
   ends of a head turn; tiny, heavily compressed pictures show faint lines
   round the eyes when enlarged.
-- Lite tier, web search, and a background-removal model for busy
-  backgrounds are not started.
+- Lite tier, and a background-removal model for busy backgrounds, are not
+  started.
 - Compliance cost for selling in Australia has not been researched.

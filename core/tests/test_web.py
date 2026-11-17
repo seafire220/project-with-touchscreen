@@ -145,6 +145,33 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         finally:
             providers.build_stt = original
 
+    async def test_speaking_over_the_character_interrupts_it_only_when_allowed(self):
+        import array
+
+        class Mic:
+            def __init__(self, frames):
+                self.list = frames
+
+            async def frames(self):
+                for f in self.list:
+                    yield f
+                    await asyncio.sleep(0)
+                await asyncio.sleep(3600)
+
+        quiet = array.array("h", [0] * 320).tobytes()
+        voice = array.array("h", [9000, -9000] * 160).tobytes()
+        for allowed in (False, True):
+            device = Device(self.dir.name, speaker=Speaker(command=None, realtime=False), stage=FakeStage(),
+                            microphone=Mic([quiet] * 20 + [voice] * 10))
+            device.store.update_settings({"listening": {"voice_interrupt": allowed}})
+            device.listening, device.state = True, "speaking"
+            calls = []
+            device.interrupt = lambda: calls.append(1)
+            task = asyncio.ensure_future(device.listen_loop())
+            await asyncio.sleep(0.3)
+            task.cancel()
+            self.assertEqual(bool(calls), allowed)
+
     def test_only_local_addresses_are_served(self):
         for ok in ("192.168.1.20", "10.0.0.5", "127.0.0.1", "fe80::1", "172.16.4.4"):
             self.assertTrue(local_address(ok), ok)
