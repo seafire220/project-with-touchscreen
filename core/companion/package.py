@@ -9,6 +9,9 @@ Layout (see docs/06-architecture.md):
     behaviour.json    emotion names, idle behaviour, end-of-speech pause
     visual/           depends on kind:
       puppet.inp + puppet.map.json   Inochi2D puppet and parameter mapping
+      live2d/model.model3.json + model.moc3 + textures/, motions/ ...
+                                     the same puppet in the Live2D format (optional;
+                                     a puppet character needs one of the two)
       clips.json + clips/*           loops per state and emotion
       sprite.json + frames/*         still frames per emotion and mouth level
     ui/               optional background and colours
@@ -42,6 +45,11 @@ ALLOWED = [
     (re.compile(r"visual/puppet\.(inp|inx)"), 96 * 1024 * 1024),
     (re.compile(r"visual/puppet\.map\.json"), MAX_TEXT),
     (re.compile(r"visual/(clips|sprite)\.json"), MAX_TEXT),
+    (re.compile(r"visual/live2d/model\.moc3"), 64 * 1024 * 1024),
+    (re.compile(r"visual/live2d/model\.(model3|physics3|cdi3|pose3)\.json"), 4 * 1024 * 1024),
+    (re.compile(r"visual/live2d/motions/[A-Za-z0-9_.\-]{1,96}\.motion3\.json"), 4 * 1024 * 1024),
+    (re.compile(r"visual/live2d/expressions/[A-Za-z0-9_.\-]{1,96}\.exp3\.json"), MAX_TEXT),
+    (re.compile(r"visual/live2d/textures/[A-Za-z0-9_.\-]{1,96}\.png"), 32 * 1024 * 1024),
     (re.compile(r"visual/clips/[A-Za-z0-9_\-]{1,64}\.(webm|mp4|webp|png)"), 32 * 1024 * 1024),
     (re.compile(r"visual/frames/[A-Za-z0-9_\-]{1,64}\.(webp|png)"), 4 * 1024 * 1024),
     (re.compile(r"ui/background\.(webp|png|jpg)"), 8 * 1024 * 1024),
@@ -64,6 +72,8 @@ SECRET_PATTERNS = [
 ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9\-]{0,47}")
 TEXT_SUFFIXES = (".json", ".md")
 PUPPET_MAGIC = b"TRNSRTS\0"
+MOC3_MAGIC = b"MOC3"
+LIVE2D_MODEL = "visual/live2d/model.model3.json"
 
 
 class PackageError(ValueError):
@@ -149,6 +159,40 @@ def _check_puppet(name, data):
         raise PackageError("%s has no puppet in it" % name)
 
 
+def _check_moc3(name, data):
+    if not data.startswith(MOC3_MAGIC) or len(data) < 64 or not 1 <= data[4] <= 6:
+        raise PackageError("%s is not a Live2D-format model file" % name)
+    if contains_secret(data.decode("latin-1")):
+        raise PackageError("%s appears to contain an API key; it was refused" % name)
+
+
+def _check_live2d(files):
+    """The Live2D-format model's index must name only files that are in the package, beside it."""
+    if not any(n.startswith("visual/live2d/") for n in files):
+        return
+    if LIVE2D_MODEL not in files or "visual/live2d/model.moc3" not in files:
+        raise PackageError("a Live2D-format model needs visual/live2d/model.model3.json and model.moc3")
+    model = json.loads(files[LIVE2D_MODEL])
+    refs = model.get("FileReferences") if isinstance(model, dict) else None
+    if not isinstance(refs, dict) or refs.get("Moc") != "model.moc3":
+        raise PackageError("model.model3.json must name model.moc3 as its model")
+    try:
+        named = [refs.get("Moc"), refs.get("Physics"), refs.get("Pose"), refs.get("DisplayInfo")]
+        named += list(refs.get("Textures") or [])
+        for group in (refs.get("Motions") or {}).values():
+            named += [m.get("File") for m in group]
+        named += [e.get("File") for e in (refs.get("Expressions") or [])]
+    except (AttributeError, TypeError):
+        raise PackageError("model.model3.json is not laid out as a Live2D-format model index")
+    for item in named:
+        if item is None:
+            continue
+        if not isinstance(item, str) or item.startswith("/") or ".." in item.split("/") or "\\" in item:
+            raise PackageError("model.model3.json names a file outside the model: %r" % (item,))
+        if "visual/live2d/" + item not in files:
+            raise PackageError("model.model3.json names %s, which is not in the package" % item)
+
+
 class Package:
     """A checked package, held in memory."""
 
@@ -219,11 +263,14 @@ def open_package(source):
             _check_image(name, data)
         elif name.endswith((".inp", ".inx")):
             _check_puppet(name, data)
+        elif name.endswith(".moc3"):
+            _check_moc3(name, data)
     manifest = json.loads(files["manifest.json"])
     _check_manifest(manifest)
+    _check_live2d(files)
     kind = manifest["kind"]
-    if kind == "puppet" and not any(n.startswith("visual/puppet.in") for n in files):
-        raise PackageError("a puppet character needs visual/puppet.inp")
+    if kind == "puppet" and not any(n.startswith("visual/puppet.in") for n in files) and LIVE2D_MODEL not in files:
+        raise PackageError("a puppet character needs visual/puppet.inp or a Live2D-format model")
     if kind == "clips" and "visual/clips.json" not in files:
         raise PackageError("a clips character needs visual/clips.json")
     if kind == "sprite" and "visual/sprite.json" not in files:
@@ -244,7 +291,7 @@ def build(files, manifest):
             data = files[name]
             if isinstance(data, str):
                 data = data.encode("utf-8")
-            stored = name.endswith((".png", ".webp", ".jpg", ".webm", ".mp4", ".inp", ".inx"))
+            stored = name.endswith((".png", ".webp", ".jpg", ".webm", ".mp4", ".inp", ".inx", ".moc3"))
             archive.writestr(name, data, zipfile.ZIP_STORED if stored else zipfile.ZIP_DEFLATED)
     data = out.getvalue()
     open_package(io.BytesIO(data))

@@ -28,7 +28,7 @@ class MakeCharacterTest(unittest.TestCase):
         cls.labels_path = os.path.join(cls.dir.name, "figure.npz")
         np.savez_compressed(cls.labels_path, masks=labels_for(image))
         args = argparse.Namespace(labels=cls.labels_path, see_through=None, weights=None, device="cpu",
-                                  persona=None, author="tester")
+                                  persona=None, author="tester", live2d=True)
         cls.data, cls.report = make_character.make(cls.image_path, "Test Figure", args, cls.dir.name)
 
     @classmethod
@@ -52,6 +52,14 @@ class MakeCharacterTest(unittest.TestCase):
         self.assertFalse(any(b["param_name"].startswith("transform.") and b["node"] == self._head(puppet)
                              for b in params["ParamAngleZ"]["bindings"]))
         self.assertEqual(params["ParamMouthOpenY"]["axis_points"][0], [0.0, refine.MOUTH_SHOWN, 1.0])
+
+    def test_the_live2d_format_version_matches_the_puppet(self):
+        p = package.open_package(io.BytesIO(self.data))
+        self.assertTrue(p.files["visual/live2d/model.moc3"].startswith(b"MOC3"))
+        self.assertIn("visual/live2d/model.model3.json", p.files)
+        check = p.json("studio/report.json")["live2d"]["check"]
+        self.assertLess(check["max_px"], 2.0, check)
+        self.assertEqual(check["max_opacity"], 0.0)
 
     def test_no_keys_or_memories_are_packed(self):
         names = set(package.open_package(io.BytesIO(self.data)).files)

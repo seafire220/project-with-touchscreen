@@ -10,7 +10,9 @@ Runs the whole chain on this computer:
      eyes and open mouth it does not show (partsplit.py);
   4. mesh and rig the layers with the image2live2d rigger;
   5. improve head movement and mouth (refine.py);
-  6. write NAME.char: the puppet, a preview, a persona to edit, and a report
+  6. with --live2d, also convert the finished puppet into the Live2D format
+     (live2d_export.py), so engines that read that format can play it;
+  7. write NAME.char: the puppet, a preview, a persona to edit, and a report
      of what the character can and cannot do.
 
 Copy the .char file to the device through its web page, or on a USB stick.
@@ -19,7 +21,10 @@ Usage:
   make_character.py IMAGE --name NAME [--out FILE.char] [--author TEXT]
                     [--persona FILE.md] [--labels MASKS.npz]
                     [--see-through DIR --weights FILE] [--device auto|cpu|mps|cuda]
-                    [--keep DIR]
+                    [--keep DIR] [--live2d]
+
+Read docs/19-live2d-format-licensing.md before distributing characters made
+with --live2d.
 """
 import argparse
 import datetime
@@ -38,6 +43,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "core"))
 
 import partsplit  # noqa: E402
 import prepare  # noqa: E402
+import live2d_export  # noqa: E402
 import refine  # noqa: E402
 from companion import package  # noqa: E402
 
@@ -95,9 +101,12 @@ def find_labels(image, args):
     return parts_model.label(model, image), "found by the See-through model on %s" % device
 
 
-def rig(layers_dir, out_path, name):
-    run = subprocess.run([sys.executable, "-m", "image2live2d", layers_dir, "-o", out_path, "-n", name],
-                         capture_output=True, text=True, cwd=os.path.dirname(out_path))
+def rig(layers_dir, out_path, name, live2d_dir=None):
+    """Mesh and rig the layers. With live2d_dir, the rigger also writes its Live2D physics and motions there."""
+    cmd = [sys.executable, "-m", "image2live2d", layers_dir, "-o", out_path, "-n", name]
+    if live2d_dir:
+        cmd += ["--live2d", live2d_dir]
+    run = subprocess.run(cmd, capture_output=True, text=True, cwd=os.path.dirname(out_path))
     if run.returncode != 0 or not os.path.exists(out_path):
         tail = (run.stdout + run.stderr).strip().splitlines()[-3:]
         raise RuntimeError("the rigger failed: %s" % " / ".join(tail))
@@ -121,11 +130,21 @@ def make(image_path, name, args, work):
             os.path.join(layers_dir, "%02d_%s.png" % (partsplit.ORDER[role], role)))
     step("cut into %d layers" % len(layers))
     rigged = os.path.join(work, "rigged.inp")
-    rig(layers_dir, rigged, name)
+    with_live2d = getattr(args, "live2d", False)
+    live2d_dir = os.path.join(work, "rigger_live2d") if with_live2d else None
+    rig(layers_dir, rigged, name, live2d_dir)
     step("rigged")
     with open(rigged, "rb") as f:
         puppet_bytes, refine_report = refine.finish(f.read())
     step("head movement and mouth refined")
+    live2d_files = {}
+    if with_live2d:
+        extras = live2d_export.read_extras(live2d_dir) if os.path.isdir(live2d_dir) else None
+        converted, live2d_report = live2d_export.export(puppet_bytes, name="model", extras=extras)
+        live2d_files = {"visual/live2d/" + path: data for path, data in converted.items()}
+        report["live2d"] = live2d_report
+        step("Live2D-format version made: %d parts, %.1f MB, within %.1f pixels of the puppet"
+             % (live2d_report["parts"], live2d_report["moc3_bytes"] / 1e6, live2d_report["check"]["max_px"]))
 
     report["warnings"] = split_report["warnings"]
     report["capabilities"] = split_report["capabilities"]
@@ -155,6 +174,7 @@ def make(image_path, name, args, work):
         "preview.png": shot.getvalue(),
         "studio/report.json": json.dumps(report, indent=1),
     }
+    files.update(live2d_files)
     return package.build(files, manifest), report
 
 
@@ -170,6 +190,8 @@ def main(argv):
     parser.add_argument("--weights")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--keep", help="keep the working files (layers, rigged puppet) in this folder")
+    parser.add_argument("--live2d", action="store_true",
+                        help="also include a Live2D-format version (see docs/19 before distributing)")
     args = parser.parse_args(argv[1:])
     out = args.out or package.slug(args.name) + ".char"
     try:

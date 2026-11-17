@@ -114,5 +114,65 @@ class PackageTest(unittest.TestCase):
         self.assertEqual(package.slug("???"), "character")
 
 
+def live2d_files(**changes):
+    """A Live2D-format model as the studio writes it: index, model file, a texture, physics and a motion."""
+    png = io.BytesIO()
+    from PIL import Image
+    Image.new("RGBA", (4, 4), (255, 0, 0, 255)).save(png, "PNG")
+    refs = {"Moc": "model.moc3", "Textures": ["textures/00_face.png"], "Physics": "model.physics3.json",
+            "DisplayInfo": "model.cdi3.json", "Motions": {"Idle": [{"File": "motions/model.idle.motion3.json"}]}}
+    refs.update(changes)
+    return {
+        "visual/live2d/model.model3.json": json.dumps({"Version": 3, "FileReferences": refs}),
+        "visual/live2d/model.moc3": b"MOC3\x01" + b"\0" * 123,
+        "visual/live2d/model.physics3.json": "{}",
+        "visual/live2d/model.cdi3.json": "{}",
+        "visual/live2d/motions/model.idle.motion3.json": "{}",
+        "visual/live2d/textures/00_face.png": png.getvalue(),
+    }
+
+
+class Live2DPackageTest(unittest.TestCase):
+    def test_a_package_can_carry_both_formats(self):
+        files = good_files()
+        files.update(live2d_files())
+        pkg = package.open_package(io.BytesIO(package.build(files, manifest())))
+        self.assertIn("visual/live2d/model.moc3", pkg.files)
+        self.assertIn("visual/puppet.inp", pkg.files)
+
+    def test_a_live2d_format_model_alone_is_a_puppet(self):
+        files = {"persona.md": "You are Aria.", "voice.json": "{}"}
+        files.update(live2d_files())
+        package.open_package(io.BytesIO(package.build(files, manifest())))
+
+    def test_the_index_must_name_only_files_that_are_there(self):
+        for refs, why in (({"Textures": ["textures/missing.png"]}, "not in the package"),
+                          ({"Physics": "../../persona.md"}, "outside the model"),
+                          ({"Moc": "other.moc3"}, "model.moc3"),
+                          ({"Motions": ["not", "a", "map"]}, "laid out")):
+            files = good_files()
+            files.update(live2d_files(**refs))
+            with self.assertRaises(package.PackageError) as e:
+                package.build(files, manifest())
+            self.assertIn(why, str(e.exception))
+
+    def test_damaged_or_secret_bearing_model_files_are_refused(self):
+        for moc, why in ((b"NOPE" + b"\0" * 124, "not a Live2D-format"),
+                         (b"MOC3\x01" + b"\0" * 20 + b"sk-ant-" + b"a" * 40 + b"\0" * 60, "API key")):
+            files = good_files()
+            files.update(live2d_files())
+            files["visual/live2d/model.moc3"] = moc
+            with self.assertRaises(package.PackageError) as e:
+                package.build(files, manifest())
+            self.assertIn(why, str(e.exception))
+
+    def test_other_files_beside_the_model_are_refused(self):
+        files = good_files()
+        files.update(live2d_files())
+        files["visual/live2d/run.sh"] = "echo hi"
+        with self.assertRaises(package.PackageError):
+            package.build(files, manifest())
+
+
 if __name__ == "__main__":
     unittest.main()

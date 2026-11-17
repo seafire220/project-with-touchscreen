@@ -195,10 +195,16 @@ class Device:
         self.emit("character", {"id": cid})
 
     def _link_puppet(self, cid):
-        target = self.characters.file(cid, "visual/puppet.inp")
-        if not os.path.exists(target):
-            target = self.characters.file(cid, "visual/puppet.inx")
-        self._point_stage_at(target)
+        for name in ("visual/puppet.inp", "visual/puppet.inx"):
+            target = self.characters.file(cid, name)
+            if os.path.exists(target):
+                self._point_stage_at(target)
+                return
+        # Only a Live2D-format model: the character program cannot draw that yet, so say so on the screen.
+        write_atomic(self.card, screen.card_puppet(screen.message_card(
+            "Can't show this character yet",
+            "It only has a Live2D-format model, which this device's character program cannot draw yet.")))
+        self._point_stage_at(self.card)
 
     def show_card(self, png):
         """Show a message on the screen instead of the character."""

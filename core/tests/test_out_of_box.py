@@ -78,6 +78,17 @@ class OutOfBoxTest(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(("nmcli", "connection", "delete", "companion-setup"), cmds.calls)
             self.assertNotIn(("nmcli", "connection", "delete", "Wired connection 1"), cmds.calls)
 
+    async def test_a_character_the_stage_cannot_draw_yet_gets_an_explanation(self):
+        from test_package import live2d_files
+        with tempfile.TemporaryDirectory() as d:
+            cmds, restarted = Commands(), []
+            device = device_in(d, cmds, restarted)
+            files = {"persona.md": "You are Aria.", "voice.json": "{}"}
+            files.update(live2d_files())
+            device.characters.install(package.build(files, manifest()))
+            device.activate("aria")
+            self.assertEqual(os.path.realpath(device.current_puppet), os.path.realpath(device.card))
+
     async def test_a_setup_reset_forgets_the_password_and_wifi_but_keeps_characters(self):
         with tempfile.TemporaryDirectory() as d:
             cmds, restarted = Commands(), []
