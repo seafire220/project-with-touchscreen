@@ -121,4 +121,28 @@ owner's things without removing the software.
 
 ## What has been tested
 
-See the end of this document, updated after the image build.
+On 2026-11-17, in this development environment (not on a Pi):
+
+- **The image was built from the official Raspberry Pi OS Lite image**
+  (`2026-10-06-raspios-trixie-arm64-lite`, checksum verified) with
+  `device/build-image.sh`, running the installer inside it under ARM64
+  emulation. Result: a 5.2 GB image; every package, the Python libraries
+  (including on-device speech recognition for 64-bit ARM) and the speech
+  model installed without error.
+- **`device/check-image.sh` passed all 26 checks** on it: software, speech
+  model, services enabled, boots to the character screen, no login or
+  first-boot user prompt, cloud-init and SSH off, hostname, permissions,
+  log limits, watchdog, a setup screen ready for the first start, the screen
+  restarting forever, no keys, password, characters, memories, saved Wi-Fi
+  or build leftovers inside, and the button and display boot settings.
+- The runtime test (the installed programs running inside a copy of the
+  image) is reported below.
+
+Two faults were found by building the image and fixed before this build:
+the service's start-up never wired in the Wi-Fi setup (the hotspot would
+not have opened), and on the first start the screen could stay blank if
+the character program started before the service had written the setup
+screen.
+
+Not tested: booting the image on a Raspberry Pi; the real display,
+buttons, sound card and Wi-Fi hotspot.
