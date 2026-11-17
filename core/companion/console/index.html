@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Character Device</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>Character Device</h1>
+  <nav id="tabs" hidden>
+    <button data-tab="home" class="on">Home</button>
+    <button data-tab="characters">Characters</button>
+    <button data-tab="memory">Memory</button>
+    <button data-tab="services">AI services</button>
+    <button data-tab="device">Device</button>
+  </nav>
+</header>
+<main>
+  <section id="login" hidden>
+    <h2 id="login-title">Log in</h2>
+    <p id="login-help"></p>
+    <form id="login-form">
+      <label>Password <input type="password" id="login-password" autocomplete="current-password" required minlength="8"></label>
+      <button type="submit">Continue</button>
+    </form>
+    <p class="error" id="login-error"></p>
+  </section>
+
+  <section id="home" class="tab" hidden>
+    <div class="row">
+      <img id="home-preview" alt="" width="160" height="160">
+      <div>
+        <h2 id="home-name">No character yet</h2>
+        <p>State: <strong id="home-state">idle</strong></p>
+        <p><button id="btn-listen">Start listening</button> <button id="btn-interrupt">Stop speaking</button></p>
+      </div>
+    </div>
+    <form id="say-form" class="row">
+      <input id="say-text" placeholder="Type something to say to the character" autocomplete="off">
+      <button type="submit">Say</button>
+    </form>
+    <h3>What is happening</h3>
+    <ol id="log" class="log"></ol>
+  </section>
+
+  <section id="characters" class="tab" hidden>
+    <h2>Characters</h2>
+    <ul id="char-list" class="cards"></ul>
+    <h3>Add a character</h3>
+    <p>Choose a <code>.char</code> file made with the character maker on your computer.</p>
+    <p><input type="file" id="char-file" accept=".char"> <label><input type="checkbox" id="char-replace"> replace if it exists</label></p>
+    <p class="error" id="char-error"></p>
+    <div id="char-edit" hidden>
+      <h3>Edit <span id="edit-name"></span></h3>
+      <label>Persona (who the character is, and its greeting)
+        <textarea id="edit-persona" rows="14"></textarea></label>
+      <label>Voice ID for this character (from your voice service; blank uses the default)
+        <input id="edit-voice"></label>
+      <p><button id="btn-save-persona">Save</button></p>
+      <h4>Clone a voice (ElevenLabs)</h4>
+      <p>A clear WAV recording of 30 seconds to a few minutes. The voice is created in your own ElevenLabs account. Only use a voice you have the right to use.</p>
+      <p><input type="file" id="voice-file" accept=".wav,audio/wav"> <button id="btn-clone">Clone</button></p>
+      <p id="edit-msg"></p>
+    </div>
+  </section>
+
+  <section id="memory" class="tab" hidden>
+    <h2>Memory of <span id="mem-name"></span></h2>
+    <label>Notes the character keeps about you (you can edit them)
+      <textarea id="mem-notes" rows="10"></textarea></label>
+    <p><button id="btn-save-notes">Save notes</button> <button id="btn-clear-memory" class="danger">Forget everything</button></p>
+    <h3>Recent conversation</h3>
+    <ol id="mem-history" class="log"></ol>
+  </section>
+
+  <section id="services" class="tab" hidden>
+    <h2>AI services</h2>
+    <p>Keys are stored only on this device. They can be replaced or removed here but never shown again.</p>
+    <fieldset>
+      <legend>Language model</legend>
+      <label>Service <select id="llm-provider">
+        <option value="">choose…</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic (Claude)</option>
+        <option value="groq">Groq</option><option value="openrouter">OpenRouter</option><option value="gemini">Google Gemini</option>
+        <option value="custom">Other (OpenAI-compatible)</option></select></label>
+      <label>Model <input id="llm-model" list="llm-models"> <button type="button" id="btn-models">List models</button></label>
+      <datalist id="llm-models"></datalist>
+      <label>Address (only for "Other") <input id="llm-base_url" placeholder="https://…/v1"></label>
+      <label>Effort (Claude only; lower is faster) <select id="llm-effort"><option>low</option><option>medium</option><option>high</option></select></label>
+      <label>Longest reply (tokens) <input id="llm-max_tokens" type="number" min="64" max="4000"></label>
+      <button type="button" data-test="llm">Test</button> <span id="test-llm"></span>
+    </fieldset>
+    <fieldset>
+      <legend>Speech recognition</legend>
+      <label>Service <select id="stt-provider">
+        <option value="local">On this device (free)</option><option value="groq">Groq</option><option value="openai">OpenAI</option>
+        <option value="custom">Other (OpenAI-compatible)</option></select></label>
+      <label>Model <input id="stt-model" placeholder="e.g. whisper-large-v3-turbo"></label>
+      <label>Address (only for "Other") <input id="stt-base_url"></label>
+      <button type="button" data-test="stt">Test</button> <span id="test-stt"></span>
+    </fieldset>
+    <fieldset>
+      <legend>Voice</legend>
+      <label>Service <select id="tts-provider">
+        <option value="">choose…</option><option value="elevenlabs">ElevenLabs</option><option value="openai">OpenAI</option>
+        <option value="custom">Other (OpenAI-compatible)</option></select></label>
+      <label>Model <input id="tts-model"></label>
+      <label>Default voice <input id="tts-voice"></label>
+      <label>Address (only for "Other") <input id="tts-base_url"></label>
+      <button type="button" data-test="tts">Test</button> <span id="test-tts"></span>
+    </fieldset>
+    <p><button id="btn-save-services">Save services</button> <span id="services-msg"></span></p>
+    <fieldset>
+      <legend>Keys</legend>
+      <div id="keys"></div>
+    </fieldset>
+  </section>
+
+  <section id="device" class="tab" hidden>
+    <h2>Device</h2>
+    <label>Volume <input type="range" id="dev-volume" min="0" max="1" step="0.05"></label>
+    <label>Listening <select id="dev-mode">
+      <option value="auto">Press to start listening; it hears when you stop speaking</option>
+      <option value="push">Press to start, press again to send</option></select></label>
+    <label>Pause that ends your turn (seconds) <input type="number" id="dev-end_silence" min="0.3" max="3" step="0.1"></label>
+    <label><input type="checkbox" id="dev-memory"> Keep long-term memory notes</label>
+    <p><button id="btn-save-device">Save</button> <span id="device-msg"></span></p>
+    <h3>Change password</h3>
+    <form id="pw-form">
+      <label>Current <input type="password" id="pw-old" autocomplete="current-password"></label>
+      <label>New (8 or more characters) <input type="password" id="pw-new" autocomplete="new-password" minlength="8"></label>
+      <button type="submit">Change</button> <span id="pw-msg"></span>
+    </form>
+    <p><button id="btn-logout">Log out</button></p>
+  </section>
+</main>
+</body>
+</html>

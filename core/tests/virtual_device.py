@@ -1,0 +1,39 @@
+"""Run the core with stand-in AI providers and no sound, for trying the console without keys or hardware.
+
+    python tests/virtual_device.py DATA_DIR PORT
+"""
+import asyncio
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
+
+from aiohttp import web  # noqa: E402
+
+from companion.audio import Speaker  # noqa: E402
+from companion.device import Device  # noqa: E402
+from companion.web import make_app  # noqa: E402
+from fakes import FakeLLM, FakeStage, FakeTTS  # noqa: E402
+
+
+def providers(which, device):
+    if which == "llm":
+        return FakeLLM("[happy] Hello! I'm a stand-in reply, so the console can be tried without keys. [timer 2m test]")
+    if which == "tts":
+        return FakeTTS()
+    raise RuntimeError("no stand-in for " + which)
+
+
+async def main(data, port):
+    device = Device(data, speaker=Speaker(command=None), stage=FakeStage(), provider_factory=providers)
+    device.start()
+    runner = web.AppRunner(make_app(device))
+    await runner.setup()
+    await web.TCPSite(runner, "127.0.0.1", port).start()
+    print("ready", flush=True)
+    await asyncio.Event().wait()
+
+
+if __name__ == "__main__":
+    asyncio.run(main(sys.argv[1], int(sys.argv[2])))
