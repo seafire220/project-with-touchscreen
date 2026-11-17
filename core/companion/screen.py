@@ -109,13 +109,18 @@ def card_puppet(png, name="card"):
     return b"TRNSRTS\0" + struct.pack(">I", len(payload)) + payload + textures
 
 
-def setup_card(address):
+def setup_card(address=None):
+    """The welcome card. Without an address yet (just started), it says so instead."""
+    if not address or not address[:1].isdigit():
+        return card_png("Hello!", [
+            "I'm starting up. In a moment this screen shows how to set me up from your phone.",
+        ])
     url = "http://%s" % address
     return card_png("Hello!", [
         "To set me up, scan this code or open this address on a phone or computer on the same Wi-Fi:",
         "> %s" % url,
         "There you add your AI service keys and a character.",
-    ], qr=url if address[:1].isdigit() else None)
+    ], qr=url)
 
 
 def wifi_qr(ssid, password):

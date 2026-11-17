@@ -448,7 +448,7 @@ class Device:
         if cid and not os.path.exists(self.current_puppet):
             self._link_puppet(cid)
         if not cid:
-            write_atomic(self.card, screen.card_puppet(screen.setup_card("this device's address")))
+            write_atomic(self.card, screen.card_puppet(screen.setup_card()))
             self._point_stage_at(self.card)
         self.restore_timers()
         if self.microphone is not None:
@@ -504,7 +504,7 @@ class Device:
         address = await self.wifi.address()
         self.emit("network", {"connected": True, "address": address})
         if not self.active_id():
-            self.show_card(screen.setup_card(address or "this device's address"))
+            self.show_card(screen.setup_card(address))
 
     async def _serial(self):
         try:

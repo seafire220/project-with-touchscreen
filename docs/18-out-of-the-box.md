@@ -135,8 +135,19 @@ On 2026-11-17, in this development environment (not on a Pi):
   log limits, watchdog, a setup screen ready for the first start, the screen
   restarting forever, no keys, password, characters, memories, saved Wi-Fi
   or build leftovers inside, and the button and display boot settings.
-- The runtime test (the installed programs running inside a copy of the
-  image) is reported below.
+- **The installed programs were run inside a copy of the image**, as
+  64-bit ARM code under emulation:
+  - the core service started as its restricted user, answered the settings
+    page (HTTP 200, "set a password" on first visit) and put the setup
+    screen in place;
+  - the character program drew a generated character and the setup screen
+    correctly with the image's own graphics libraries (OpenGL ES 3.2,
+    software rendering);
+  - on-device speech recognition, emulating the Pi 4's processor
+    (Cortex-A72), recognised its test recording word for word. Emulating a
+    newer processor with extra instructions gave an empty result, an
+    emulation artefact to re-check on real hardware if a newer board is
+    used.
 
 Two faults were found by building the image and fixed before this build:
 the service's start-up never wired in the Wi-Fi setup (the hotspot would

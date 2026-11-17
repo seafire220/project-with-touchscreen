@@ -116,7 +116,7 @@ if [ ! -e "$DATA/current.inp" ]; then
     runuser -u companion -- "$APP/venv/bin/python" -c "
 import sys; sys.path.insert(0, '$APP/core')
 from companion import screen
-open('$DATA/card.inp', 'wb').write(screen.card_puppet(screen.setup_card('this device')))"
+open('$DATA/card.inp', 'wb').write(screen.card_puppet(screen.setup_card()))"
     runuser -u companion -- ln -sfn "$DATA/card.inp" "$DATA/current.inp"
 fi
 
