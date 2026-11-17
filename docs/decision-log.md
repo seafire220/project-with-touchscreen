@@ -438,3 +438,45 @@ rejected. Settled entries are not reopened without new evidence.
   behind the arms, or for alternative drawings (D-029).
 - Controls a character lacks are skipped, so a head-only character still
   nods and blushes: this is the partial mapping the owner asked for.
+
+## D-036 — No engine rewrite; Live2D-format playback later, behind a licence check
+
+- Date: 2026-11-17. Status: recommended (`17-engine-evaluation.md`); the
+  owner decides.
+- Ayagami (MIT/Apache-2.0) built, benchmarked and rendered Live2D's sample
+  models correctly; its maths costs about the same as Inox2D's. Godot would
+  add a full on-screen application framework at a cost in memory, start-up
+  time and custom builds. Neither makes characters made from a picture look
+  better: that depends on the rig, not the renderer.
+- Recommendation: keep the current stage and core; for the higher-end model,
+  add Live2D-format playback with Ayagami inside the stage once the format
+  and Cubism Editor licence questions are answered; Umamo and Ayatsuri2D are
+  optional desktop editors; Godot only for a later bigger-screen model.
+- Snapshot before this evaluation: branch `snapshot-2026-11-17` and a zip
+  given to the owner.
+
+## D-037 — Units are made from one ready-made image
+
+- Date: 2026-11-17. Status: implemented (`device/build-image.sh`,
+  `device/check-image.sh`); not yet booted on a Pi.
+- One image per software version, built from the official Raspberry Pi OS
+  Lite image, flashed to every unit. The image switches off what a
+  keyboard-less product must not have: Raspberry Pi OS's first-boot user
+  prompt, cloud-init (which can create a login with a default password) and
+  SSH. Nothing secret is shared between units.
+- Out-of-the-box gaps closed with it: the setup hotspot was not wired into
+  the service's start-up (bug); sound card detection; QR codes on the setup
+  screens; the phone's time zone; factory reset and a 12-second button
+  reset; an explanation screen when a character cannot be shown; a setup
+  screen present from the very first start, and services that never stop
+  restarting; return to the home Wi-Fi after a power cut.
+
+## D-038 — Buyers enter their own keys on the settings page
+
+- Date: 2026-11-17. Status: implemented.
+- Units ship with no keys. Each AI service section of the settings page
+  shows the key field for the chosen service, where to get a key, and a
+  "Save and test" button. Keys are write-only, stored only on the device and
+  never shown again. Typing keys on the device's own small touch screen was
+  rejected: the screen shows a QR code that opens the settings page on the
+  buyer's phone instead.
