@@ -69,6 +69,7 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 14. [Making a character from a picture](docs/14-making-characters.md)
 15. [Hardware test plan and troubleshooting](docs/15-hardware-test-plan.md)
 16. [Measurements](docs/16-measurements.md)
+17. [Evaluation: Ayagami, Umamo and Godot](docs/17-engine-evaluation.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner
