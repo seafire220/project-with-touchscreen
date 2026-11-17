@@ -31,10 +31,32 @@ def loudness(frame):
     return max(0.0, min(1.0, (db + 50.0) / 35.0))
 
 
+def detect_card(cards_text=None):
+    """The ALSA name of the sound card to use when none is configured.
+
+    Prefers a ReSpeaker, then any USB sound card, then nothing (the system
+    default). Reads /proc/asound/cards, whose lines look like
+    ` 2 [Lite           ]: USB-Audio - ReSpeaker Lite`.
+    """
+    import re
+    if cards_text is None:
+        try:
+            with open("/proc/asound/cards", encoding="utf-8") as f:
+                cards_text = f.read()
+        except OSError:
+            return ""
+    cards = re.findall(r"^\s*\d+\s+\[(\S+)\s*\]:\s*(.*)$", cards_text, re.M)
+    for want in ("respeaker", "usb-audio"):
+        for card_id, description in cards:
+            if want in description.lower():
+                return "plughw:CARD=%s" % card_id
+    return ""
+
+
 def _alsa_device(kind):
-    """COMPANION_ALSA_PLAYBACK / COMPANION_ALSA_CAPTURE name an ALSA device, e.g. plughw:CARD=Lite."""
+    """COMPANION_ALSA_PLAYBACK / COMPANION_ALSA_CAPTURE name an ALSA device; otherwise one is detected."""
     import os
-    value = os.environ.get("COMPANION_ALSA_" + kind, "")
+    value = os.environ.get("COMPANION_ALSA_" + kind, "") or detect_card()
     return ["-D", value] if value else []
 
 

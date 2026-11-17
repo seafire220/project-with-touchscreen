@@ -75,7 +75,7 @@ function listen() {
   if (source) source.close();
   source = new EventSource("/api/events");
   source.onmessage = (m) => onEvent(JSON.parse(m.data));
-  api("GET", "/api/status").then(setStatus).catch(() => {});
+  api("GET", "/api/status").then((s) => { setStatus(s); syncTimezone(s); }).catch(() => {});
 }
 
 function addLog(who, words, cls) {
@@ -94,13 +94,53 @@ function onEvent(e) {
   else if (e.kind === "error" || e.kind === "stage_error") addLog("Problem:", e.message, "error");
   else if (e.kind === "timer") addLog("Timer:", e.label + (e.did ? " " + e.did : " set"));
   else if (e.kind === "searching") addLog("Searching:", e.query);
-  else if (e.kind === "character") refreshCharacters();
+  else if (e.kind === "memory" || e.kind === "replied") api("GET", "/api/status").then(setStatus).catch(() => {});
+  else if (e.kind === "character") { refreshCharacters(); api("GET", "/api/status").then(setStatus).catch(() => {}); }
   else if (e.kind === "button") text($("btn-listen"), e.did === "listen on" ? "Stop listening" : "Start listening");
 }
 
 function setStatus(s) {
   text($("home-state"), s.state);
   text($("btn-listen"), s.listening ? "Stop listening" : "Start listening");
+  if (s.providers) showSteps(s);
+  if (s.timezone !== undefined) text($("tz-device"), s.timezone || "not set");
+}
+
+// What a new owner still has to do, with links to where it is done.
+function showSteps(s) {
+  const keyFor = { openai: "openai", anthropic: "anthropic", groq: "groq", openrouter: "openrouter",
+                   gemini: "openai_compatible", custom: "openai_compatible", elevenlabs: "elevenlabs" };
+  const hasKey = (p) => !p || p === "local" || !keyFor[p] || s.keys[keyFor[p]];
+  const steps = [
+    ["Choose a language model and add its key", s.providers.llm && hasKey(s.providers.llm), "services"],
+    ["Choose a voice and add its key", s.providers.tts && hasKey(s.providers.tts), "services"],
+    ["Add a character", s.characters > 0, "characters"],
+    ["Press the button on the device (or Start listening) and say hello", s.characters > 0 && s.providers.llm && s.providers.tts, "home"],
+  ];
+  const list = $("start-steps");
+  list.replaceChildren();
+  for (const [label, done, tab] of steps) {
+    const li = document.createElement("li");
+    if (done) li.className = "done";
+    const a = document.createElement("a"); text(a, label);
+    a.addEventListener("click", () => show(tab));
+    li.append(a);
+    list.append(li);
+  }
+  $("start").hidden = steps.every(([, done]) => done);
+}
+
+// On first setup, give the device this phone's time zone, so alarms ring at the right time.
+async function syncTimezone(s) {
+  const phone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  text($("tz-phone"), phone);
+  let asked = false;
+  try { asked = localStorage.getItem("tz-set") === "1"; } catch (e) {}
+  $("btn-tz").hidden = !s.can_set_timezone;
+  if (!asked && phone && s.can_set_timezone && s.timezone !== phone) {
+    try { const r = await api("POST", "/api/timezone", { zone: phone }); text($("tz-device"), r.timezone); } catch (e) {}
+    try { localStorage.setItem("tz-set", "1"); } catch (e) {}
+  }
 }
 
 $("btn-listen").addEventListener("click", () => api("POST", "/api/button").then(setStatus).catch((e) => addLog("Problem:", e.message, "error")));
@@ -312,6 +352,22 @@ $("wifi-form").addEventListener("submit", async (e) => {
   try { await api("POST", "/api/wifi", { ssid: $("wifi-ssid").value, password: $("wifi-password").value }); text($("wifi-msg"), "Joined."); }
   catch (err) { text($("wifi-msg"), err.message); }
   $("wifi-password").value = "";
+});
+
+$("btn-tz").addEventListener("click", async () => {
+  try { const r = await api("POST", "/api/timezone", { zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+        text($("tz-device"), r.timezone); text($("tz-msg"), "Set."); }
+  catch (err) { text($("tz-msg"), err.message); }
+});
+
+$("reset-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!confirm("Remove everything from this device? This cannot be undone.")) return;
+  try {
+    await api("POST", "/api/reset", { password: $("reset-password").value, confirm: $("reset-confirm").value.trim() });
+    text($("reset-msg"), "Resetting. The device restarts; this page will ask for a new password.");
+  } catch (err) { text($("reset-msg"), err.message); }
+  $("reset-password").value = "";
 });
 
 $("btn-logout").addEventListener("click", async () => { await api("POST", "/api/logout"); if (source) source.close(); showLogin(false); });

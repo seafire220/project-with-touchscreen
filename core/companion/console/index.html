@@ -30,6 +30,10 @@
   </section>
 
   <section id="home" class="tab" hidden>
+    <div id="start" class="start" hidden>
+      <h2>Getting started</h2>
+      <ol id="start-steps"></ol>
+    </div>
     <div class="row">
       <img id="home-preview" alt="" width="160" height="160">
       <div>
@@ -137,6 +141,9 @@
       <button type="submit">Join</button> <button type="button" id="btn-wifi-scan">Look again</button>
       <span id="wifi-msg"></span>
     </form>
+    <h3>Time zone</h3>
+    <p>Alarms use the device's time zone: <strong id="tz-device">…</strong>.
+       <button type="button" id="btn-tz">Use this phone's time zone (<span id="tz-phone"></span>)</button> <span id="tz-msg"></span></p>
     <h3>Change password</h3>
     <form id="pw-form">
       <label>Current <input type="password" id="pw-old" autocomplete="current-password"></label>
@@ -144,6 +151,14 @@
       <button type="submit">Change</button> <span id="pw-msg"></span>
     </form>
     <p><button id="btn-logout">Log out</button></p>
+    <h3>Reset</h3>
+    <p>Removes every character, memory, key, setting and saved Wi-Fi network, as when new. Before passing the device on, do this.
+       (To reset only a forgotten password and Wi-Fi, hold the listen button for 12 seconds.)</p>
+    <form id="reset-form">
+      <label>Password <input type="password" id="reset-password" autocomplete="current-password"></label>
+      <label>Type RESET to confirm <input id="reset-confirm" autocomplete="off"></label>
+      <button type="submit" class="danger">Reset everything</button> <span id="reset-msg"></span>
+    </form>
   </section>
 </main>
 </body>

@@ -24,21 +24,36 @@ EVENT = struct.Struct("llHHi")   # struct input_event on 64-bit Linux
 EV_KEY = 1
 
 
-async def read_button(path, code, press):
-    """Call `press` for each key-down of `code` on an input device; reopen it if it goes away."""
+LONG_PRESS = 12.0       # seconds held to reset setup (forgotten password or Wi-Fi)
+SHORT_PRESS = 2.5       # a press longer than this and shorter than LONG_PRESS does nothing
+
+
+async def read_button(path, code, press, long_press=None):
+    """Call `press` for each short press of `code` on an input device, and `long_press` after a
+    hold of LONG_PRESS seconds; reopen the device if it goes away."""
     log = logging.getLogger("companion.button")
     while True:
         try:
             with open(path, "rb", buffering=0) as f:
                 log.info("reading the button from %s (key %d)", path, code)
                 loop = asyncio.get_running_loop()
+                down = None
                 while True:
                     data = await loop.run_in_executor(None, f.read, EVENT.size)
                     if len(data) < EVENT.size:
                         break
-                    _, _, kind, key, value = EVENT.unpack(data)
-                    if kind == EV_KEY and key == code and value == 1:
-                        press()
+                    sec, usec, kind, key, value = EVENT.unpack(data)
+                    if kind != EV_KEY or key != code:
+                        continue
+                    when = sec + usec / 1e6          # the kernel's own time stamp of the press
+                    if value == 1:
+                        down = when
+                    elif value == 0 and down is not None:
+                        held, down = when - down, None
+                        if held >= LONG_PRESS and long_press is not None:
+                            asyncio.ensure_future(long_press())
+                        elif held < SHORT_PRESS:
+                            press()
         except OSError as error:
             log.warning("button device unavailable (%s); retrying", error)
         await asyncio.sleep(2.0)
@@ -68,11 +83,14 @@ def main():
         os.makedirs(args.data, exist_ok=True)
         speaker = Speaker(command=None) if args.no_audio else Speaker(command=player_command)
         microphone = None if args.no_audio else Microphone()
-        device = Device(args.data, stage_socket=args.stage_socket, speaker=speaker, microphone=microphone)
+        from .network import WiFi
+        import shutil
+        wifi = WiFi() if shutil.which("nmcli") else None
+        device = Device(args.data, stage_socket=args.stage_socket, speaker=speaker, microphone=microphone, wifi=wifi)
         device.start()
         button = find_button() if args.button == "auto" else ("" if args.button == "none" else args.button)
         if button:
-            asyncio.ensure_future(read_button(button, args.button_key, device.button))
+            asyncio.ensure_future(read_button(button, args.button_key, device.button, device.setup_reset))
         runner = web.AppRunner(make_app(device), access_log=None)
         await runner.setup()
         await web.TCPSite(runner, args.host, args.port).start()

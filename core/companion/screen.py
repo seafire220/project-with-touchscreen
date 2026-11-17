@@ -42,8 +42,23 @@ def _wrap(draw, text, font, width):
     return lines
 
 
-def card_png(title, lines, size=SIZE):
-    """A picture with a title and lines of text. Lines starting with '>' are shown large, as things to type."""
+def qr_code(text, box=8):
+    """A QR code picture for a phone camera, or None if the qrcode library is missing."""
+    try:
+        import qrcode
+    except ImportError:
+        return None
+    code = qrcode.QRCode(border=2, box_size=box, error_correction=qrcode.constants.ERROR_CORRECT_M)
+    code.add_data(text)
+    code.make(fit=True)
+    return code.make_image(fill_color="black", back_color="white").get_image().convert("RGBA")
+
+
+def card_png(title, lines, size=SIZE, qr=None):
+    """A picture with a title and lines of text. Lines starting with '>' are shown large, as things to type.
+
+    `qr`, if given, is shown as a QR code below the text.
+    """
     image = Image.new("RGBA", size, BACKGROUND + (255,))
     draw = ImageDraw.Draw(image)
     margin = 56
@@ -61,6 +76,11 @@ def card_png(title, lines, size=SIZE):
             draw.text((margin, y), line, font=font, fill=TEXT if not big else (255, 255, 255))
             y += 56 if big else 46
         y += 24
+    code = qr_code(qr) if qr else None
+    if code is not None:
+        side = min(size[0] - 2 * margin, max(160, size[1] - y - 60), 360)
+        code = code.resize((side, side), Image.NEAREST)
+        image.alpha_composite(code, ((size[0] - side) // 2, y + 10))
     out = io.BytesIO()
     image.save(out, "PNG")
     return out.getvalue()
@@ -90,22 +110,29 @@ def card_puppet(png, name="card"):
 
 
 def setup_card(address):
+    url = "http://%s" % address
     return card_png("Hello!", [
-        "To give me a character, open this address on a phone or computer on the same Wi-Fi:",
-        "> http://%s" % address,
-        "Then add a .char file made with the character maker.",
-    ])
+        "To set me up, scan this code or open this address on a phone or computer on the same Wi-Fi:",
+        "> %s" % url,
+        "There you add your AI service keys and a character.",
+    ], qr=url if address[:1].isdigit() else None)
+
+
+def wifi_qr(ssid, password):
+    """The standard Wi-Fi QR format: phone cameras offer to join the network."""
+    def esc(v):
+        return "".join("\\" + c if c in "\\;,:\"" else c for c in v)
+    return "WIFI:T:WPA;S:%s;P:%s;;" % (esc(ssid), esc(password))
 
 
 def hotspot_card(ssid, password):
     return card_png("Set up Wi-Fi", [
-        "On your phone, join this Wi-Fi network:",
+        "Scan this code with your phone to join my setup network, or join it by hand:",
         "> %s" % ssid,
         "Password:",
         "> %s" % password,
-        "Then open this address and choose your home Wi-Fi:",
-        "> http://10.42.0.1",
-    ])
+        "Then open http://10.42.0.1 and choose your home Wi-Fi.",
+    ], qr=wifi_qr(ssid, password))
 
 
 def message_card(title, text):

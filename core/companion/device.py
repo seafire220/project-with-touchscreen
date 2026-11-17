@@ -4,6 +4,9 @@ import datetime
 import json
 import logging
 import os
+import re
+import shutil
+import subprocess
 import time
 
 from . import providers
@@ -24,7 +27,7 @@ NOTES_EVERY = 6          # update the memory notes after this many turns
 
 class Device:
     def __init__(self, data_dir, stage_socket=None, speaker=None, microphone=None, stage=None,
-                 provider_factory=None, wifi=None):
+                 provider_factory=None, wifi=None, restart=None, run=None):
         self.data_dir = data_dir
         self.store = Store(os.path.join(data_dir, "config"))
         self.characters = Characters(os.path.join(data_dir, "characters"))
@@ -45,6 +48,11 @@ class Device:
         self.log = []
         self.wifi = wifi
         self.card = os.path.join(data_dir, "card.inp")
+        # How to restart the service after a reset (systemd starts it again), and
+        # how to run system commands; both replaceable in tests.
+        self.restart = restart or (lambda: os._exit(0))
+        self.run = run or _run_command
+        self.stage_seen = time.time()
 
     # ----- events for the console
     def emit(self, kind, data=None):
@@ -58,8 +66,89 @@ class Device:
                 queue.put_nowait(event)
 
     def _stage_event(self, event):
+        self.stage_seen = time.time()
         if event.get("event") in ("error", "fatal"):
             self.emit("stage_error", {"message": event.get("message", "")})
+
+    async def stage_watch(self, patience=25.0):
+        """If the character cannot be shown (the stage keeps failing to start), show a card instead.
+
+        A puppet the stage cannot load makes it exit before it can report
+        why, so the sign is that it never connects.
+        """
+        while True:
+            await asyncio.sleep(5.0)
+            if getattr(self.stage, "writer", None) is not None:
+                self.stage_seen = time.time()
+                continue
+            showing = os.path.realpath(self.current_puppet)
+            if time.time() - self.stage_seen > patience and showing != os.path.realpath(self.card):
+                self.emit("error", {"message": "the character could not be shown; showing a message instead"})
+                self.show_card(screen.message_card(
+                    "Character problem", "This character could not be shown. Choose another one, or add it "
+                    "again, on the settings page."))
+                self.stage_seen = time.time()
+
+    # ----- time zone, resets
+    def timezone(self):
+        try:
+            return os.path.relpath(os.path.realpath("/etc/localtime"), "/usr/share/zoneinfo")
+        except ValueError:
+            return ""
+
+    async def set_timezone(self, zone):
+        if not re.fullmatch(r"[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+){0,2}", zone or "") or \
+                not os.path.isfile(os.path.join("/usr/share/zoneinfo", zone)):
+            raise ValueError("unknown time zone: %s" % zone)
+        await self.run("timedatectl", "set-timezone", zone)
+        self.emit("device", {"timezone": zone})
+
+    async def forget_wifi(self):
+        """Forget every saved Wi-Fi network (not the setup hotspot)."""
+        if self.wifi is None:
+            return
+        try:
+            out = await self.run("nmcli", "-t", "-f", "NAME,TYPE", "connection", "show")
+        except Exception:
+            return
+        from .network import HOTSPOT_NAME, split_terse
+        for line in out.splitlines():
+            name, kind = (split_terse(line) + ["", ""])[:2]
+            if kind.endswith("wireless") and name != HOTSPOT_NAME:
+                try:
+                    await self.run("nmcli", "connection", "delete", name)
+                except Exception:
+                    pass
+
+    async def setup_reset(self):
+        """Long press of the button: forget the settings-page password and Wi-Fi, keep characters and keys."""
+        self.interrupt()
+        if os.path.exists(self.store.password_path):
+            os.remove(self.store.password_path)
+        await self.forget_wifi()
+        self.emit("device", {"did": "setup reset"})
+        self.show_card(screen.message_card("Setup reset", "The settings-page password and Wi-Fi were "
+                                           "forgotten. Starting again…"))
+        await asyncio.sleep(2.0)
+        self.restart()
+
+    async def factory_reset(self):
+        """Remove everything the owner added: characters, memories, keys, settings, timers, Wi-Fi."""
+        self.interrupt()
+        await self.forget_wifi()
+        keep = {"models"}
+        for name in os.listdir(self.data_dir):
+            if name in keep:
+                continue
+            path = os.path.join(self.data_dir, name)
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path, ignore_errors=True)
+            else:
+                os.remove(path)
+        self.emit("device", {"did": "factory reset"})
+        self.show_card(screen.message_card("Reset", "Everything was removed. Starting again…"))
+        await asyncio.sleep(2.0)
+        self.restart()
 
     # ----- providers, rebuilt from the settings for each conversation
     def build(self, which, **extra):
@@ -345,6 +434,9 @@ class Device:
             "timers": [{"label": k, "due": round(v[0]), "kind": v[2]} for k, v in self.timers.items()],
             "uptime": round(time.time() - self.started),
             "stage_connected": getattr(self.stage, "writer", True) is not None,
+            "timezone": self.timezone(),
+            # timedatectl needs systemd running (true on the device, not in every test machine)
+            "can_set_timezone": shutil.which("timedatectl") is not None and os.path.isdir("/run/systemd/system"),
         }
 
     def start(self):
@@ -362,6 +454,8 @@ class Device:
             asyncio.ensure_future(self.listen_loop())
         if self.wifi is not None:
             asyncio.ensure_future(self.network_watch())
+        if isinstance(self.stage, StageLink):
+            asyncio.ensure_future(self.stage_watch())
 
     # ----- Wi-Fi
     async def network_watch(self, wait=40.0):
@@ -409,3 +503,19 @@ class Device:
         await self._connected()
         if self.active_id():
             self.show_character()
+
+
+async def _run_command(*args, timeout=30):
+    """Run a system command; return its output or raise RuntimeError with its message."""
+    try:
+        proc = await asyncio.create_subprocess_exec(*args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except FileNotFoundError:
+        raise RuntimeError("%s is not installed on this machine" % args[0])
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        raise RuntimeError("%s took too long" % args[0])
+    if proc.returncode != 0:
+        raise RuntimeError(err.decode("utf-8", "replace").strip() or "%s failed" % args[0])
+    return out.decode("utf-8", "replace")

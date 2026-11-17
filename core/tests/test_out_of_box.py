@@ -1,0 +1,142 @@
+"""Tests for out-of-the-box behaviour: sound card detection, time zone, resets, the long press, QR codes."""
+import asyncio
+import os
+import struct
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(__file__))
+
+from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
+
+from companion import package, screen  # noqa: E402
+from companion.__main__ import EVENT, LONG_PRESS, read_button  # noqa: E402
+from companion.audio import Speaker, detect_card  # noqa: E402
+from companion.device import Device  # noqa: E402
+from companion.network import WiFi  # noqa: E402
+from companion.web import make_app  # noqa: E402
+from fakes import FakeStage  # noqa: E402
+from test_package import good_files, manifest  # noqa: E402
+
+CARDS = """ 0 [vc4hdmi0       ]: vc4-hdmi - vc4-hdmi-0
+                      vc4-hdmi-0
+ 2 [Lite           ]: USB-Audio - ReSpeaker Lite
+                      Seeed Studio ReSpeaker Lite at usb-xhci-hcd.0-1, high speed
+"""
+
+
+class Commands:
+    """Stand-in for system commands (timedatectl, nmcli)."""
+
+    def __init__(self):
+        self.calls = []
+
+    async def __call__(self, *args, timeout=30):
+        self.calls.append(args)
+        if args[:2] == ("nmcli", "-t") and "connection" in args:
+            return "Home Wi-Fi:802-11-wireless\ncompanion-setup:802-11-wireless\nWired connection 1:802-3-ethernet\n"
+        return ""
+
+
+def device_in(folder, commands, restarted):
+    return Device(folder, speaker=Speaker(command=None, realtime=False), stage=FakeStage(),
+                  wifi=WiFi(run=commands), run=commands, restart=lambda: restarted.append(1))
+
+
+class OutOfBoxTest(unittest.IsolatedAsyncioTestCase):
+    def test_the_respeaker_is_found_without_configuration(self):
+        self.assertEqual(detect_card(CARDS), "plughw:CARD=Lite")
+        self.assertEqual(detect_card(" 1 [Device         ]: USB-Audio - USB Audio Device\n"), "plughw:CARD=Device")
+        self.assertEqual(detect_card(" 0 [vc4hdmi0       ]: vc4-hdmi - vc4-hdmi-0\n"), "")
+
+    async def test_the_time_zone_is_checked_then_set(self):
+        with tempfile.TemporaryDirectory() as d:
+            cmds, restarted = Commands(), []
+            device = device_in(d, cmds, restarted)
+            for bad in ("../../etc/passwd", "Not/A_Zone", "", "Europe/London; rm -rf /"):
+                with self.assertRaises(ValueError):
+                    await device.set_timezone(bad)
+            if os.path.isfile("/usr/share/zoneinfo/Australia/Brisbane"):
+                await device.set_timezone("Australia/Brisbane")
+                self.assertIn(("timedatectl", "set-timezone", "Australia/Brisbane"), cmds.calls)
+
+    async def test_a_factory_reset_removes_everything_but_the_speech_model(self):
+        with tempfile.TemporaryDirectory() as d:
+            cmds, restarted = Commands(), []
+            device = device_in(d, cmds, restarted)
+            device.store.set_password("a good password")
+            device.store.set_secret("openai", "sk-test-1234567890")
+            device.characters.install(package.build(good_files(), manifest()))
+            device.memory("aria").set_notes("- likes tea\n")
+            os.makedirs(os.path.join(d, "models", "stt"))
+            await device.factory_reset()
+            self.assertEqual(sorted(os.listdir(d)), ["card.inp", "current.inp", "models"])
+            self.assertEqual(restarted, [1])
+            self.assertIn(("nmcli", "connection", "delete", "Home Wi-Fi"), cmds.calls)
+            self.assertNotIn(("nmcli", "connection", "delete", "companion-setup"), cmds.calls)
+            self.assertNotIn(("nmcli", "connection", "delete", "Wired connection 1"), cmds.calls)
+
+    async def test_a_setup_reset_forgets_the_password_and_wifi_but_keeps_characters(self):
+        with tempfile.TemporaryDirectory() as d:
+            cmds, restarted = Commands(), []
+            device = device_in(d, cmds, restarted)
+            device.store.set_password("a good password")
+            device.characters.install(package.build(good_files(), manifest()))
+            await device.setup_reset()
+            self.assertFalse(device.store.has_password())
+            self.assertEqual(device.characters.ids(), ["aria"])
+            self.assertIn(("nmcli", "connection", "delete", "Home Wi-Fi"), cmds.calls)
+            self.assertEqual(restarted, [1])
+
+    async def test_the_reset_page_needs_the_password_and_confirmation(self):
+        with tempfile.TemporaryDirectory() as d:
+            cmds, restarted = Commands(), []
+            device = device_in(d, cmds, restarted)
+            client = TestClient(TestServer(make_app(device)))
+            await client.start_server()
+            try:
+                h = {"X-Companion": "1"}
+                await client.post("/api/setup", json={"password": "a good password"}, headers=h)
+                r = await client.post("/api/reset", json={"password": "wrong password", "confirm": "RESET"}, headers=h)
+                self.assertEqual(r.status, 401)
+                r = await client.post("/api/reset", json={"password": "a good password", "confirm": "yes"}, headers=h)
+                self.assertEqual(r.status, 400)
+                r = await client.post("/api/reset", json={"password": "a good password", "confirm": "RESET"}, headers=h)
+                self.assertEqual(r.status, 200)
+                await asyncio.sleep(2.5)
+                self.assertEqual(restarted, [1])
+            finally:
+                await client.close()
+
+    async def test_short_and_long_presses_are_told_apart(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "event")
+            events = []
+            for t, value in ((100.0, 1), (100.3, 0), (200.0, 1), (205.0, 0), (300.0, 1), (300.0 + LONG_PRESS + 1, 0)):
+                events.append(EVENT.pack(int(t), int((t % 1) * 1e6), 1, 148, value))
+                events.append(EVENT.pack(int(t), 0, 0, 0, 0))            # a sync event, ignored
+            with open(path, "wb") as f:
+                f.write(b"".join(events))
+            short, long_ = [], []
+
+            async def on_long():
+                long_.append(1)
+
+            task = asyncio.ensure_future(read_button(path, 148, lambda: short.append(1), on_long))
+            await asyncio.sleep(0.5)
+            task.cancel()
+            self.assertEqual(short, [1], "a quick press is a press; a 5-second hold is ignored")
+            self.assertEqual(long_, [1], "a hold of 12 seconds or more resets setup")
+
+    def test_setup_cards_carry_qr_codes(self):
+        self.assertEqual(screen.wifi_qr("My;Net", "pa:ss"), r"WIFI:T:WPA;S:My\;Net;P:pa\:ss;;")
+        if screen.qr_code("http://192.168.1.50") is not None:
+            plain = screen.card_png("x", ["y"])
+            with_code = screen.card_png("x", ["y"], qr="http://192.168.1.50")
+            self.assertNotEqual(plain, with_code)
+
+
+if __name__ == "__main__":
+    unittest.main()

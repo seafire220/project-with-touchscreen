@@ -322,6 +322,24 @@ class Console:
             raise web.HTTPBadRequest(text=str(error))
         return web.json_response({"ok": True})
 
+    # ----- device
+    async def set_timezone(self, request):
+        body = await request.json()
+        try:
+            await self.device.set_timezone(str(body.get("zone", "")))
+        except (ValueError, RuntimeError) as error:
+            raise web.HTTPBadRequest(text=str(error))
+        return web.json_response({"timezone": self.device.timezone()})
+
+    async def reset(self, request):
+        body = await request.json()
+        if not self.device.store.check_password(str(body.get("password", ""))):
+            raise web.HTTPUnauthorized(text="the password is wrong")
+        if body.get("confirm") != "RESET":
+            raise web.HTTPBadRequest(text="type RESET to confirm")
+        asyncio.ensure_future(self.device.factory_reset())
+        return web.json_response({"ok": True})
+
     async def index(self, request):
         return web.FileResponse(os.path.join(STATIC, "index.html"))
 
@@ -359,6 +377,8 @@ def make_app(device):
     r.add_post("/api/say", console.say)
     r.add_post("/api/button", console.press)
     r.add_post("/api/interrupt", console.interrupt)
+    r.add_post("/api/timezone", console.set_timezone)
+    r.add_post("/api/reset", console.reset)
     r.add_get("/api/wifi", console.wifi_status)
     r.add_post("/api/wifi", console.wifi_join)
     if os.path.isdir(STATIC):

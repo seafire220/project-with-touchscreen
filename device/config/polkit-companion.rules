@@ -1,7 +1,9 @@
-// Let the device's own service manage Wi-Fi (scan, join, open the setup hotspot).
+// Let the device's own service manage Wi-Fi (scan, join, open the setup
+// hotspot) and set the time zone the owner's phone reports.
 polkit.addRule(function(action, subject) {
     if (subject.user == "companion" &&
-        action.id.indexOf("org.freedesktop.NetworkManager.") == 0) {
+        (action.id.indexOf("org.freedesktop.NetworkManager.") == 0 ||
+         action.id == "org.freedesktop.timedate1.set-timezone")) {
         return polkit.Result.YES;
     }
 });

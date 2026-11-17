@@ -29,3 +29,7 @@ fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 14px 0; p
 .error { color: var(--bad); }
 .key { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
 .key span { min-width: 130px; }
+.start { background: var(--card); border: 1px solid var(--accent); border-radius: 12px; padding: 4px 16px 10px; margin-bottom: 16px; }
+.start li { margin: 6px 0; }
+.start li.done { color: var(--muted); text-decoration: line-through; }
+.start a { color: var(--accent); cursor: pointer; text-decoration: underline; }
