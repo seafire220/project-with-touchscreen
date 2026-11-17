@@ -18,7 +18,7 @@ rigged 2D puppet. Standard is being built first.
 | 4. Hardware selection and BOM | Prototype board chosen: Raspberry Pi 4, 1 GB. Nothing bought yet |
 | 5. Architecture | Revision 2 |
 | 6. Software | Written and tested off the device: the stage (character drawing), the core service (conversation, providers, memory, characters, timers and alarms, web search, emotions and gestures, Wi-Fi setup), the web settings page, and character making from one picture |
-| 7. Install, boot and appliance behaviour | Installer, services, setup screens and update/rollback written; tested in a Debian 13 environment, not on a Pi |
+| 7. Install, boot and appliance behaviour | Ready-to-flash device image builder, installer, services, setup screens with QR codes, Wi-Fi hotspot setup, resets, update/rollback. Built from the official Raspberry Pi OS image and checked under emulation; not yet on a Pi |
 | 8. Guides | Build and install, making characters, hardware test plan |
 
 **Tested so far:** 25 stage tests, 48 character-making tests, 54 core tests (one with the real on-device speech model),
@@ -48,8 +48,9 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
   plain background (`prepare.py`), cuts the picture into layers and draws
   the closed eyes and open mouth it lacks (`partsplit.py`), rigs it with
   image2live2d, and refines head movement and the mouth (`refine.py`).
-- [`device/`](device/): installer, services and system settings for
-  Raspberry Pi OS Lite.
+- [`device/`](device/): `build-image.sh` makes a ready-to-flash card image
+  from the official Raspberry Pi OS Lite image; `check-image.sh` checks one;
+  `install.sh` sets up a Pi by hand; services and system settings.
 
 ## Documents
 
@@ -70,6 +71,7 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 15. [Hardware test plan and troubleshooting](docs/15-hardware-test-plan.md)
 16. [Measurements](docs/16-measurements.md)
 17. [Evaluation: Ayagami, Umamo and Godot](docs/17-engine-evaluation.md)
+18. [How the device works out of the box](docs/18-out-of-the-box.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner

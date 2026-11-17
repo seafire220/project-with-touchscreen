@@ -20,15 +20,24 @@ STAGE = os.path.join(os.path.dirname(__file__), "..", "..", "stage", "target", "
 
 
 class FakeNmcli:
-    def __init__(self, connected=False, fail_join=False):
+    def __init__(self, connected=False, fail_join=False, saved=(), comes_back_after=None):
         self.connected = connected
         self.fail_join = fail_join
+        self.saved = list(saved)
+        self.comes_back_after = comes_back_after      # hotspot closings before the home network returns
+        self.closings = 0
         self.calls = []
 
     async def __call__(self, *args, timeout=40):
         self.calls.append(args)
         if args[1:4] == ("-t", "-f", "STATE"):
             return "connected\n" if self.connected else "disconnected\n"
+        if args[1:4] == ("-t", "-f", "NAME,TYPE"):
+            return "".join("%s:802-11-wireless\n" % n for n in self.saved) + "companion-setup:802-11-wireless\n"
+        if args[1:3] == ("connection", "down"):
+            self.closings += 1
+            if self.comes_back_after is not None and self.closings >= self.comes_back_after:
+                self.connected = True
         if "IP4.ADDRESS" in args:
             return "IP4.ADDRESS[1]:192.168.1.50/24\n" if self.connected else ""
         if "list" in args:
@@ -71,6 +80,33 @@ class WiFiTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(nm.connected)
             self.assertIsNone(device.wifi.hotspot, "the hotspot closes once joined")
             self.assertTrue(any(e["kind"] == "network" and e.get("address") == "192.168.1.50" for e in device.log))
+
+    async def test_after_a_power_cut_the_device_goes_back_to_the_home_network(self):
+        with tempfile.TemporaryDirectory() as d:
+            nm = FakeNmcli(connected=False, saved=["Home"], comes_back_after=2)
+            device = Device(d, speaker=Speaker(command=None), stage=FakeStage(), wifi=WiFi(run=nm))
+            await asyncio.wait_for(device.network_watch(wait=0.05, retry=0.05, busy=0.0), 10)
+            self.assertTrue(nm.connected)
+            self.assertEqual(nm.closings, 2, "the hotspot was closed to retry the home network until it came back")
+            self.assertTrue(any(e["kind"] == "network" and e.get("connected") for e in device.log))
+
+    async def test_a_new_device_waits_in_its_hotspot(self):
+        with tempfile.TemporaryDirectory() as d:
+            nm = FakeNmcli(connected=False, saved=[])
+            device = Device(d, speaker=Speaker(command=None), stage=FakeStage(), wifi=WiFi(run=nm))
+            await asyncio.wait_for(device.network_watch(wait=0.05, retry=0.05), 5)
+            self.assertIsNotNone(device.wifi.hotspot)
+            self.assertEqual(nm.closings, 0)
+
+    async def test_the_hotspot_stays_open_while_someone_uses_the_settings_page(self):
+        with tempfile.TemporaryDirectory() as d:
+            nm = FakeNmcli(connected=False, saved=["Home"], comes_back_after=1)
+            device = Device(d, speaker=Speaker(command=None), stage=FakeStage(), wifi=WiFi(run=nm))
+            device.last_use = 10 ** 12            # in use "now" for the length of the test
+            task = asyncio.ensure_future(device.network_watch(wait=0.05, retry=0.05, busy=60.0))
+            await asyncio.sleep(0.5)
+            self.assertEqual(nm.closings, 0)
+            task.cancel()
 
     async def test_a_failed_join_reopens_the_hotspot(self):
         with tempfile.TemporaryDirectory() as d:

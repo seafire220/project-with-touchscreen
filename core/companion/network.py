@@ -91,6 +91,16 @@ class WiFi:
         await self.stop_hotspot()
         await self.run(*args, timeout=60)
 
+    async def saved_networks(self):
+        """Names of the Wi-Fi networks the device has joined before (not its own hotspot)."""
+        out = await self.run("nmcli", "-t", "-f", "NAME,TYPE", "connection", "show")
+        names = []
+        for line in out.splitlines():
+            name, kind = (split_terse(line) + ["", ""])[:2]
+            if kind.endswith("wireless") and name != HOTSPOT_NAME:
+                names.append(name)
+        return names
+
     async def start_hotspot(self, suffix):
         password = "".join(secrets.choice("23456789") for _ in range(8))
         ssid = "Companion-%s" % suffix

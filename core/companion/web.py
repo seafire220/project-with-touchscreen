@@ -47,6 +47,7 @@ class Console:
         if not local_address(request.remote):
             raise web.HTTPForbidden(text="this device only answers on its home network")
         path = request.path
+        self.device.last_use = time.time()
         if path.startswith("/api/"):
             if request.method not in ("GET", "HEAD") and request.headers.get("X-Companion") != "1":
                 raise web.HTTPForbidden(text="missing X-Companion header")

@@ -15,6 +15,7 @@ they change a decision.
 | 4 | Console | Open the address on a phone and a laptop | Password set; all tabs load |
 | 5 | Listen button | Press it with no character speaking | Console shows "listen on"; second press "listen off" |
 | 6 | Power button | Press while running; press again | Clean shutdown (no SD errors next boot); starts again |
+| 6a | Setup reset | Hold the listen button for 12 s | Setup screens return; characters kept |
 | 7 | Sound out | AI services → Voice → Test | Clear voice, no crackle at 80% volume |
 | 8 | Sound in | Talk with listening on; watch "What is happening" | Your words appear correctly in a quiet room |
 
@@ -55,9 +56,10 @@ they change a decision.
 |---|---|---|
 | Black screen after boot | `journalctl -u companion-stage -b` | Wrong display overlay line; or the stage program is missing from `/opt/companion/bin` |
 | Screen shows a console login | `systemctl is-enabled companion-stage` | The installer did not finish; run it again |
-| No sound | `aplay -l`; `/etc/default/companion` | The sound card name in `/etc/default/companion` is wrong |
+| No sound | `aplay -l`; `/etc/default/companion` | The device picked the wrong sound card (it prefers a ReSpeaker, then any USB card); name the right one in `/etc/default/companion` |
 | It never hears you | Console "What is happening" | Listening is off (press the button); wrong capture device; the on-device speech model failed to download (choose a cloud service) |
 | "refused the key" | AI services → Test | The key is wrong, expired, or has no credit |
 | Character shows as a still picture | Console; stage log | The puppet uses a feature the renderer lacks; the log names it |
 | Settings page will not load | Phone on the same Wi-Fi? | The page only answers on the home network; check the address on screen |
-| Forgot the settings page password | — | Delete `/var/lib/companion/config/console-password` over SSH and restart `companion-core`; the next visit asks for a new one |
+| Forgot the settings page password | — | Hold the listen button for 12 seconds: the password and saved Wi-Fi are forgotten (characters, memories and keys stay) and the setup screens return |
+| Passing the device on | Settings page → Device → Reset everything | Removes all characters, memories, keys, settings and saved Wi-Fi |

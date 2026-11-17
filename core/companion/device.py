@@ -53,6 +53,7 @@ class Device:
         self.restart = restart or (lambda: os._exit(0))
         self.run = run or _run_command
         self.stage_seen = time.time()
+        self.last_use = 0.0                 # when the settings page was last used
 
     # ----- events for the console
     def emit(self, kind, data=None):
@@ -458,26 +459,46 @@ class Device:
             asyncio.ensure_future(self.stage_watch())
 
     # ----- Wi-Fi
-    async def network_watch(self, wait=40.0):
-        """Open a setup hotspot if the device has no network a while after starting."""
-        deadline = time.time() + wait
-        while time.time() < deadline:
-            try:
-                if await self.wifi.connected():
-                    await self._connected()
+    async def network_watch(self, wait=40.0, retry=180.0, busy=120.0):
+        """Keep the device on a network, opening a setup hotspot when it has none.
+
+        With no network a while after starting, the device opens its setup
+        hotspot. If it has joined a home network before (the usual case after
+        a power cut, when the router starts more slowly than the device), it
+        closes the hotspot every few minutes to try that network again, unless
+        someone is using the settings page through the hotspot right now.
+        """
+        while True:
+            deadline = time.time() + wait
+            while time.time() < deadline:
+                try:
+                    if await self.wifi.connected():
+                        await self._connected()
+                        return
+                except NetworkError as error:
+                    self.emit("error", {"message": "network: %s" % error})
                     return
+                await asyncio.sleep(2.0)
+            try:
+                saved = await self.wifi.saved_networks()
+                if self.wifi.hotspot is None:
+                    suffix = (await self._serial())[-4:].upper() or "0000"
+                    ssid, password = await self.wifi.start_hotspot(suffix)
+                    self.emit("network", {"hotspot": ssid})
+                    self.show_card(screen.hotspot_card(ssid, password))
             except NetworkError as error:
-                self.emit("error", {"message": "network: %s" % error})
+                self.emit("error", {"message": "could not open the setup hotspot: %s" % error})
                 return
-            await asyncio.sleep(2.0)
-        try:
-            suffix = (await self._serial())[-4:].upper() or "0000"
-            ssid, password = await self.wifi.start_hotspot(suffix)
-        except NetworkError as error:
-            self.emit("error", {"message": "could not open the setup hotspot: %s" % error})
-            return
-        self.emit("network", {"hotspot": ssid})
-        self.show_card(screen.hotspot_card(ssid, password))
+            if not saved:
+                return                      # a new device: wait in the hotspot for the owner
+            while True:
+                await asyncio.sleep(retry)
+                if self.wifi.hotspot is None:
+                    return                  # the owner joined a network meanwhile
+                if time.time() - self.last_use > busy:
+                    break
+            await self.wifi.stop_hotspot()  # let NetworkManager try the saved networks again
+            self.emit("network", {"retrying": saved})
 
     async def _connected(self):
         address = await self.wifi.address()
