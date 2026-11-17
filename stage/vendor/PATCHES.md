@@ -52,3 +52,17 @@ mouth interior, depend on it.
    puppet; Inox2D did not, so every half-transparent edge (anti-aliased
    outlines, soft blush, a character's cut-out edge) was drawn too bright,
    showing as pale halos. Textures are now premultiplied on load.
+
+# Ayagami (Live2D-format player core)
+
+`ayagami/` is the core crate of https://github.com/AyagamiDev/ayagami at
+commit `0d1d7aa3efe57b1b363b72e672e353c52a9c15d6` (2026-09-14), dual licensed
+MIT or Apache-2.0 (`LICENSE-MIT`, `LICENSE-APACHE`, `COPYRIGHT` kept beside
+it). It reads `.moc3` files, evaluates parameters, deformers and physics, and
+gives each art mesh's vertices, opacity, colours and draw order. The stage
+draws them itself with OpenGL ES 3 (`src/live2d.rs`), so Ayagami's own wgpu
+renderer and demo are not included.
+
+1. `Cargo.toml` — builds only as an ordinary library: the `cdylib` crate type,
+   the `load-model` example program (`src/main.rs`) and its `env_logger`
+   dependency are removed. No source file is changed.

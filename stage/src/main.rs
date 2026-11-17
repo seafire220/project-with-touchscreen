@@ -1,13 +1,14 @@
 //! The stage: draws and animates the character on the device screen.
 //!
-//! It loads an Inochi2D puppet, keeps it alive with breathing, blinking and
-//! small movements, and moves its mouth and changes its manner according to
-//! commands from the core service. It holds no API keys and makes no network
-//! connections.
+//! It loads a character (an Inochi2D puppet, or a Live2D-format model played
+//! with Ayagami), keeps it alive with breathing, blinking and small movements,
+//! and moves its mouth and changes its manner according to commands from the
+//! core service. It holds no API keys and makes no network connections.
 
 mod behaviour;
 mod capture;
 mod control;
+mod live2d;
 mod mapping;
 mod overrides;
 mod puppet_info;
@@ -23,6 +24,7 @@ use inox2d::formats::inp::parse_inp;
 use inox2d::model::Model;
 use inox2d::render::InoxRendererExt;
 use inox2d_opengl::OpenglRenderer;
+use live2d::{Live2dPuppet, Live2dRenderer};
 use serde_json::json;
 use winit::window::{Fullscreen, WindowBuilder};
 
@@ -34,7 +36,11 @@ use puppet_info::PuppetInfo;
 use window::{App, AppFrame, GlPreference};
 
 const USAGE: &str = "\
-Usage: stage PUPPET.inp [options]
+Usage: stage CHARACTER [options]
+
+  CHARACTER is an Inochi2D puppet (.inp or .inx) or a Live2D-format model
+  (.model3.json, with the files it names beside it). The kind is decided by
+  the file's contents, so a link with any name works.
 
   --size WxH            window size when not full screen (default 720x1280)
   --fullscreen          take the whole screen
@@ -45,7 +51,8 @@ Usage: stage PUPPET.inp [options]
   --background RRGGBB   background colour (default 101014)
   --seed N              seed for blink timing (default 1)
   --still               no idle movement; only commanded mouth, blink and look
-  --view X0,Y0,X1,Y1    show this box of the puppet (puppet units) instead of all of it
+  --view X0,Y0,X1,Y1    show this box instead of the whole character (puppet units;
+                        canvas pixels for Live2D-format models)
 
 Testing:
   --script FILE         timed commands, one JSON object per line with \"at\"
@@ -53,6 +60,7 @@ Testing:
   --capture-dir DIR     where captured frames are written
   --capture-at T,T,...  times at which to save a frame
   --exit-after SECONDS  stop after this much stage time
+  --no-physics          hair and clothes do not swing (Live2D-format models only)
 ";
 
 struct Options {
@@ -67,6 +75,7 @@ struct Options {
 	background: [f32; 3],
 	seed: u64,
 	still: bool,
+	physics: bool,
 	view: Option<[f32; 4]>,
 	script: Option<PathBuf>,
 	fixed_dt: Option<f32>,
@@ -88,6 +97,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 		background: [0x10 as f32 / 255.0, 0x10 as f32 / 255.0, 0x14 as f32 / 255.0],
 		seed: 1,
 		still: false,
+		physics: true,
 		view: None,
 		script: None,
 		fixed_dt: None,
@@ -128,6 +138,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 			}
 			"--seed" => o.seed = value("--seed")?.parse().map_err(|_| "--seed is not a number")?,
 			"--still" => o.still = true,
+			"--no-physics" => o.physics = false,
 			"--view" => {
 				let v: Vec<f32> = value("--view")?
 					.split(',')
@@ -171,9 +182,29 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 	Ok(o)
 }
 
+/// The character, in whichever format it came.
+enum Puppet {
+	Inox(Model),
+	Live2d(Box<Live2dPuppet>),
+}
+
+impl Puppet {
+	fn format(&self) -> &'static str {
+		match self {
+			Puppet::Inox(_) => "inochi2d",
+			Puppet::Live2d(_) => "live2d",
+		}
+	}
+}
+
+enum Renderer {
+	Inox(OpenglRenderer),
+	Live2d(Box<Live2dRenderer>),
+}
+
 struct StageApp {
 	opts: Options,
-	model: Model,
+	puppet: Puppet,
 	info: PuppetInfo,
 	mapper: Mapper,
 	behaviour: Behaviour,
@@ -181,7 +212,7 @@ struct StageApp {
 	commands: Receiver<Command>,
 	script: Option<Script>,
 	events: Events,
-	on_window: Option<(OpenglRenderer, glow::Context)>,
+	on_window: Option<(Renderer, glow::Context)>,
 	width: u32,
 	height: u32,
 	t: f32,
@@ -199,13 +230,18 @@ impl StageApp {
 			return;
 		};
 		let (w, h) = (self.width.max(1) as f32, self.height.max(1) as f32);
-		match self.opts.view.or(self.info.bounds) {
+		let (scale, centre) = match self.opts.view.or(self.info.bounds) {
 			Some([x0, y0, x1, y1]) if x1 > x0 && y1 > y0 => {
-				let scale = 0.94 * (w / (x1 - x0)).min(h / (y1 - y0));
-				renderer.camera.scale = Vec2::splat(scale);
-				renderer.camera.position = Vec2::new(-(x0 + x1) * 0.5, -(y0 + y1) * 0.5);
+				(0.94 * (w / (x1 - x0)).min(h / (y1 - y0)), Vec2::new((x0 + x1) * 0.5, (y0 + y1) * 0.5))
 			}
-			_ => renderer.camera.scale = Vec2::splat(0.15),
+			_ => (0.15, Vec2::ZERO),
+		};
+		match renderer {
+			Renderer::Inox(r) => {
+				r.camera.scale = Vec2::splat(scale);
+				r.camera.position = -centre;
+			}
+			Renderer::Live2d(r) => r.camera = live2d::Camera { centre, scale },
 		}
 	}
 
@@ -237,9 +273,19 @@ impl App for StageApp {
 		let version = aux.version().clone();
 		let [r, g, b] = self.opts.background;
 		unsafe { aux.clear_color(r, g, b, 1.0) };
-		match OpenglRenderer::new(gl, &self.model) {
+		let made = match &mut self.puppet {
+			Puppet::Inox(model) => OpenglRenderer::new(gl, model).map(Renderer::Inox).map_err(|e| e.to_string()),
+			Puppet::Live2d(puppet) => Live2dRenderer::new(gl, puppet).map(|mut r| {
+				r.background = self.opts.background;
+				Renderer::Live2d(Box::new(r))
+			}),
+		};
+		match made {
 			Ok(mut renderer) => {
-				renderer.resize(self.opts.width, self.opts.height);
+				match &mut renderer {
+					Renderer::Inox(r) => r.resize(self.opts.width, self.opts.height),
+					Renderer::Live2d(r) => r.resize(self.opts.width, self.opts.height),
+				}
 				self.width = self.opts.width;
 				self.height = self.opts.height;
 				self.on_window = Some((renderer, aux));
@@ -253,12 +299,19 @@ impl App for StageApp {
 				self.events.emit(json!({
 					"event": "ready",
 					"puppet": self.info.name,
+					"format": self.puppet.format(),
 					"parts": self.info.part_count,
 					"params": self.info.params.len(),
 					"param_names": self.info.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
 					"controls": controls,
 					"opengl": format!("{}{}.{}", if version.is_embedded { "ES " } else { "" }, version.major, version.minor),
 				}));
+				if let Puppet::Live2d(puppet) = &self.puppet {
+					self.events.emit(json!({"event": "features", "live2d": puppet.features().to_json()}));
+					for warning in &puppet.warnings {
+						self.events.emit(json!({"event": "warning", "message": warning}));
+					}
+				}
 			}
 			Err(e) => {
 				self.events.emit(json!({"event": "fatal", "message": format!("renderer could not start: {e}")}));
@@ -272,8 +325,10 @@ impl App for StageApp {
 	fn resize(&mut self, width: u32, height: u32) {
 		self.width = width;
 		self.height = height;
-		if let Some((renderer, _)) = &mut self.on_window {
-			renderer.resize(width, height);
+		match &mut self.on_window {
+			Some((Renderer::Inox(r), _)) => r.resize(width, height),
+			Some((Renderer::Live2d(r), _)) => r.resize(width, height),
+			None => {}
 		}
 		self.fit_camera();
 	}
@@ -305,18 +360,30 @@ impl App for StageApp {
 		let Some((renderer, aux)) = &mut self.on_window else {
 			return !self.quit;
 		};
-		renderer.clear();
-		let puppet = &mut self.model.puppet;
-		puppet.begin_frame();
-		if let Some(params) = puppet.param_ctx.as_mut() {
-			for (name, value) in &values {
-				let _ = params.set(name, *value);
+		match (&mut self.puppet, renderer) {
+			(Puppet::Inox(model), Renderer::Inox(renderer)) => {
+				renderer.clear();
+				let puppet = &mut model.puppet;
+				puppet.begin_frame();
+				if let Some(params) = puppet.param_ctx.as_mut() {
+					for (name, value) in &values {
+						let _ = params.set(name, *value);
+					}
+				}
+				puppet.end_frame(dt);
+				renderer.on_begin_draw(puppet);
+				renderer.draw(puppet);
+				renderer.on_end_draw(puppet);
 			}
+			(Puppet::Live2d(puppet), Renderer::Live2d(renderer)) => {
+				puppet.update(&values, dt);
+				if let Err(e) = renderer.draw(puppet) {
+					self.events.emit(json!({"event": "fatal", "message": format!("drawing failed: {e}")}));
+					return false;
+				}
+			}
+			_ => unreachable!("the renderer is made for the puppet's format"),
 		}
-		puppet.end_frame(dt);
-		renderer.on_begin_draw(puppet);
-		renderer.draw(puppet);
-		renderer.on_end_draw(puppet);
 
 		// Save frames that tests asked for, before the buffers are swapped.
 		while self.next_capture < self.opts.capture_at.len() && self.t >= self.opts.capture_at[self.next_capture] {
@@ -354,14 +421,30 @@ impl App for StageApp {
 fn run(opts: Options) -> Result<(), String> {
 	let events = Events::default();
 	let bytes = std::fs::read(&opts.puppet).map_err(|e| format!("cannot read {}: {e}", opts.puppet.display()))?;
-	let info = puppet_info::read(&bytes)?;
-	let unsupported = puppet_info::unsupported_node_types(&info);
-	if !unsupported.is_empty() {
-		return Err(format!(
-			"this puppet uses features the renderer does not support yet: {}",
-			unsupported.join(", ")
-		));
-	}
+	let (puppet, info) = if live2d::looks_like_model3(&bytes) {
+		drop(bytes);
+		let mut puppet = Live2dPuppet::load(&opts.puppet)?;
+		if !opts.physics {
+			puppet.drop_physics();
+		}
+		let info = puppet.info.clone();
+		(Puppet::Live2d(Box::new(puppet)), info)
+	} else {
+		let info = puppet_info::read(&bytes)?;
+		let unsupported = puppet_info::unsupported_node_types(&info);
+		if !unsupported.is_empty() {
+			return Err(format!(
+				"this puppet uses features the renderer does not support yet: {}",
+				unsupported.join(", ")
+			));
+		}
+		let mut model = parse_inp(bytes.as_slice()).map_err(|e| format!("cannot load puppet: {e}"))?;
+		model.puppet.init_transforms();
+		model.puppet.init_rendering();
+		model.puppet.init_params();
+		model.puppet.init_physics();
+		(Puppet::Inox(model), info)
+	};
 	let mapper = match &opts.map {
 		Some(path) => {
 			let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
@@ -380,12 +463,6 @@ fn run(opts: Options) -> Result<(), String> {
 	if let Some(dir) = &opts.capture_dir {
 		std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
 	}
-
-	let mut model = parse_inp(bytes.as_slice()).map_err(|e| format!("cannot load puppet: {e}"))?;
-	model.puppet.init_transforms();
-	model.puppet.init_rendering();
-	model.puppet.init_params();
-	model.puppet.init_physics();
 
 	let (tx, rx) = channel();
 	if opts.stdin {
@@ -409,7 +486,7 @@ fn run(opts: Options) -> Result<(), String> {
 		overrides: Overrides::new(&info.params),
 		behaviour,
 		opts,
-		model,
+		puppet,
 		info,
 		mapper,
 		commands: rx,
