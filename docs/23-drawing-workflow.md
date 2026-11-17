@@ -114,7 +114,12 @@ character.
 1. Make or obtain an original test character (front view, full body, flat
    colours).
 2. With the owner's Gemini key: ask for an arm raised, a hand on the hip,
-   both arms relaxed; a three-quarter and a profile head. Record cost, time,
+   both arms relaxed; a three-quarter and a profile head. **Blocked for
+   now:** the key's project is on Google's free tier, which allows no image
+   generation at all ("limit: 0" on every image model, checked 2026-11-17);
+   billing must be enabled for the project in Google AI Studio (about
+   US$0.04 per image with Gemini 2.5 Flash Image), or another image service's
+   key supplied. Record cost, time,
    and how well style, colours and proportions hold (`reveal.py` and pose
    strips on the result).
 3. Run See-through's demo (free Hugging Face account, 1-2 runs a day) on the
