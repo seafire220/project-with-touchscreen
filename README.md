@@ -74,6 +74,7 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 18. [How the device works out of the box](docs/18-out-of-the-box.md)
 19. [Licensing check: Live2D-format models without Live2D's software](docs/19-live2d-format-licensing.md)
 20. [How heads turn](docs/20-head-turns.md)
+21. [Roadmap: what is done, what comes next, how to resume](docs/21-roadmap.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner
