@@ -69,7 +69,15 @@ class Device:
         if which == "llm":
             return providers.build_llm(settings, self.store)
         if which == "stt":
-            return providers.build_stt(settings, self.store, self.stt_model_dir)
+            # Kept between uses: the on-device model takes about 200 MB and
+            # seconds to load, so it is loaded once and reused until the
+            # speech settings or keys change.
+            key = (json.dumps(settings["stt"], sort_keys=True), json.dumps(self.store.secret_status(), sort_keys=True))
+            if getattr(self, "_stt_key", None) != key:
+                self._stt = None
+                self._stt = providers.build_stt(settings, self.store, self.stt_model_dir)
+                self._stt_key = key
+            return self._stt
         if which == "tts":
             return providers.build_tts(settings, self.store, **extra)
         raise ValueError(which)

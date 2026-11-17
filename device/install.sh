@@ -19,8 +19,10 @@ APP=/opt/companion
 DATA=/var/lib/companion
 STAGE_BINARY="$REPO/stage/target/aarch64-unknown-linux-gnu/release/stage"
 GET_MODEL=1
-# On-device speech recognition model (sherpa-onnx Moonshine tiny, English, 8-bit).
-MODEL_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-moonshine-tiny-en-int8.tar.bz2"
+# On-device speech recognition model: Moonshine tiny, English, 8-bit (MIT
+# licence, Useful Sensors), packaged for sherpa-onnx. About 120 MB.
+MODEL_URL="https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main"
+MODEL_FILES="preprocess.onnx encode.int8.onnx uncached_decode.int8.onnx cached_decode.int8.onnx tokens.txt LICENSE"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -45,7 +47,7 @@ apt-get install -y -q --no-install-recommends \
     cage python3 python3-venv python3-numpy python3-aiohttp python3-pil \
     alsa-utils network-manager polkitd fonts-dejavu-core \
     libegl1 libgles2 libgl1-mesa-dri libwayland-client0 libwayland-egl1 libxkbcommon0 \
-    ca-certificates curl bzip2
+    ca-certificates curl
 
 say "Creating the service user"
 if ! id companion >/dev/null 2>&1; then
@@ -88,15 +90,18 @@ fi
 if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/stt" ]; then
     say "Downloading the on-device speech model"
     tmp="$(mktemp -d)"
-    if curl -fsSL "$MODEL_URL" -o "$tmp/model.tar.bz2"; then
-        tar -xjf "$tmp/model.tar.bz2" -C "$tmp"
+    ok=1
+    for f in $MODEL_FILES; do
+        curl -fsSL "$MODEL_URL/$f" -o "$tmp/$f" || { ok=0; break; }
+    done
+    if [ "$ok" = 1 ]; then
         install -d -o companion -g companion "$DATA/models"
-        mv "$tmp"/sherpa-onnx-* "$DATA/models/stt"
+        mv "$tmp" "$DATA/models/stt"
         chown -R companion:companion "$DATA/models"
     else
         echo "warning: could not download the speech model; choose a cloud speech service in the settings page" >&2
+        rm -rf "$tmp"
     fi
-    rm -rf "$tmp"
 fi
 
 say "Installing system settings"

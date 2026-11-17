@@ -21,8 +21,8 @@ rigged 2D puppet. Standard is being built first.
 | 7. Install, boot and appliance behaviour | Installer, services, setup screens and update/rollback written; tested in a Debian 13 environment, not on a Pi |
 | 8. Guides | Build and install, making characters, hardware test plan |
 
-**Tested so far:** 24 stage tests, 48 character-making tests, 46 core tests,
-11 browser checks of the settings page, the installer run in a Debian 13
+**Tested so far:** 25 stage tests, 48 character-making tests, 48 core tests (one with the real on-device speech model),
+11 browser checks of the settings page, the real core driving the real stage through a spoken reply (`core/tests/stack_check.py`), the installer run in a Debian 13
 environment, and the Pi build of the stage started under ARM emulation.
 Characters were judged by eye on eleven pictures, on software graphics.
 **Not yet tested:** anything on real hardware; live AI services (no keys
@@ -68,6 +68,7 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 13. [Building and installing the device](docs/13-build-and-install.md)
 14. [Making a character from a picture](docs/14-making-characters.md)
 15. [Hardware test plan and troubleshooting](docs/15-hardware-test-plan.md)
+16. [Measurements](docs/16-measurements.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner

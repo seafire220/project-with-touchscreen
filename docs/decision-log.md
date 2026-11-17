@@ -407,3 +407,21 @@ rejected. Settled entries are not reopened without new evidence.
 - A mouth the model missed is looked for by colour where a mouth belongs; if
   there is none, a small line is added so the character can talk. Both cases
   are reported.
+
+## D-033 — On-device speech recognition uses Moonshine tiny (8-bit)
+
+- Date: 2026-11-17. Status: tested off the device.
+- The sherpa-onnx packaging of Moonshine tiny English (MIT licence, Useful
+  Sensors), about 120 MB, recognised both test recordings word for word at
+  about 27 times real time on two x86 threads. It takes about 220 MB of
+  memory once loaded, so the core loads it once and keeps it.
+- The installer fetches it from Hugging Face, where the files were checked.
+- Open: speed on the Pi 4; whether a smaller model is needed for memory.
+
+## D-034 — The stage repeats "ready" to late connections
+
+- Date: 2026-11-17. Status: implemented and tested.
+- The first test of the real core with the real stage found that the core
+  never learned the puppet's parameters: the stage announced them once at
+  start, before the core connected. The stage now sends the latest "ready"
+  to each client as it connects.

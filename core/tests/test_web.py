@@ -130,6 +130,21 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("tea", self.device.timers)
         self.assertTrue(any(e["kind"] == "timer" and e.get("did") == "rang" for e in self.device.log))
 
+    async def test_speech_recognition_is_built_once_and_reused(self):
+        built = []
+        from companion import providers
+        original = providers.build_stt
+        providers.build_stt = lambda settings, store, model_dir: built.append(1) or object()
+        try:
+            device = Device(self.dir.name, speaker=Speaker(command=None, realtime=False), stage=FakeStage())
+            first, second = device.build("stt"), device.build("stt")
+            self.assertIs(first, second)
+            device.store.update_settings({"stt": {"provider": "groq"}})
+            device.build("stt")
+            self.assertEqual(len(built), 2, "rebuilt only when the settings change")
+        finally:
+            providers.build_stt = original
+
     def test_only_local_addresses_are_served(self):
         for ok in ("192.168.1.20", "10.0.0.5", "127.0.0.1", "fe80::1", "172.16.4.4"):
             self.assertTrue(local_address(ok), ok)

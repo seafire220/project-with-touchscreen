@@ -146,17 +146,40 @@ impl Script {
 }
 
 /// Where events go: standard output and any connected socket clients.
+///
+/// The last "ready" event is kept and sent to each client as it connects, so
+/// a client that connects after start-up (the usual case) still learns the
+/// puppet's parameters.
 #[derive(Clone, Default)]
 pub struct Events {
 	clients: Arc<Mutex<Vec<UnixStream>>>,
+	ready: Arc<Mutex<Option<String>>>,
 }
 
 impl Events {
 	pub fn emit(&self, event: Value) {
 		let line = event.to_string();
 		println!("{line}");
+		if event.get("event").and_then(Value::as_str) == Some("ready") {
+			if let Ok(mut ready) = self.ready.lock() {
+				*ready = Some(line.clone());
+			}
+		}
 		if let Ok(mut clients) = self.clients.lock() {
 			clients.retain_mut(|c| writeln!(c, "{line}").is_ok());
+		}
+	}
+
+	fn add_client(&self, mut client: UnixStream) {
+		if let Ok(ready) = self.ready.lock() {
+			if let Some(line) = ready.as_ref() {
+				if writeln!(client, "{line}").is_err() {
+					return;
+				}
+			}
+		}
+		if let Ok(mut clients) = self.clients.lock() {
+			clients.push(client);
 		}
 	}
 }
@@ -196,9 +219,7 @@ pub fn spawn_socket(path: &Path, tx: Sender<Command>, events: Events) -> Result<
 	std::thread::spawn(move || {
 		for stream in listener.incoming().flatten() {
 			if let Ok(writer) = stream.try_clone() {
-				if let Ok(mut clients) = events.clients.lock() {
-					clients.push(writer);
-				}
+				events.add_client(writer);
 			}
 			let tx = tx.clone();
 			let events = events.clone();
@@ -255,6 +276,18 @@ mod tests {
 		] {
 			assert!(parse_line(bad).is_err(), "{bad}");
 		}
+	}
+
+	#[test]
+	fn a_late_client_is_told_the_puppet_is_ready() {
+		let events = Events::default();
+		events.emit(serde_json::json!({"event": "ready", "puppet": "x"}));
+		events.emit(serde_json::json!({"event": "heartbeat"}));
+		let (ours, theirs) = UnixStream::pair().unwrap();
+		events.add_client(ours);
+		let mut line = String::new();
+		BufReader::new(theirs).read_line(&mut line).unwrap();
+		assert!(line.contains("\"ready\""), "{line}");
 	}
 
 	#[test]
