@@ -130,6 +130,19 @@ Out of date or superseded:
 - Ayagami now has physics and a Godot plugin; Umamo now has a
   command-line converter.
 
+## Since this evaluation: characters in the Live2D format
+
+The owner asked for a picture-to-Live2D-format route rather than ready-made
+Live2D models. It now exists (D-039): the finished Inochi2D puppet is
+converted, movement for movement, into a `.moc3` model, and Ayagami plays it
+the same as our stage plays the puppet (checked on all seven test poses, and
+by replaying every vertex against Inox2D's maths: within 1.5-1.9 px on
+eleven characters). The rigger's own Live2D-format output was also tried; it
+uses the older head movement, so converting our puppet is better. Ayagami
+deformed the converted Alice in 0.05 ms per frame, as fast as the rigger's
+simpler model. The licensing questions are now written up in
+`19-live2d-format-licensing.md`.
+
 ## Recommendation
 
 1. **No rewrite.** Keep the current stage (Inox2D) and core. They work, they

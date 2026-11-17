@@ -480,3 +480,52 @@ rejected. Settled entries are not reopened without new evidence.
   never shown again. Typing keys on the device's own small touch screen was
   rejected: the screen shows a QR code that opens the settings page on the
   buyer's phone instead.
+
+## D-039 — Live2D-format characters are converted from our puppet
+
+- Date: 2026-11-17. Status: implemented (`studio/live2d_export.py`,
+  `make_character.py --live2d`); played in Ayagami on a development PC, not
+  yet on the device.
+- The owner asked for a pipeline that makes Live2D-format models from one
+  picture. Two routes were tried: the rigger's own Live2D output, and
+  converting our finished puppet. The rigger's model has the older head
+  movement the owner rejected; the converted one keeps ours, so it was
+  chosen. One rig, two formats.
+- Each part's own movements become exact keyforms; shared smooth movements
+  (breathing, the body turn carrying the head) and the body's rotation go on
+  warp deformers, decided per part so a part's own movement never changes
+  how a shared one applies. Every export is replayed against Inox2D's maths;
+  eleven characters were within 1.5-1.9 px (rotations between keys are
+  blended in straight lines in this format).
+- Findings recorded in the code: in this format y grows downwards (Live2D's
+  samples play upright that way in Ayagami), and each parameter's
+  "decimal places" field must be 3, as in official files (Ayagami refuses
+  the 4 the writer used).
+- Packages may carry the copy under `visual/live2d/`, with the same checks as
+  everything else in a package.
+
+## D-040 — Live2D-format playback stays off in units for sale until a lawyer says otherwise
+
+- Date: 2026-11-17. Status: recommended (`19-live2d-format-licensing.md`);
+  the owner decides.
+- We use no Live2D code, SDK, editor or sample model; the writer
+  (image2live2d) and the player (Ayagami) are independent open-source
+  projects whose authors describe how they learned the format without
+  Live2D's software. Live2D's official route for a device that loads users'
+  models needs approval and a share of every sale.
+- Open questions for a lawyer: our position as a downstream user of
+  independently written code (Australia, US, Japan, EU), patents (not yet
+  searched), wording about compatibility, and buyers' rights in their own
+  models. Inochi2D stays the default format.
+
+## D-041 — The neck follows the head when the body turns or leans
+
+- Date: 2026-11-17. Status: implemented (`studio/refine.py`).
+- The rigger's body turn shifts the head but not the neck, whose top is
+  drawn wide in shadow colour to fill under the jaw; it showed beside the
+  face as a skin-coloured block. Found while comparing the two formats; it
+  showed in both. The neck now takes the head's shift fully up to the point
+  the head leans from, fading out to the shoulders.
+- Still visible at full body turn: smears where the long hair moves off the
+  chest, which the picture never showed. That is the same problem as the
+  arms, for the alternative-drawings work.

@@ -88,6 +88,27 @@ Works, with limits:
 - Arms crossed in front of the body stay part of the body and do not move.
 - No visible neck: a plain one is added under the face.
 
+## Also in the Live2D format (optional)
+
+Add `--live2d` to put a Live2D-format copy of the character in the package
+as well (`visual/live2d/`: `model.moc3`, `model.model3.json`, textures,
+physics and motions):
+
+```bash
+python studio/make_character.py picture.png --name "Aria" --live2d \
+    --see-through ~/see-through --weights ~/see-through-weights/checkpoint-18000.pt
+```
+
+The copy is converted from the finished puppet, movement for movement
+(`studio/live2d_export.py`), so it moves the same as the Inochi2D version,
+including the improved head movement. The tool replays both versions
+against each other and prints the largest difference; on the eleven test
+characters it was under 2 pixels. Players that read this format, such as
+Ayagami, can then show the character. No Live2D software is used or needed.
+
+Read `19-live2d-format-licensing.md` before selling or sharing characters in
+this format. The device itself still plays the Inochi2D version.
+
 ## What the character can do
 
 Each package lists its abilities (blink, speak, head turn, hair sway, each
