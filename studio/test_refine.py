@@ -45,6 +45,12 @@ def puppet():
              "isSet": [[True]] * 3, "interpolate_mode": "Linear"}]})
     mouth = {"name": refine.MOUTH_PARAM, "axis_points": [[0.0, 1.0], [0.0]], "bindings": []}
     params.append(mouth)
+    # As the rigger makes it: the body turn shifts every head part sideways by the same amount.
+    shift = [{"node": n["uuid"], "param_name": "deform",
+              "values": [[[[-40.0, 0.0]] * (len(n["mesh"]["verts"]) // 2)], [[[0.0, 0.0]] * (len(n["mesh"]["verts"]) // 2)],
+                         [[[40.0, 0.0]] * (len(n["mesh"]["verts"]) // 2)]],
+              "isSet": [[True]] * 3, "interpolate_mode": "Linear"} for n in head["children"]]
+    params.append({"name": "ParamBodyAngleX", "axis_points": [[0.0, 0.5, 1.0], [0.0]], "bindings": shift})
     return {"nodes": nodes, "param": params}
 
 
@@ -59,6 +65,10 @@ def binding(p, param, role, kind="deform"):
     prm = next(x for x in p["param"] if x["name"] == param)
     found = [b for b in prm["bindings"] if refine.role_of(names[b["node"]]) == role and b["param_name"] == kind]
     return found[0] if found else None
+
+
+def binding_list(p, param):
+    return next(x for x in p["param"] if x["name"] == param)["bindings"]
 
 
 def mesh_points(p, role):
@@ -132,6 +142,20 @@ class RefineTest(unittest.TestCase):
         neck_moves = self.offsets("ParamAngleZ", "neck", 1)
         bottom = [abs(dx) + abs(dy) for (x, y), (dx, dy) in zip(pts["neck"], neck_moves) if y >= -61]
         self.assertTrue(all(b < 0.5 for b in bottom), "the bottom of the neck stays on the body")
+
+    def test_the_neck_follows_the_head_when_the_body_turns(self):
+        self.assertEqual(self.report["neck_follows_body"], ["ParamBodyAngleX"])
+        b = binding(self.p, "ParamBodyAngleX", "neck")
+        neck = mesh_points(self.p, "neck")
+        top = [dx for (dx, _), (_, y) in zip(b["values"][2][0], neck) if y == min(p[1] for p in neck)]
+        bottom = [dx for (dx, _), (_, y) in zip(b["values"][2][0], neck) if y == max(p[1] for p in neck)]
+        self.assertTrue(all(abs(dx - 40.0) < 1e-6 for dx in top), "the top of the neck stays behind the face")
+        self.assertTrue(all(abs(dx) < 1e-6 for dx in bottom), "the base of the neck stays on the shoulders")
+        self.assertEqual(b["values"][1][0], [[0.0, 0.0]] * len(neck))
+        again = copy.deepcopy(self.p)
+        refine.refine_neck_follow(again, refine.head_geometry(refine.walk_parts(again["nodes"])))
+        self.assertEqual(len([x for x in again["param"] if x["name"] == "ParamBodyAngleX"][0]["bindings"]),
+                         len(binding_list(self.p, "ParamBodyAngleX")), "running it twice adds nothing")
 
     def test_the_mouth_line_fades_as_the_open_mouth_grows_from_it(self):
         prm = next(x for x in self.p["param"] if x["name"] == refine.MOUTH_PARAM)

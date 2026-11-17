@@ -27,8 +27,17 @@ often only a few pixels high, so the mouth hardly moves. partsplit.py draws
 an open mouth sized to the face, hidden at rest. Here the mouth line fades
 out as the mouth opens and the open mouth grows down from the line.
 
-Blink, breathing, body sway and hair physics are left as the rigger made
-them.
+Neck under body turn and lean
+-----------------------------
+The rigger's body turn and lean shift the head sideways or down but leave
+the neck where it is. The top of the neck is drawn wide, in shadow colour,
+to fill what the jaw uncovers, and is meant to stay behind the face; when
+the head moved off it, it showed beside the face as a skin-coloured block.
+The neck now follows the head's shift fully up to the point the head
+leans from, fading out down to the shoulders.
+
+Blink, breathing, the body's own sway and hair physics are left as the
+rigger made them.
 
 Usage: refine.py IN.inp OUT.inp
 """
@@ -253,7 +262,62 @@ def refine(puppet):
             report["added"] += 1
         param["bindings"] = kept
     report.update(refine_mouth(puppet, parts))
+    report.update(refine_neck_follow(puppet, g))
     return report
+
+
+BODY_PARAMS = ("ParamBodyAngleX", "ParamBodyAngleY")
+
+
+def _pairs(values):
+    """A deform binding's offsets at one key, as (dx, dy) pairs, however the list is nested."""
+    flat = []
+
+    def walk(x):
+        if isinstance(x, (list, tuple)):
+            for y in x:
+                walk(y)
+        else:
+            flat.append(float(x))
+    walk(values)
+    return list(zip(flat[0::2], flat[1::2]))
+
+
+def refine_neck_follow(puppet, g):
+    """Make the neck follow the head when the body turn or lean shifts the head (see the module notes)."""
+    neck = g["neck"]
+    if neck is None or g["neck_bottom"] is None:
+        return {"neck_follows_body": []}
+    head_ids = {p["node"]["uuid"] for p in g["head_parts"]}
+    neck_id = neck["node"]["uuid"]
+    py = g["pivot"][1]
+    fade = max(g["neck_bottom"] - py, 1e-6)
+    weights = [1.0 if y <= py else 1.0 - smoothstep((y - py) / fade) for _, y in points(neck)]
+    params = {p["name"]: p for p in puppet.get("param", [])}
+    done = []
+    for name in BODY_PARAMS:
+        param = params.get(name)
+        if param is None:
+            continue
+        heads = [b for b in param["bindings"] if b["node"] in head_ids and b["param_name"] == "deform"]
+        if not heads:
+            continue
+        keys = len(param["axis_points"][0])
+        shifts = []
+        for k in range(keys):
+            moves = [m for b in heads for m in _pairs(b["values"][k])]
+            shifts.append((sum(m[0] for m in moves) / len(moves), sum(m[1] for m in moves) / len(moves)))
+        if all(abs(sx) < 1e-6 and abs(sy) < 1e-6 for sx, sy in shifts):
+            continue
+        kept = [b for b in param["bindings"] if not (b["node"] == neck_id and b["param_name"] == "deform")]
+        kept.append({
+            "node": neck_id, "param_name": "deform",
+            "values": [[[[round(sx * w, 3), round(sy * w, 3)] for w in weights]] for sx, sy in shifts],
+            "isSet": [[True]] * keys, "interpolate_mode": "Linear",
+        })
+        param["bindings"] = kept
+        done.append(name)
+    return {"neck_follows_body": done}
 
 
 MOUTH_PARAM = "ParamMouthOpenY"
