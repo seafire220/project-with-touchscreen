@@ -122,12 +122,22 @@ def make(image_path, name, args, work):
     image, notes = prepare.prepare(original, masks)
     for note in notes:
         step(note)
-    layers, split_report = partsplit.split(image, masks)
+    invented = {}
+    layers, split_report = partsplit.split(image, masks, invented)
     layers_dir = os.path.join(work, "layers")
     os.makedirs(layers_dir, exist_ok=True)
     for role, array in layers:
         Image.fromarray(partsplit.pad_square(array), "RGBA").save(
             os.path.join(layers_dir, "%02d_%s.png" % (partsplit.ORDER[role], role)))
+    # Which pixels were made up rather than copied, for reveal.py; kept beside the layers,
+    # never in the package.
+    invented_dir = os.path.join(work, "invented")
+    os.makedirs(invented_dir, exist_ok=True)
+    for role, mask in invented.items():
+        marked = np.zeros(mask.shape + (4,), np.uint8)
+        marked[mask] = 255
+        Image.fromarray(partsplit.pad_square(marked), "RGBA").save(
+            os.path.join(invented_dir, "%02d_%s.png" % (partsplit.ORDER[role], role)))
     step("cut into %d layers" % len(layers))
     rigged = os.path.join(work, "rigged.inp")
     with_live2d = getattr(args, "live2d", False)

@@ -32,7 +32,7 @@ def puppet():
                 part("30_eye_white_r", 15, -55, 35, -45, 2), part("40_pupil_r", 18, -56, 32, -44, 2),
                 part("50_eye_r", 14, -58, 36, -44, 2),
                 part("58_mouth_cavity", -8, -18, 8, -8, 2), part("60_mouth", -8, -19, 8, -17, 1),
-                part("80_hair_front", -70, -150, 70, -60),
+                part("80_hair_front", -70, -150, 70, -60), part("20_hair_back", -60, -150, 60, -110),
             ]}
     body = {"uuid": next(UUID), "name": "body", "type": "Node", "transform": {"trans": [0.0, 0.0, 0.0]},
             "children": [part("10_torso", -80, -80, 80, 200), part("14_neck", -15, -110, 15, -60), head]}
@@ -95,32 +95,57 @@ class RefineTest(unittest.TestCase):
             self.assertFalse(any(b["param_name"].startswith("transform.") for b in prm["bindings"]))
             self.assertIsNotNone(binding(self.p, name, "face_base"))
 
-    def test_eyes_and_mouth_keep_their_shape_when_the_head_turns_or_nods(self):
-        for name in ("ParamAngleX", "ParamAngleY"):
-            for role in ("eye_l", "eye_white_l", "pupil_l", "eye_closed_l", "eye_r", "mouth", "mouth_cavity"):
-                moves = {tuple(o) for o in self.offsets(name, role, 1)}
-                self.assertEqual(len(moves), 1, "%s %s moves as one piece" % (name, role))
+    def moved_width(self, role, position):
+        pts = mesh_points(self.p, role)
+        moves = self.offsets("ParamAngleX", role, position)
+        xs = [x + dx for (x, _), (dx, _) in zip(pts, moves)]
+        return max(xs) - min(xs)
 
-    def test_each_eye_moves_as_one_group(self):
-        moves = {tuple(self.offsets("ParamAngleX", role, 1)[0]) for role in ("eye_l", "eye_white_l", "pupil_l", "eye_closed_l")}
-        self.assertEqual(len(moves), 1)
+    def test_a_turn_narrows_the_far_eye_and_widens_the_near_eye(self):
+        rest = self.moved_width("eye_l", 0)
+        # Turning right (+): the right side of the face turns away.
+        self.assertLess(self.moved_width("eye_r", 1), rest)
+        self.assertGreater(self.moved_width("eye_l", 1), rest)
+        self.assertLess(self.moved_width("eye_l", -1), rest)
+        self.assertGreater(self.moved_width("eye_r", -1), rest)
+        self.assertGreater(self.moved_width("eye_r", 1), 0.6 * rest, "narrower, not squashed flat")
 
-    def test_a_turn_slides_the_middle_of_the_face_more_than_its_edge_and_not_the_hair_outline(self):
+    def test_the_pieces_of_an_eye_move_together(self):
+        # The eye and its closed eye share one grid, so where they overlap they move alike.
+        shared = {}
+        for role in ("eye_l", "eye_closed_l"):
+            for pt, move in zip(mesh_points(self.p, role), self.offsets("ParamAngleX", role, 1)):
+                shared.setdefault((round(pt[0], 3), round(pt[1], 3)), []).append(tuple(move))
+        both = [moves for moves in shared.values() if len(moves) == 2]
+        self.assertTrue(both)
+        self.assertTrue(all(abs(a[0] - b[0]) < 1e-3 and abs(a[1] - b[1]) < 1e-3 for a, b in both))
+
+    def test_a_turn_moves_the_middle_of_the_face_most_and_holds_the_head_outline(self):
         pts = mesh_points(self.p, "face_base")
         moves = self.offsets("ParamAngleX", "face_base", 1)
-        middle = max(m[0] for m, (x, y) in zip(moves, pts))
-        edge = [m[0] for m, (x, y) in zip(moves, pts) if abs(x) >= 49 and abs(y + 150) < 3]
-        self.assertGreater(middle, 0.1 * 100 * 0.9, "the middle slides about a tenth of the face width")
-        self.assertTrue(all(e < 0.6 * middle for e in edge))
+        middle = max(m[0] for m in moves)
+        near = [m[0] for m, (x, y) in zip(moves, pts) if x <= -49 and abs(y + 150) < 3]
+        far = [m[0] for m, (x, y) in zip(moves, pts) if x >= 49 and abs(y + 150) < 3]
+        self.assertGreater(middle, 0.1 * 100 * 0.9, "the middle moves about a tenth of the face width or more")
+        self.assertTrue(all(f < n for f, n in zip(far, near)), "the side turning away moves least: it narrows")
+        self.assertTrue(all(n < middle for n in near))
         hair_pts = mesh_points(self.p, "hair_front")
         hair_moves = self.offsets("ParamAngleX", "hair_front", 1)
         rim = [abs(m[0]) for m, (x, y) in zip(hair_moves, hair_pts) if abs(x) >= 69]
         self.assertTrue(all(r < 1e-6 for r in rim), "the outline of the head stays put")
 
+    def test_hair_behind_the_head_moves_the_other_way(self):
+        pts = mesh_points(self.p, "hair_back")
+        moves = self.offsets("ParamAngleX", "hair_back", 1)
+        middle = [dx for (x, _), (dx, _) in zip(pts, moves) if abs(x) < 10]
+        self.assertTrue(all(dx <= 1e-9 for dx in middle), "none moves with the face")
+        self.assertLess(min(middle), -1.0, "it moves the other way (points on the outline are held)")
+
     def test_turning_the_other_way_mirrors_and_rest_is_untouched(self):
-        right = self.offsets("ParamAngleX", "mouth", 1)[0]
-        left = self.offsets("ParamAngleX", "mouth", -1)[0]
-        self.assertAlmostEqual(right[0], -left[0], places=3)
+        def mean_dx(position):
+            moves = self.offsets("ParamAngleX", "mouth", position)
+            return sum(dx for dx, _ in moves) / len(moves)
+        self.assertAlmostEqual(mean_dx(1), -mean_dx(-1), places=2)
         self.assertEqual(self.offsets("ParamAngleX", "face_base", 0)[0], [0.0, 0.0])
 
     def test_a_nod_moves_the_features_up_or_down(self):
@@ -143,19 +168,21 @@ class RefineTest(unittest.TestCase):
         bottom = [abs(dx) + abs(dy) for (x, y), (dx, dy) in zip(pts["neck"], neck_moves) if y >= -61]
         self.assertTrue(all(b < 0.5 for b in bottom), "the bottom of the neck stays on the body")
 
-    def test_the_neck_follows_the_head_when_the_body_turns(self):
-        self.assertEqual(self.report["neck_follows_body"], ["ParamBodyAngleX"])
-        b = binding(self.p, "ParamBodyAngleX", "neck")
-        neck = mesh_points(self.p, "neck")
-        top = [dx for (dx, _), (_, y) in zip(b["values"][2][0], neck) if y == min(p[1] for p in neck)]
-        bottom = [dx for (dx, _), (_, y) in zip(b["values"][2][0], neck) if y == max(p[1] for p in neck)]
-        self.assertTrue(all(abs(dx - 40.0) < 1e-6 for dx in top), "the top of the neck stays behind the face")
-        self.assertTrue(all(abs(dx) < 1e-6 for dx in bottom), "the base of the neck stays on the shoulders")
-        self.assertEqual(b["values"][1][0], [[0.0, 0.0]] * len(neck))
+    def test_a_body_turn_carries_the_head_and_neck_together_a_little(self):
+        self.assertEqual(self.report["body"], ["ParamBodyAngleX"])
+        head = self.offsets("ParamBodyAngleX", "face_base", 1)
+        neck = self.offsets("ParamBodyAngleX", "neck", 1)
+        shift = head[0][0]
+        self.assertTrue(all(m == head[0] for m in head + neck), "head and neck move as one")
+        self.assertTrue(0 < shift < 0.1 * 80, "a few pixels, not the rigger's 40")
+        torso = self.offsets("ParamBodyAngleX", "torso", 1)
+        self.assertGreater(max(dx for dx, _ in torso), shift, "the chest moves more than the spine")
+        self.assertEqual(self.offsets("ParamBodyAngleX", "face_base", 0)[0], [0.0, 0.0])
         again = copy.deepcopy(self.p)
-        refine.refine_neck_follow(again, refine.head_geometry(refine.walk_parts(again["nodes"])))
-        self.assertEqual(len([x for x in again["param"] if x["name"] == "ParamBodyAngleX"][0]["bindings"]),
-                         len(binding_list(self.p, "ParamBodyAngleX")), "running it twice adds nothing")
+        parts = refine.walk_parts(again["nodes"])
+        refine.refine_body(again, parts, refine.head_geometry(parts))
+        self.assertEqual(len(binding_list(again, "ParamBodyAngleX")), len(binding_list(self.p, "ParamBodyAngleX")),
+                         "running it twice adds nothing")
 
     def test_the_mouth_line_fades_as_the_open_mouth_grows_from_it(self):
         prm = next(x for x in self.p["param"] if x["name"] == refine.MOUTH_PARAM)

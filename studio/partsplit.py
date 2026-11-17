@@ -43,6 +43,10 @@ PRIORITY = ["eyes", "mouth", "nose", "eyewear", "headwear", "hair", "earwear", "
 UNDERLAP_SHARE = 0.016
 # Labelled areas smaller than this share of their part are treated as stray.
 STRAY_SHARE = 0.03
+# The neck under the face: its width when no neck was found (share of face
+# width), and how much wider than the neck it is at the chin.
+NECK_SHARE = 0.36
+NECK_WIDEN = 1.25
 
 
 def silhouette(alpha, masks):
@@ -137,9 +141,11 @@ def shadow_colour(rgb, mask, darken=0.92):
 def neck_column(face, hair, neck, eye_line, face_width):
     """Where the neck continues up under the face, so a moving head uncovers neck, not a hole.
 
-    A column under the lower face: as wide as the jaw, widened to take in
-    the top of the neck if one was found. It runs from the
-    eye line down and only where the face or hair hides it.
+    Shaped like a neck going up into the head: as wide as the jaw at the eye
+    line, where the cheeks hide it, narrowing to a little wider than the
+    neck at the chin, where a turning or rising head uncovers it. A square
+    column as wide as the jaw showed its corners beside the neck as a block.
+    It runs from the eye line down and only where the face or hair hides it.
     """
     h, w = face.shape
     face_rows = np.nonzero(face.any(axis=1))[0]
@@ -147,14 +153,19 @@ def neck_column(face, hair, neck, eye_line, face_width):
     face_height = chin - face_rows[0] + 1
     lower = face[max(chin - int(0.45 * face_height), 0):chin + 1]
     xs = np.nonzero(lower.any(axis=0))[0]
-    x0, x1 = xs[0], xs[-1]
+    jaw_half = (xs[-1] - xs[0]) / 2.0
+    centre = (xs[0] + xs[-1]) / 2.0
+    neck_half = NECK_SHARE * face_width / 2.0
     if neck.any():
         rows = np.nonzero(neck.any(axis=1))[0]
         top = rows[0] + max(1, (rows[-1] - rows[0]) // 4)
         nx = np.nonzero(neck[rows[0]:top + 1].any(axis=0))[0]
-        x0, x1 = min(x0, nx[0]), max(x1, nx[-1])
+        centre, neck_half = (nx[0] + nx[-1]) / 2.0, (nx[-1] - nx[0]) / 2.0
     yy, xx = np.mgrid[0:h, 0:w]
-    column = (xx >= x0) & (xx <= x1) & (yy >= eye_line)
+    t = np.clip((yy - eye_line) / max(chin - eye_line, 1), 0.0, 1.0)
+    t = t * t * (3.0 - 2.0 * t)
+    half = jaw_half + (NECK_WIDEN * neck_half - jaw_half) * t
+    column = (np.abs(xx - centre) <= half) & (yy >= eye_line)
     return column & (face | hair)
 
 
@@ -320,7 +331,15 @@ def eye_parts(rgb, eye):
     return {"eye_white": white, "pupil": eye & ~white & ~lash, "eye": lash}
 
 
-def split(image, masks):
+def split(image, masks, invented=None):
+    """Cut the picture into layers. Returns (layers, report).
+
+    If `invented` is a dict, it is filled with role -> mask of the pixels this
+    function made up (filled in under other parts) rather than copied from
+    the picture. reveal.py uses them to measure how much made-up filling a
+    pose uncovers. The closed eyes and open mouth are left out: showing them
+    is intended.
+    """
     rgba = np.asarray(image.convert("RGBA"))
     rgb, alpha = rgba[..., :3], rgba[..., 3]
     if masks.shape != (len(PARTS),) + alpha.shape:
@@ -438,6 +457,23 @@ def split(image, masks):
     neck_rgb[under] = colour.astype(np.uint8)
     neck_mask = neck | under
 
+    # --- hair behind the head, as Live2D artists draw it: under everything the face and the hair round
+    # it cover, down to the cheeks, in the hair's colours. Hidden at rest; a turning face uncovers hair
+    # there, as on a real head, rather than the background.
+    cheek_line = int(eye_line + 0.5 * (chin - eye_line))
+    above = np.zeros_like(body)
+    above[:cheek_line] = True
+    head_hair = hair & above
+    back_mask = (face | head_hair) & above if head_hair.any() else np.zeros_like(body)
+    # Long hair hangs beside the jaw: it carries on down behind the jaw's sides to just below the chin,
+    # beside the neck, so a jaw moving off it uncovers hair. Short hair leaves the background there.
+    below_chin = int(chin + 0.12 * (chin - eye_line))
+    lower = np.zeros_like(body)
+    lower[cheek_line:below_chin] = True
+    if head_hair.any() and (hair & lower & ~face).sum() > 0.02 * hair.sum():
+        back_mask |= (face | hair) & lower & ~ndimage.binary_dilation(neck_mask, iterations=2)
+    back_rgb = soft_fill(rgb, head_hair, back_mask & ~head_hair, 4 * reach) if back_mask.any() else rgb
+
     # --- arms: each separate area on its own side of the body
     arms = part("handwear")
     body_x = np.nonzero(body.any(axis=0))[0]
@@ -478,6 +514,7 @@ def split(image, masks):
 
     layers = [("torso", layer(rest_mask, rest_rgb)), ("neck", layer(neck_mask, neck_rgb)),
               ("arm_l", layer(arm_sides["l"])), ("arm_r", layer(arm_sides["r"])),
+              ("hair_back", layer(back_mask, back_rgb)),
               ("face_base", layer(face_base_mask, face_rgb))]
     for side in ("l", "r"):
         if side in eye_layers:
@@ -504,6 +541,10 @@ def split(image, masks):
         layers.append(("mouth_cavity", open_mouth((h, w), (xs.min() + xs.max()) / 2.0, ys.mean(), width, lip_colour)))
     layers += [("mouth", layer(mouth, mouth_rgb)), ("hair_front", layer(hair))]
     layers = [(role, array) for role, array in layers if array[..., 3].any()]
+    if invented is not None:
+        invented["torso"] = covered & ~rest
+        invented["neck"] = under & ~neck
+        invented["face_base"] = (hidden | (face_base_mask & ~face)) & face_base_mask
 
     found = sorted({PARTS[i] for i in np.unique(labels) if i >= 0})
     report["parts_found"] = found
@@ -529,7 +570,8 @@ def split(image, masks):
 HIDDEN_AT_REST = ("eye_closed_l", "eye_closed_r", "mouth_cavity")
 
 ORDER = {"eye_closed_l": 52, "eye_closed_r": 53, "mouth_cavity": 58,
-         "torso": 10, "neck": 14, "arm_l": 16, "arm_r": 17, "face_base": 24, "eye_white_l": 30, "eye_white_r": 31,
+         "torso": 10, "neck": 14, "arm_l": 16, "arm_r": 17, "hair_back": 20, "face_base": 24,
+         "eye_white_l": 30, "eye_white_r": 31,
          "pupil_l": 40, "pupil_r": 41, "eye_l": 50, "eye_r": 51, "mouth": 60, "hair_front": 80}
 
 

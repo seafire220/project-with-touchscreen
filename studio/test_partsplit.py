@@ -84,14 +84,22 @@ class PartSplitTest(unittest.TestCase):
         self.assertEqual(self.roles["torso"][200, 30, 3], 0, "nothing is invented outside the figure")
         self.assertTrue(self.roles["hair_front"][54, 120, 3] > 0, "the hair ornament travels with the hair")
 
+    def test_hair_carries_on_behind_the_face_in_hair_colours(self):
+        back = self.roles["hair_back"]
+        self.assertTrue(back[100, 120, 3] > 0, "behind the middle of the face, so a turning face uncovers hair")
+        self.assertLess(np.abs(back[100, 120, :3].astype(int) - np.array(HAIR)).max(), 40)
+        self.assertEqual(back[135, 120, 3], 0, "not over the neck")
+
     def test_the_neck_continues_up_under_the_face_in_shadow(self):
         neck = self.roles["neck"][..., 3] > 0
         self.assertTrue(neck[135, 120])
         self.assertTrue(neck[126, 120], "extended under the chin")
         self.assertTrue(neck[100, 120], "and up to the eye line, so a turning head uncovers neck")
         self.assertFalse(neck[80, 120], "but not above the eyes")
-        self.assertTrue(neck[110, 95], "as wide as the jaw")
+        self.assertTrue(neck[100, 92], "as wide as the jaw at the eye line, where the cheeks hide it")
         self.assertFalse(neck[100, 75], "but no wider")
+        self.assertFalse(neck[126, 103], "narrowing like a neck towards the chin, so no corners show")
+        self.assertTrue(neck[126, 108], "still a little wider than the neck there")
         shadow = np.array(SKIN) * 0.92
         self.assertLess(np.abs(self.roles["neck"][110, 120, :3].astype(int) - shadow).max(), 6)
 
