@@ -76,6 +76,7 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 20. [How heads turn](docs/20-head-turns.md)
 21. [Roadmap: what is done, what comes next, how to resume](docs/21-roadmap.md)
 22. [Board options for the Standard device](docs/22-board-options.md)
+23. [Drawing workflow: hidden areas, alternate poses, new views (candidate assessment)](docs/23-drawing-workflow.md)
 24. [Motion: a generic skeleton every character is fitted to](docs/24-motion.md)
 - [Decision log](docs/decision-log.md)
 
