@@ -307,6 +307,17 @@ impl Motion {
 		self.start(name, intensity, true)
 	}
 
+	/// Start a gesture the speech suggests (a nod on "yes"), unless one asked for is playing.
+	/// Returns whether it started.
+	pub fn suggest(&mut self, name: &str, intensity: f32) -> Result<bool, String> {
+		let i = self.lib.clips.iter().position(|c| c.name == name).ok_or(format!("unknown gesture '{name}'"))?;
+		if !self.available[i] || self.playing.iter().any(|p| p.asked && p.cut.is_none()) {
+			return Ok(false);
+		}
+		self.begin(i, intensity, false);
+		Ok(true)
+	}
+
 	fn start(&mut self, name: &str, intensity: f32, asked: bool) -> Result<(), String> {
 		let i = self.lib.clips.iter().position(|c| c.name == name).ok_or(format!("unknown gesture '{name}'"))?;
 		if !self.available[i] {

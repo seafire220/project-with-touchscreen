@@ -86,6 +86,13 @@ class StageLink:
     def mouth(self, level):
         self.send({"mouth": round(float(level), 3)})
 
+    def perform(self, performance):
+        """A sentence starts: its syllables' mouth shapes and the movements tied to them."""
+        self.send({"perform": performance})
+
+    def syllable(self, k):
+        self.send({"syllable": int(k)})
+
     def blink(self):
         self.send({"blink": True})
 

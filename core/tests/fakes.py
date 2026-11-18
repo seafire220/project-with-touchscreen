@@ -78,6 +78,12 @@ class FakeStage:
     def random_gestures(self, on):
         self.commands.append({"random_gestures": on})
 
+    def perform(self, performance):
+        self.commands.append({"perform": performance})
+
+    def syllable(self, k):
+        self.commands.append({"syllable": k})
+
     def blink(self):
         self.commands.append({"blink": True})
 

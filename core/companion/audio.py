@@ -96,7 +96,11 @@ class Speaker:
         self.volume = 1.0
 
     async def play(self, chunks, rate, on_level, on_audio=None):
-        """Play an async stream of PCM chunks. Returns seconds played."""
+        """Play an async stream of PCM chunks. Returns seconds played.
+
+        A chunk may instead be a marker: a function to call, with no arguments, at the moment the sound
+        before it is heard (a sentence's feeling, its gestures, each syllable's mark).
+        """
         loop = asyncio.get_running_loop()
         frame_bytes = int(rate * FRAME) * 2
         cmd = self.command(rate) if self.command else None
@@ -112,6 +116,14 @@ class Speaker:
             async for chunk in chunks:
                 if self.stopped:
                     break
+                if callable(chunk):
+                    if not self.realtime:
+                        chunk()
+                        continue
+                    now = loop.time()
+                    heard = (start + index * FRAME if start is not None else now) + len(pending) / 2 / rate
+                    timers.append(loop.call_at(max(now, heard) + self.latency, chunk))
+                    continue
                 pending += chunk
                 while len(pending) >= frame_bytes and not self.stopped:
                     frame, pending = pending[:frame_bytes], pending[frame_bytes:]

@@ -11,10 +11,13 @@ sound stops at once and what was actually said is remembered.
 """
 import asyncio
 import datetime
+import functools
 import logging
+import random
 
 from .audio import tone
 from .characters import split_persona
+from .performance import Planner, SyllableMarks, guess_feeling, syllable_offsets
 from .memory import when
 from .providers import ProviderError
 from .search import results_for_model
@@ -73,6 +76,8 @@ class Conversation:
         self._task = None
         self.mood_linger = MOOD_LINGER
         self._calm = None
+        # Mouth shapes and movements that go with each sentence's meaning (performance.py).
+        self.planner = Planner(random.Random())
 
     def _calm_later(self):
         """Let the reply's feeling stay a little, then return to neutral (unless a new reply starts)."""
@@ -190,26 +195,34 @@ class Conversation:
 
         async def fetch_all(first_item):
             try:
-                item = first_item
+                item, first, tagged, feeling = first_item, True, False, None
                 while item is not None:
                     text, emotion, actions = item
+                    if emotion:
+                        tagged = True
+                    elif text and not tagged:
+                        # The model tagged no feeling in this reply (yet): guess one from the words.
+                        guess = guess_feeling(text)
+                        emotion = guess if guess and guess != feeling else None
                     if emotion:                  # the mood first, so a gesture asked for plays on top of it
+                        feeling = emotion
                         await audio_queue.put(("emotion", emotion))
+                    asked = []
                     for action in actions:
                         if action.get("kind") == "search":
                             if queries is not None:
                                 queries.append(action["query"])
                         elif action.get("kind") == "gesture":
+                            asked.append(action["name"])
                             await audio_queue.put(("gesture", action["name"]))   # in step with the speech
                         else:
                             self.on_action(action)
                     if text:
-                        started = False
-                        async for chunk in self.tts.stream(text):
-                            if not started:      # counted as said only once its sound exists
-                                await audio_queue.put(("text", text))
-                                started = True
-                            await audio_queue.put(("audio", chunk))
+                        plan = self._plan(text, asked, first)
+                        first = False
+                        if plan:
+                            await audio_queue.put(("perform", plan))
+                        await self._queue_sound(text, plan, audio_queue)
                     item = await self._next(sentences, False)
                 await audio_queue.put(None)
             except asyncio.CancelledError:
@@ -232,11 +245,17 @@ class Conversation:
                         "the voice failed (%s)" % type(value).__name__)
                 if kind == "audio":
                     yield value
-                elif kind == "emotion":
-                    self.stage.express(value)
+                elif kind == "emotion":          # markers: each runs as the sound before it is heard
+                    yield functools.partial(self.stage.express, value)
                 elif kind == "gesture":
                     if hasattr(self.stage, "gesture"):
-                        self.stage.gesture(value)
+                        yield functools.partial(self.stage.gesture, value)
+                elif kind == "perform":
+                    if hasattr(self.stage, "perform"):
+                        yield functools.partial(self.stage.perform, value)
+                elif kind == "syllable":
+                    if hasattr(self.stage, "syllable"):
+                        yield functools.partial(self.stage.syllable, value)
                 elif kind == "text":
                     reply.spoken.append(value)
                     self.on_event("saying", {"text": value})
@@ -246,6 +265,49 @@ class Conversation:
             await self.speaker.play(audio(), self.tts.rate, self.stage.mouth, self.on_audio)
         finally:
             fetcher.cancel()
+
+    def _plan(self, text, asked, first):
+        """The sentence's performance, or None (the stage then moves the mouth with the loudness alone)."""
+        try:
+            available = self.gestures if self.gestures is not None else getattr(self.stage, "gestures", ())
+            return self.planner.plan(text, available or (), asked=asked, first=first)
+        except Exception:
+            log.exception("could not plan a sentence's performance")
+            return None
+
+    async def _queue_sound(self, text, plan, audio_queue):
+        """Queue a sentence's sound, with a mark where each of its syllables is heard."""
+        count = len(plan["syllables"]) if plan else 0
+        whole = getattr(self.tts, "full", None)
+        if whole and count:
+            # Made whole anyway (the device's own voice): place each syllable at its loudness peak.
+            pcm = await whole(text)
+            await audio_queue.put(("text", text))
+            try:
+                offsets = [o * 2 for o in syllable_offsets(pcm, self.tts.rate, count)]
+            except Exception:
+                log.exception("could not place a sentence's syllables")
+                offsets = []
+            step, pos = int(self.tts.rate * 0.2) * 2, 0
+            cuts = sorted(set([0] + [o for o in offsets if 0 <= o < len(pcm)]))
+            marks = {o: k for k, o in enumerate(offsets)}
+            for i, cut in enumerate(cuts):
+                end = cuts[i + 1] if i + 1 < len(cuts) else len(pcm)
+                if cut in marks:
+                    await audio_queue.put(("syllable", marks[cut]))
+                for piece in range(cut, end, step):
+                    await audio_queue.put(("audio", pcm[piece:min(end, piece + step)]))
+            return
+        marks = SyllableMarks(self.tts.rate, count, plan["clauses"]) if count else None
+        started = False
+        async for chunk in self.tts.stream(text):
+            if not started:                      # counted as said only once its sound exists
+                await audio_queue.put(("text", text))
+                started = True
+            for out in (marks.feed(chunk) if marks else [chunk]):
+                await audio_queue.put(("audio", out) if isinstance(out, bytes) else out)
+        for out in (marks.flush() if marks else []):
+            await audio_queue.put(("audio", out))
 
     async def _notice(self):
         """A short tone when something failed, so a silent device is never a mystery."""

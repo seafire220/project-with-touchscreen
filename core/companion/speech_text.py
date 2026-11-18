@@ -11,7 +11,7 @@ import re
 EMOTIONS = ("neutral", "happy", "sad", "angry", "surprised", "embarrassed", "thinking")
 # Every gesture in the stage's library (stage/motions/library.json; a test keeps the
 # two in step). The model is told only those its character can make.
-GESTURES = ("bounce", "bow", "emphatic_nod", "hands_on_hips", "laugh", "lean_back", "lean_in", "look_away",
+GESTURES = ("bounce", "bow", "brow_flash", "emphatic_nod", "hands_on_hips", "laugh", "lean_back", "lean_in", "look_away",
             "look_down", "nod", "shake", "shrug", "sigh", "surprise", "sway", "think", "tilt", "wave")
 
 GESTURE_WORDS = {
@@ -20,11 +20,28 @@ GESTURE_WORDS = {
     "sway": "sway", "look_away": "look away, shy", "look_down": "look down", "lean_in": "lean in",
     "lean_back": "lean back", "surprise": "start in surprise", "think": "look up, thinking",
     "hands_on_hips": "put your hands on your hips", "wave": "wave", "shrug": "shrug",
+    "brow_flash": "raise your eyebrows",
 }
 
 TAG = re.compile(r"\[([^\[\]]{1,80})\]")
 # A tag, or words between single asterisks ("*giggles*"), which may be a stage direction.
-TOKEN = re.compile(r"\[([^\[\]]{1,80})\]|(?<!\*)\*([^*\n]{1,60})\*(?!\*)")
+# A tag in brackets; words between single asterisks ("*giggles*"), in parentheses ("(smiles)") or in angle
+# brackets ("<happy>"), any of which may be a stage direction.
+TOKEN = re.compile(r"\[([^\[\]]{1,80})\]|(?<!\*)\*([^*\n]{1,60})\*(?!\*)|\(([^()\n]{1,40})\)"
+                   r"|<\s*/?\s*([A-Za-z][^<>\n]{0,40})>")
+OPENERS = {"[": ("]", 80), "(": (")", 40), "<": (">", 40)}
+# Words a model may put before the feeling in a tag: "[emotion: happy]", "[mood happy]".
+LABELS = {"emotion", "feeling", "mood", "expression", "face", "gesture", "action", "emote", "tone"}
+# A feeling from emoji, when a sentence has no tag (emoji are never spoken).
+EMOJI_FEELINGS = {
+    "happy": "😊😄😁😀🙂😃😆🥰😍😘🤗😺✨🎉🥳👍💖💕❤♥😋",
+    "sad": "😢😭😞😔☹🙁💔😿😥😓",
+    "angry": "😠😡🤬💢😤",
+    "surprised": "😮😲😯🤯😱😳❗",
+    "embarrassed": "😅🙈☺😬",
+    "thinking": "🤔🧐",
+}
+EMOJI_LOOKUP = {ch: feeling for feeling, chars in EMOJI_FEELINGS.items() for ch in chars}
 SINGLE_STAR = re.compile(r"(?<!\*)\*(?!\*)")
 
 # Stage directions models write on their own, though asked to use only the tags above ("[smile]",
@@ -48,6 +65,22 @@ DIRECTIONS = {
     "hum": None, "clap": None, "hug": None, "look": None, "stretch": None, "yawn": None, "pause": None,
     "whisper": None, "cough": None, "clear": None, "sniff": None, "blink": None, "stare": None, "gaze": None,
     "turn": None, "point": None, "hold": None, "reach": None, "smirk": ("emotion", "happy"),
+    # Other words for the feelings, which models use in tags of their own ("[joyful]", "*nervously*").
+    "joy": ("emotion", "happy"), "joyful": ("emotion", "happy"), "glad": ("emotion", "happy"),
+    "delighted": ("emotion", "happy"), "proud": ("emotion", "happy"), "warm": ("emotion", "happy"),
+    "amused": ("emotion", "happy"), "loving": ("emotion", "happy"), "affectionate": ("emotion", "happy"),
+    "content": ("emotion", "happy"), "enthusiastic": ("emotion", "happy"),
+    "sadness": ("emotion", "sad"), "sorrow": ("emotion", "sad"), "disappointed": ("emotion", "sad"),
+    "worried": ("emotion", "sad"), "concerned": ("emotion", "sad"), "sympathetic": ("emotion", "sad"),
+    "anger": ("emotion", "angry"), "mad": ("emotion", "angry"), "frustrated": ("emotion", "angry"),
+    "irritated": ("emotion", "angry"), "grumpy": ("emotion", "angry"),
+    "amazed": ("emotion", "surprised"), "astonished": ("emotion", "surprised"), "afraid": ("emotion", "surprised"),
+    "fear": ("emotion", "surprised"), "shock": ("emotion", "surprised"),
+    "embarrassment": ("emotion", "embarrassed"), "bashful": ("emotion", "embarrassed"),
+    "sheepish": ("emotion", "embarrassed"), "anxious": ("emotion", "embarrassed"), "awkward": ("emotion", "embarrassed"),
+    "thoughtful": ("emotion", "thinking"), "pensive": ("emotion", "thinking"), "puzzled": ("emotion", "thinking"),
+    "wonder": ("emotion", "thinking"), "serious": ("emotion", "neutral"), "relaxed": ("emotion", "neutral"),
+    "soft": None, "gentle": None, "quiet": None, "sarcastic": None, "slow": None,
 }
 _VOCABULARY = set(DIRECTIONS) | set(GESTURES) | set(EMOTIONS) | {"in", "back", "away", "down", "on", "hands", "hips"}
 SENTENCE_END = re.compile(r"([.!?…]+[\"'”’)\]]*)(\s+)")
@@ -116,6 +149,10 @@ def _base(word):
         candidates += [word[:-3], word[:-3] + "e", word[:-4]]
     if word.endswith("ed"):
         candidates += [word[:-2], word[:-1], word[:-3]]
+    if word.endswith("ily"):
+        candidates.append(word[:-3] + "y")          # "angrily"
+    if word.endswith("ly"):
+        candidates += [word[:-2], word[:-2] + "e"]  # "nervously", "gently"
     return next((c for c in candidates if c in _VOCABULARY), word)
 
 
@@ -126,6 +163,8 @@ def stage_direction(body, starred=False):
     if not starred and re.fullmatch(r"\s*\d{1,3}\s*", body):
         return ("drop", None)                 # a footnote mark, "[1]"
     words = [_base(w) for w in re.findall(r"[a-z]+", body.lower())]
+    while words and words[0] in LABELS:
+        words = words[1:]                     # "[emotion: happy]"
     if not words or len(words) > 6 or re.search(r"\d", body):
         return None
     joined = " ".join(words)
@@ -145,6 +184,13 @@ def stage_direction(body, starred=False):
             return ("action", {"kind": "gesture", "name": meaning[1]})
         return meaning
     return None if starred else ("drop", None)
+
+
+def _emphasis(body):
+    """One word that, between asterisks inside a sentence, is emphasis ("I'm *glad* you came", "let's *pause*")
+    rather than an action ("*smiles*", "*giggles softly*")."""
+    words = re.findall(r"[a-z]+", body.lower())
+    return len(words) == 1 and not (words[0].endswith("s") and _base(words[0]) != words[0])
 
 
 def clean_for_speech(text):
@@ -172,9 +218,10 @@ class Splitter:
     def _read_tags(self, final=False):
         raw = self.raw
         hold = len(raw)
-        open_at = raw.rfind("[")
-        if open_at != -1 and "]" not in raw[open_at:] and len(raw) - open_at < 80:
-            hold = open_at                                      # a tag may still be arriving
+        for opener, (closer, reach) in OPENERS.items():
+            open_at = raw.rfind(opener)
+            if open_at != -1 and closer not in raw[open_at:] and len(raw) - open_at < reach:
+                hold = min(hold, open_at)                       # a tag may still be arriving
         stars = [m.start() for m in SINGLE_STAR.finditer(raw)]
         if len(stars) % 2 and len(raw) - stars[-1] < 60:
             hold = min(hold, stars[-1])                         # so may words between asterisks
@@ -185,15 +232,28 @@ class Splitter:
         for m in TOKEN.finditer(ready):
             self.text += ready[pos:m.start()]
             pos = m.end()
-            if m.group(1) is not None:
-                parsed = parse_tag(m.group(1)) or stage_direction(m.group(1))
+            bracket, starred, round_, angle = m.groups()
+            if bracket is not None:
+                parsed = parse_tag(bracket) or stage_direction(bracket)
+            elif angle is not None:
+                parsed = parse_tag(angle) or stage_direction(angle)
             else:
-                parsed = stage_direction(m.group(2), starred=True)
+                parsed = stage_direction(starred if starred is not None else round_, starred=True)
+                if (parsed is not None and parsed[0] in ("emotion", "drop") and starred is not None
+                        and _emphasis(starred) and self._mid_sentence()):
+                    parsed = None            # a feeling word stressed mid-sentence is said, not acted
             if parsed is None:
-                self.text += m.group(0) if m.group(1) is not None else m.group(2)
+                # Not a direction after all: emphasis keeps its words, a remark in parentheses its brackets.
+                self.text += starred if starred is not None else m.group(0)
             elif parsed[0] != "drop":
                 self.tags.append((len(self.text), parsed))
         self.text += ready[pos:]
+
+    def _mid_sentence(self):
+        """Whether the words so far stop inside a sentence."""
+        ends = list(SENTENCE_END.finditer(self.text))
+        tail = self.text[ends[-1].end():] if ends else self.text
+        return bool(re.search(r"[^\W\d_]", tail))
 
     def _next_cut(self, final):
         """Where the next piece ends: (end of its words, where the following text starts), or None to wait."""
@@ -230,6 +290,10 @@ class Splitter:
         emotions = [value for kind, value in mine if kind == "emotion"]
         actions = [value for kind, value in mine if kind == "action"]
         self.first = False
+        if not emotions:                     # no tag: an emoji, if the model used one, says the feeling
+            found = [EMOJI_LOOKUP[ch] for ch in piece if ch in EMOJI_LOOKUP]
+            if found:
+                emotions = [max(set(found), key=found.count)]
         return (clean_for_speech(piece), emotions[-1] if emotions else None, actions)
 
     def _pieces(self, final):

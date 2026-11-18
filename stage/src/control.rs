@@ -14,6 +14,8 @@
 //! {"emotion": "happy", "intensity": 0.8}
 //! {"gesture": "nod"}
 //! {"random_gestures": false}
+//! {"perform": {"syllables": "eaoe", "events": [[0, "nod", 0.7]]}}
+//! {"syllable": 2}
 //! {"emotion": "happy", "expression": "Smile"}
 //! {"quit": true}
 //! ```
@@ -60,10 +62,31 @@ pub enum Command {
 	RandomGestures(bool),
 	/// Show one of the model's own expressions with the mood, or none.
 	Expression(Option<String>),
+	/// A sentence starts: its syllables' mouth shapes and the movements tied to them.
+	Perform(crate::speech::Performance),
+	/// Syllable k of the sentence is being heard.
+	Syllable(usize),
 	Quit,
 }
 
 const DEFAULT_EASE: f32 = 0.25;
+
+/// `{"syllables": "eaoe", "events": [[syllable, "gesture", strength], ...]}`
+fn parse_performance(val: &Value) -> Result<crate::speech::Performance, String> {
+	let syllables = val.get("syllables").and_then(Value::as_str).ok_or("\"perform\" needs \"syllables\"")?;
+	if syllables.len() > 2000 || !syllables.bytes().all(|b| b"aeiou".contains(&b)) {
+		return Err("\"syllables\" must be letters a, e, i, o and u".into());
+	}
+	let mut events = Vec::new();
+	for e in val.get("events").and_then(Value::as_array).map(|a| a.as_slice()).unwrap_or(&[]) {
+		let item = e.as_array().filter(|a| a.len() == 3).ok_or("each event is [syllable, gesture, strength]")?;
+		let at = item[0].as_u64().ok_or("an event's syllable must be a number")? as usize;
+		let name = item[1].as_str().ok_or("an event names a gesture")?.to_string();
+		let strength = item[2].as_f64().ok_or("an event's strength must be a number")? as f32;
+		events.push((at, name, strength.clamp(0.0, 1.5)));
+	}
+	Ok(crate::speech::Performance { syllables: syllables.as_bytes().to_vec(), events })
+}
 
 /// Parse one line. Returns the optional `at` time and the commands it holds.
 pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
@@ -115,6 +138,8 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 				}
 			}
 			"mouth" => out.push(Command::Mouth(val.as_f64().ok_or("\"mouth\" must be a number")? as f32)),
+			"syllable" => out.push(Command::Syllable(val.as_u64().ok_or("\"syllable\" must be a number")? as usize)),
+			"perform" => out.push(Command::Perform(parse_performance(val)?)),
 			"state" => {
 				let s = val.as_str().ok_or("\"state\" must be a string")?;
 				out.push(Command::State(State::parse(s).ok_or(format!("unknown state '{s}'"))?));
@@ -288,6 +313,17 @@ mod tests {
 		assert_eq!(c, vec![Command::Unset("Cheek".into(), 0.0)]);
 		let (_, c) = parse_line(r#"{"clear": true}"#).unwrap();
 		assert_eq!(c, vec![Command::ClearAll(DEFAULT_EASE)]);
+		let (_, c) = parse_line(r#"{"perform": {"syllables": "aei", "events": [[1, "nod", 0.5]]}}"#).unwrap();
+		assert_eq!(c, vec![Command::Perform(crate::speech::Performance {
+			syllables: b"aei".to_vec(),
+			events: vec![(1, "nod".into(), 0.5)],
+		})]);
+		let (_, c) = parse_line(r#"{"syllable": 3}"#).unwrap();
+		assert_eq!(c, vec![Command::Syllable(3)]);
+		for bad in [r#"{"perform": {"syllables": "xyz"}}"#, r#"{"perform": {"syllables": "a", "events": [[1, "nod"]]}}"#,
+			r#"{"syllable": "two"}"#] {
+			assert!(parse_line(bad).is_err(), "{bad}");
+		}
 		for bad in [r#"{"set": 3}"#, r#"{"set": {"Cheek": "pink"}}"#, r#"{"set": {"Cheek": 1}, "ease": -1}"#] {
 			assert!(parse_line(bad).is_err(), "{bad}");
 		}

@@ -14,6 +14,7 @@ mod motion;
 mod overrides;
 mod puppet_info;
 mod smooth;
+mod speech;
 mod window;
 
 use std::path::PathBuf;
@@ -30,7 +31,7 @@ use live2d::{Live2dPuppet, Live2dRenderer};
 use serde_json::json;
 use winit::window::{Fullscreen, WindowBuilder};
 
-use behaviour::Behaviour;
+use behaviour::{Behaviour, State};
 use control::{Command, Events, Script};
 use mapping::Mapper;
 use motion::{Library, Motion};
@@ -214,6 +215,8 @@ struct StageApp {
 	mapper: Mapper,
 	behaviour: Behaviour,
 	motion: Motion,
+	/// The sentence being said: its mouth shapes and the movements tied to its words.
+	speech: speech::Speech,
 	/// The model's own expressions and how much each shows (Live2D-format models).
 	expressions: Vec<live2d::Expression>,
 	expression_weights: Vec<(smooth::Spring, f32)>,
@@ -263,6 +266,9 @@ impl StageApp {
 		match command {
 			Command::Mouth(level) => self.behaviour.set_mouth(level),
 			Command::State(state) => {
+				if state != State::Speaking {
+					self.speech.stop();
+				}
 				if state != self.behaviour.state() {
 					self.behaviour.set_state(state);
 					self.events.emit(json!({"event": "state", "state": state.name()}));
@@ -291,6 +297,14 @@ impl StageApp {
 				Err(e) => self.events.emit(json!({"event": "error", "message": e})),
 			},
 			Command::RandomGestures(on) => self.motion.set_random(on),
+			Command::Perform(perf) => self.speech.start(perf),
+			Command::Syllable(k) => {
+				for (name, strength) in self.speech.syllable(k) {
+					if let Ok(true) = self.motion.suggest(&name, strength) {
+						self.events.emit(json!({"event": "gesture", "name": name, "cause": "speech"}));
+					}
+				}
+			}
 			Command::Expression(name) => {
 				let index = match &name {
 					None => None,
@@ -419,6 +433,7 @@ impl App for StageApp {
 		if let Some((g, cause)) = self.motion.apply(dt, &mut pose, self.behaviour.state(), !self.opts.still) {
 			self.events.emit(json!({"event": "gesture", "name": g, "cause": cause}));
 		}
+		self.speech.apply(dt, self.behaviour.state() == State::Speaking, &mut pose);
 		let mut values = self.mapper.resolve(&pose);
 		self.overrides.apply(dt, &mut values);
 		for (expression, (weight, target)) in self.expressions.iter().zip(self.expression_weights.iter_mut()) {
@@ -588,6 +603,7 @@ fn run(opts: Options) -> Result<(), String> {
 		overrides: Overrides::new(&info.params),
 		behaviour,
 		motion,
+		speech: speech::Speech::new(),
 		expressions,
 		expression_weights,
 		opts,

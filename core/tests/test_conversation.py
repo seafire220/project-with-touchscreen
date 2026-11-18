@@ -85,6 +85,25 @@ class SplitterTest(unittest.TestCase):
             self.assertEqual(got, expected, "pieces of %d characters" % size)
         self.assertEqual(self.pieces("That is **very** important.", 3), [("That is very important.", None, [])])
 
+    def test_tags_written_other_ways_and_emoji_still_count(self):
+        text = ("[Emotion: Happy!] Hello there! (smiles) Nice to see you. <sad> I missed you (a lot, honestly). "
+                "[mood: thinking] Let me see what we can do... (waves) Bye for now! That is great 🎉")
+        out = [(t, e, [a["name"] for a in acts]) for t, e, acts in self.pieces(text, 4)]
+        self.assertEqual(out, [("Hello there!", "happy", []), ("Nice to see you.", "happy", []),
+                               ("I missed you (a lot, honestly).", "sad", []),
+                               ("Let me see what we can do...", "thinking", []),
+                               ("Bye for now!", None, ["wave"]),
+                               ("That is great", "happy", [])])
+
+    def test_other_words_for_feelings_count_and_stressed_words_are_still_said(self):
+        text = ("[joyful] What a day! *nervously* Um, hi there. <Angrily> Stop that right now! "
+                "I'm *glad* you came, honestly. Let's *pause* here. *sighs* Okay, fine. (thoughtfully) I wonder.")
+        out = [(t, e, [a["name"] for a in acts]) for t, e, acts in self.pieces(text, 5)]
+        self.assertEqual(out, [("What a day!", "happy", []), ("Um, hi there.", "embarrassed", []),
+                               ("Stop that right now!", "angry", []),
+                               ("I'm glad you came, honestly.", None, []), ("Let's pause here.", None, []),
+                               ("Okay, fine.", None, ["sigh"]), ("I wonder.", "thinking", [])])
+
     def test_tags_at_the_very_end_are_kept(self):
         out = self.pieces("All done now, thank you. [happy] [bow]", 6)
         self.assertEqual(out[-1], ("", "happy", [{"kind": "gesture", "name": "bow"}]))
@@ -157,6 +176,42 @@ class ConversationTest(unittest.TestCase):
         self.assertIn("rough day at work", system, "and the most recent one")
         self.assertNotIn("Saturn", system, "but not the others")
         self.assertLess(system.index("sourdough"), system.index("rough day"), "oldest first")
+
+    def certain_planner(self, conv):
+        import random as rnd
+        from companion.performance import Planner
+        conv.planner = Planner(rnd.Random(2), expressiveness=10.0)      # every rule that applies fires
+        return conv
+
+    def test_a_reply_without_tags_still_shows_a_feeling_and_moves_with_its_words(self):
+        conv = self.certain_planner(self.make(llm=FakeLLM("That's wonderful news, congratulations! Do you want to celebrate?")))
+        reply = run(conv.respond("I got the job!"))
+        self.assertIsNone(reply.error)
+        self.assertIn({"express": "happy"}, self.stage.commands, "the feeling is guessed from the words")
+        performs = [c["perform"] for c in self.stage.commands if "perform" in c]
+        self.assertEqual(len(performs), len(reply.spoken), "every sentence gets mouth shapes")
+        self.assertTrue(all(set(p["syllables"]) <= set("aeiou") and p["syllables"] for p in performs))
+        self.assertIn("tilt", [e[1] for p in performs for e in p["events"]], "a question tilts the head")
+        marks = [c["syllable"] for c in self.stage.commands if "syllable" in c]
+        self.assertTrue(marks, "syllables are marked in the sound")
+
+    def test_a_feeling_the_model_tagged_is_not_second_guessed(self):
+        conv = self.make(llm=FakeLLM("[sad] I lost my keys today. Congratulations, wonderful, amazing!"))
+        run(conv.respond("hi"))
+        feelings = [c["express"] for c in self.stage.commands if "express" in c and c["express"] != "neutral"]
+        self.assertEqual(feelings, ["sad"])
+
+    def test_if_planning_fails_the_character_still_talks(self):
+        conv = self.make(llm=FakeLLM("Hello there. How are you today?"))
+
+        def broken(*args, **kwargs):
+            raise RuntimeError("planner bug")
+        conv.planner.plan = broken
+        reply = run(conv.respond("hi"))
+        self.assertIsNone(reply.error)
+        self.assertEqual(reply.spoken, ["Hello there.", "How are you today?"])
+        self.assertFalse(any("perform" in c for c in self.stage.commands))
+        self.assertGreater(max(c["mouth"] for c in self.stage.commands if "mouth" in c), 0.3, "the mouth still moves")
 
     def test_an_interruption_stops_speech_and_remembers_what_was_said(self):
         async def scenario():

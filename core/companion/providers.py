@@ -341,6 +341,11 @@ class LocalTTS:
         samples = np.clip(np.asarray(audio.samples, dtype=np.float32), -1.0, 1.0)
         return (samples * 32767).astype(np.int16).tobytes()
 
+    async def full(self, text):
+        """A whole sentence's sound at once (it is made whole anyway), so its syllables can be placed."""
+        import asyncio
+        return await asyncio.get_running_loop().run_in_executor(None, self._speak, text)
+
     async def stream(self, text):
         import asyncio
         pcm = await asyncio.get_running_loop().run_in_executor(None, self._speak, text)
