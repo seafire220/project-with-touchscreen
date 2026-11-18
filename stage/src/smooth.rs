@@ -56,6 +56,9 @@ impl Spring {
 	}
 }
 
+// Not used by the stage yet: it is for noisy inputs, such as recorded or
+// tracked motion (docs/24-motion.md).
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OneEuro {
 	/// Cut-off at rest, in hertz: lower removes more jitter from slow motion.
@@ -68,11 +71,13 @@ pub struct OneEuro {
 	speed: f32,
 }
 
+#[allow(dead_code)]
 fn alpha(cutoff: f32, dt: f32) -> f32 {
 	let tau = 1.0 / (TAU * cutoff);
 	1.0 / (1.0 + tau / dt)
 }
 
+#[allow(dead_code)]
 impl OneEuro {
 	pub fn new(min_cutoff: f32, beta: f32) -> Self {
 		Self { min_cutoff, beta, d_cutoff: 1.0, last: None, speed: 0.0 }

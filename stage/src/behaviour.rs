@@ -91,6 +91,8 @@ const SETTLE: f32 = 0.35;
 /// Springs: the eyes jump, the head follows, posture drifts.
 const GAZE_TIME: f32 = 0.045;
 const HEAD_TIME: f32 = 0.22;
+/// Fastest the head turns, in control units per second, however far it is told to look.
+const HEAD_MAX_SPEED: f32 = 2.5;
 const POSTURE_TIME: f32 = 1.4;
 const BROW_TIME: f32 = 0.12;
 const NOD_TIME: f32 = 0.09;
@@ -166,7 +168,11 @@ impl Behaviour {
 			posture: [spring(POSTURE_TIME), spring(POSTURE_TIME), spring(POSTURE_TIME)],
 			posture_target: [0.0; 3],
 			next_posture: 2.0,
-			head: [spring(HEAD_TIME), spring(HEAD_TIME), spring(HEAD_TIME)],
+			head: [
+				spring(HEAD_TIME).with_max_speed(HEAD_MAX_SPEED),
+				spring(HEAD_TIME).with_max_speed(HEAD_MAX_SPEED),
+				spring(HEAD_TIME).with_max_speed(HEAD_MAX_SPEED),
+			],
 			nod: spring(NOD_TIME),
 			nod_until: 0.0,
 			nod_depth: 0.0,

@@ -365,7 +365,7 @@ impl App for StageApp {
 			return !self.quit;
 		};
 		let started = Instant::now();
-		let mut posed = started;
+		let posed: Instant;
 		match (&mut self.puppet, renderer) {
 			(Puppet::Inox(model), Renderer::Inox(renderer)) => {
 				renderer.clear();
