@@ -51,9 +51,11 @@ areas that look drawn rather than smeared, arms in other poses, side views.
 PSD2Live, Anime2.5DRig and Iki each rig separated layers, as our rigger and
 `refine.py` do; they may do individual things better (PSD2Live's simulation
 baking, Anime2.5DRig's hair strands, Iki's checks) and are worth comparing
-on the same layers. The new capability is artwork: See-through for hidden
-areas; an image-editing model (Qwen 2511, or the buyer's image API) for arm
-poses and side views; THA3 and the multi-view models as references.
+on the same layers. The new capability is artwork as **parts**: See-through
+for completed, transparent layers (hidden areas included); arms cut into
+pieces that turn at the joints; and, only where deformation cannot reach,
+alternate drawings of a part made as transparent layers by open models run
+locally. THA3 and the multi-view models are references at most.
 
 **Which are usable commercially?** Clear: Image2Live2D, Anime2.5DRig, Iki,
 THA3 (with attribution for its weights), Qwen 2511 and its LoRA,
@@ -87,45 +89,45 @@ converter already carries into the Live2D format.
 
 ## Recommended method
 
-1. **Hidden areas**: keep today's fills as the fallback; with a GPU of 8 GB
-   or more (or a hosted run), use See-through's LayerDiff 3D for the layers
-   behind the arms, hair and face, matched to our layer roles; with only the
-   buyer's image-API key, inpaint each hidden area with the API using our
-   masks.
-2. **Arm poses**: ask an image-editing model (local Qwen 2511, or the
-   buyer's image API) to redraw the whole character with one arm changed
-   (waving, hand on hip, pointing, hands together), then segment, register
-   and cut the new arm as above, and check its colours and outline against
-   the original before accepting it. The buyer approves each drawing on a
-   review page.
-3. **Side views (for 90° turns)**: three-quarter and profile heads from Qwen
-   2511 with the Multiple Angles LoRA, used as targets to fit the turn keys
-   (the way Iki measures a turn reference) and as the source of the profile
-   artwork (nose, lips, fill) that `20-head-turns.md` lists.
-4. **References**: THA3 only if fitting needs exact angle-by-angle targets.
+The owner's requirements (2026-11-18): the tool must be **free** (no paid
+image services), and what it makes must be **parts for the rig**, not new
+pictures: general image generators return whole pictures with backgrounds,
+which is the wrong kind of output. So:
 
-## Experiments next (item 3), with an original character only
+1. **Layers and hidden areas**: See-through (free: Apache-2.0 code,
+   OpenRAIL++-M weights) run on the buyer's computer gives completed,
+   transparent layers per part, which map onto our layer roles. It needs an
+   NVIDIA card with 8 GB or more, or (to be tried) an Apple Silicon Mac; on
+   other laptops it can run slowly on the processor once per character, or
+   use See-through's free Hugging Face demo. Without it, today's fills stay.
+2. **Bigger poses by deformation first**, the way Live2D artists do it: the
+   arm cut into upper arm, forearm and hand, each completed where the others
+   hid it, so the rig turns them at the shoulder, elbow and wrist without
+   gaps. This covers waving, open arms and shrugs within a range.
+3. **Alternate drawings only where deformation cannot reach** (a hand on
+   the hip): made as a transparent part in the character's own coordinates
+   by an open model run locally (See-through's layer generator is the first
+   candidate), registered at the shoulder, checked against the original's
+   colours and outline, and switched in by the rig. Never whole pictures.
+4. **Side views for 90° turns** follow the same rule: profile parts (side
+   nose, lips, the fill behind the profile) as transparent layers.
+5. **Riggers compared on the same layers**: PSD2Live, Anime2.5DRig and Iki
+   against ours; borrow what is better.
 
-The owner's own test pictures are commercial characters; image models will
-be tried only on original artwork (a character made for the test, or the
-commissioned default character), never asked to redraw an existing
-character.
+## Experiments next (item 3), free tools and an original character only
 
-1. Make or obtain an original test character (front view, full body, flat
-   colours).
-2. With the owner's Gemini key: ask for an arm raised, a hand on the hip,
-   both arms relaxed; a three-quarter and a profile head. **Blocked for
-   now:** the key's project is on Google's free tier, which allows no image
-   generation at all ("limit: 0" on every image model, checked 2026-11-17);
-   billing must be enabled for the project in Google AI Studio (about
-   US$0.04 per image with Gemini 2.5 Flash Image), or another image service's
-   key supplied. Record cost, time,
-   and how well style, colours and proportions hold (`reveal.py` and pose
-   strips on the result).
-3. Run See-through's demo (free Hugging Face account, 1-2 runs a day) on the
-   same picture; compare its hidden areas with our fills.
-4. Rig the same layers with PSD2Live, Anime2.5DRig and Iki; compare pose
-   strips with ours and note what to borrow.
+The owner's own test pictures are commercial characters, so experiments use
+original artwork (a character made or commissioned for testing).
+
+1. Run See-through on the original character (its free demo, a GPU, or the
+   owner's Mac); compare its completed layers with our fills (`reveal.py`).
+2. Cut its arm layers into upper arm, forearm and hand, rig them to turn at
+   the joints, and measure gaps at the gesture poses (wave, shrug, hands on
+   hips).
+3. Rig the same layers with PSD2Live, Anime2.5DRig and Iki and compare pose
+   strips with ours.
+4. Only then try a local open model for one alternate arm drawing, as a
+   transparent part.
 
 ## Sources
 
