@@ -1,7 +1,8 @@
 # Motion: a generic skeleton every character is fitted to
 
-Status: 2026-11-17. Design; nothing here is built yet (roadmap item 4,
-decision D-045). Written after the owner looked at a friend's VTubing app,
+Status: 2026-11-18. Design (roadmap item 4, decision D-045). First steps
+built: the smoothing primitives, the wider controls with rest-aware mapping,
+and the new idle and speech motion (see "Built so far" at the end). Written after the owner looked at a friend's VTubing app,
 in which a full-body character moves smoothly with an outstretched arm, and
 suggested that the trick may be a generic animation skeleton that every
 uploaded model is fitted to.
@@ -184,6 +185,32 @@ covers the image-to-3D candidates).
 
 Judged by eye in side-by-side clips (old and new motion, same character),
 since the existing checks have passed motion that looked wrong.
+
+## Built so far (2026-11-18)
+
+- `stage/src/smooth.rs`: the critically damped spring and the 1€ filter,
+  with tests (no overshoot, steady at any frame time, speed limits; jitter
+  removed without lag on fast moves).
+- `stage/src/mapping.rs`: eight more controls on Live2D's standard names
+  (gaze X and Y, left and right brow, mouth shape, left and right arm,
+  shoulders); controls that run from -1 to 1 now rest at each parameter's
+  default, so a model whose neutral pose is not the middle of its range
+  rests correctly; a mapping file can set `"rest"`.
+- `stage/src/behaviour.rs`: the eyes shift by state (look around when idle,
+  at the user when listening, up and away when thinking, mostly at the user
+  with glances away when speaking) and the head follows part of the way;
+  posture drifts to a new resting pose every 2.5-6 s, so idle motion never
+  repeats; loudness onsets while speaking bring a quick nod, a brow lift on
+  strong ones and a small accent of one arm; a slight smile when idle or
+  listening; shoulders rise with breath; blink gaps follow a log-normal
+  spread, with a blink often on a long gaze shift; every movement goes
+  through a spring. Holding still (`--still`) still stops all of it.
+- Not built yet: calibration files, layers with fades, motion clips, the
+  recording tool, the calibration page and the debug view.
+
+Our own characters have no gaze or brow parameters yet (the rigger does not
+make them), so on them these controls do nothing until the studio adds them;
+imported Live2D-format models usually have them.
 
 ## Sources
 

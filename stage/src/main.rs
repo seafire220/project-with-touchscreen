@@ -12,6 +12,7 @@ mod live2d;
 mod mapping;
 mod overrides;
 mod puppet_info;
+mod smooth;
 mod window;
 
 use std::path::PathBuf;

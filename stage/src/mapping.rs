@@ -21,10 +21,18 @@ pub enum Control {
 	BodyPitch,
 	BodyRoll,
 	Breath,
+	GazeX,
+	GazeY,
+	BrowLeft,
+	BrowRight,
+	Smile,
+	ArmLeft,
+	ArmRight,
+	Shoulders,
 }
 
 impl Control {
-	pub const ALL: [Control; 10] = [
+	pub const ALL: [Control; 18] = [
 		Control::MouthOpen,
 		Control::BlinkLeft,
 		Control::BlinkRight,
@@ -35,6 +43,14 @@ impl Control {
 		Control::BodyPitch,
 		Control::BodyRoll,
 		Control::Breath,
+		Control::GazeX,
+		Control::GazeY,
+		Control::BrowLeft,
+		Control::BrowRight,
+		Control::Smile,
+		Control::ArmLeft,
+		Control::ArmRight,
+		Control::Shoulders,
 	];
 
 	pub fn key(self) -> &'static str {
@@ -49,10 +65,19 @@ impl Control {
 			Control::BodyPitch => "body_pitch",
 			Control::BodyRoll => "body_roll",
 			Control::Breath => "breath",
+			Control::GazeX => "gaze_x",
+			Control::GazeY => "gaze_y",
+			Control::BrowLeft => "brow_left",
+			Control::BrowRight => "brow_right",
+			Control::Smile => "smile",
+			Control::ArmLeft => "arm_left",
+			Control::ArmRight => "arm_right",
+			Control::Shoulders => "shoulders",
 		}
 	}
 
-	/// Controls that run from -1 to 1; the rest run from 0 to 1.
+	/// Controls that run from -1 to 1, with 0 at the parameter's default; the
+	/// rest run from 0 to 1 across the parameter's range.
 	fn bipolar(self) -> bool {
 		!matches!(self, Control::MouthOpen | Control::BlinkLeft | Control::BlinkRight | Control::Breath)
 	}
@@ -68,6 +93,13 @@ impl Control {
 			Control::BodyPitch => pose.body_pitch,
 			Control::BodyRoll => pose.body_roll,
 			Control::Breath => pose.breath,
+			Control::GazeX => pose.gaze_x,
+			Control::GazeY => pose.gaze_y,
+			Control::BrowLeft | Control::BrowRight => pose.brows,
+			Control::Smile => pose.smile,
+			Control::ArmLeft => pose.arm_left,
+			Control::ArmRight => pose.arm_right,
+			Control::Shoulders => pose.shoulders,
 		}
 	}
 
@@ -86,6 +118,15 @@ impl Control {
 			Control::BodyPitch => &[("Body:: Yaw-Pitch", 1, false), ("ParamBodyAngleY", 0, false)],
 			Control::BodyRoll => &[("Body:: Roll", 0, false), ("ParamBodyAngleZ", 0, false)],
 			Control::Breath => &[("Breath", 0, false), ("ParamBreath", 0, false)],
+			// Live2D's standard parameter names (docs/24-motion.md).
+			Control::GazeX => &[("ParamEyeBallX", 0, false)],
+			Control::GazeY => &[("ParamEyeBallY", 0, false)],
+			Control::BrowLeft => &[("ParamBrowLY", 0, false)],
+			Control::BrowRight => &[("ParamBrowRY", 0, false)],
+			Control::Smile => &[("ParamMouthForm", 0, false)],
+			Control::ArmLeft => &[("ParamArmLA", 0, false)],
+			Control::ArmRight => &[("ParamArmRA", 0, false)],
+			Control::Shoulders => &[("ParamShoulderY", 0, false)],
 		}
 	}
 }
@@ -98,6 +139,29 @@ pub struct Target {
 	pub lo: f32,
 	/// Parameter value when the control is at its highest.
 	pub hi: f32,
+	/// Parameter value when a control that runs from -1 to 1 is at 0: the
+	/// parameter's default, so a model whose neutral pose is not the middle
+	/// of its range still rests in it.
+	pub mid: f32,
+}
+
+impl Target {
+	fn value(&self, u: f32, bipolar: bool) -> f32 {
+		if !bipolar {
+			return self.lo + u.clamp(0.0, 1.0) * (self.hi - self.lo);
+		}
+		let u = u.clamp(-1.0, 1.0);
+		if u >= 0.0 {
+			self.mid + u * (self.hi - self.mid)
+		} else {
+			self.mid - u * (self.lo - self.mid)
+		}
+	}
+}
+
+/// The default, kept inside the range (some files carry a default outside it).
+fn neutral(p: &ParamInfo, axis: usize, lo: f32, hi: f32) -> f32 {
+	p.defaults[axis].clamp(lo.min(hi), lo.max(hi))
 }
 
 pub struct Mapper {
@@ -117,7 +181,8 @@ impl Mapper {
 			for (name, axis, inverted) in control.candidates() {
 				if let Some(p) = find(info, name) {
 					let (lo, hi) = if *inverted { (p.max[*axis], p.min[*axis]) } else { (p.min[*axis], p.max[*axis]) };
-					targets.push((control, Target { param: p.name.clone(), axis: *axis, lo, hi }));
+					let mid = neutral(p, *axis, lo, hi);
+					targets.push((control, Target { param: p.name.clone(), axis: *axis, lo, hi, mid }));
 					break;
 				}
 			}
@@ -135,7 +200,9 @@ impl Mapper {
 	}
 
 	/// Apply a mapping file on top of the automatic mapping. Format:
-	/// `{"mouth_open": {"param": "Name", "axis": "y", "min": 0, "max": 1, "invert": false}, ...}`.
+	/// `{"mouth_open": {"param": "Name", "axis": "y", "min": 0, "max": 1, "invert": false}, ...}`;
+	/// controls that run from -1 to 1 also take `"rest"`, the value at 0
+	/// (default: the parameter's default).
 	/// A control set to `null` is switched off.
 	pub fn with_overrides(info: &PuppetInfo, overrides: &Value) -> Result<Self, String> {
 		let mut targets = Self::auto(info).targets;
@@ -162,7 +229,11 @@ impl Mapper {
 			if spec.get("invert").and_then(Value::as_bool).unwrap_or(false) {
 				std::mem::swap(&mut lo, &mut hi);
 			}
-			targets.push((control, Target { param: p.name.clone(), axis, lo, hi }));
+			let mid = match spec.get("rest").and_then(Value::as_f64) {
+				Some(rest) => rest as f32,
+				None => neutral(p, axis, lo, hi),
+			};
+			targets.push((control, Target { param: p.name.clone(), axis, lo, hi, mid }));
 		}
 		Ok(Self::from_targets(info, targets))
 	}
@@ -174,10 +245,9 @@ impl Mapper {
 	/// Compute parameter values for a pose. Returns (parameter name, value).
 	pub fn resolve(&mut self, pose: &Pose) -> Vec<(String, Vec2)> {
 		for (control, t) in &self.targets {
-			let v = control.value(pose);
-			let u = if control.bipolar() { (v + 1.0) * 0.5 } else { v }.clamp(0.0, 1.0);
+			let v = t.value(control.value(pose), control.bipolar());
 			if let Some(slot) = self.values.get_mut(&t.param) {
-				slot[t.axis] = t.lo + u * (t.hi - t.lo);
+				slot[t.axis] = v;
 			}
 		}
 		let mut out: Vec<(String, Vec2)> = self
@@ -237,6 +307,30 @@ mod tests {
 		let out = m.resolve(&Pose { blink: 1.0, head_yaw: 0.5, ..Default::default() });
 		assert_eq!(value(&out, "ParamEyeLOpen").x, 0.0); // closed
 		assert_eq!(value(&out, "ParamAngleX").x, 15.0);
+	}
+
+	#[test]
+	fn standard_controls_rest_at_the_parameter_default() {
+		let info = PuppetInfo {
+			params: vec![
+				param("ParamEyeBallX", false, [-1.0, 0.0], [1.0, 0.0], [0.0, 0.0]),
+				param("ParamArmLA", false, [-30.0, 0.0], [30.0, 0.0], [0.0, 0.0]),
+				// A model whose neutral mouth is not the middle of its range.
+				param("ParamMouthForm", false, [-1.0, 0.0], [2.0, 0.0], [1.0, 0.0]),
+				param("ParamShoulderY", false, [-10.0, 0.0], [10.0, 0.0], [0.0, 0.0]),
+			],
+			..Default::default()
+		};
+		let mut m = Mapper::auto(&info);
+		let rest = m.resolve(&Pose::default());
+		assert_eq!(value(&rest, "ParamMouthForm").x, 1.0, "at rest, the model's own neutral shape");
+		assert_eq!(value(&rest, "ParamShoulderY").x, 0.0);
+		let out = m.resolve(&Pose { gaze_x: 0.5, arm_left: -0.5, smile: 1.0, ..Default::default() });
+		assert_eq!(value(&out, "ParamEyeBallX").x, 0.5);
+		assert_eq!(value(&out, "ParamArmLA").x, -15.0);
+		assert_eq!(value(&out, "ParamMouthForm").x, 2.0);
+		let down = m.resolve(&Pose { smile: -0.5, ..Default::default() });
+		assert_eq!(value(&down, "ParamMouthForm").x, 0.0, "halfway from neutral to the lowest value");
 	}
 
 	#[test]
