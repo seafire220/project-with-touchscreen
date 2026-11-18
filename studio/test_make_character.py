@@ -68,6 +68,19 @@ class MakeCharacterTest(unittest.TestCase):
         names = {n.get("name") for n in refine._nodes(puppet["nodes"])}
         self.assertTrue({"arm_l", "arm_r"} <= names)
 
+    def test_a_preview_of_it_moving_is_drawn_without_the_stage(self):
+        import preview
+        from PIL import Image
+        p = package.open_package(io.BytesIO(self.data))
+        renderer = preview.Renderer(p.files["visual/puppet.inp"], size=96)
+        rest = np.asarray(renderer.render({}))
+        self.assertGreater((np.abs(rest.astype(int) - preview.BACKGROUND).sum(-1) > 30).mean(), 0.05, "the figure shows")
+        keys = preview.tour([x.name for x in renderer.puppet.params])
+        self.assertTrue(any("ParamArmRB" in v for _, v in keys), "the tour waves")
+        gif = preview.gif(preview.frames(renderer, keys[:4], fps=4))
+        self.assertTrue(gif.startswith(b"GIF89a"))
+        self.assertGreater(Image.open(io.BytesIO(gif)).n_frames, 1)
+
     def test_the_live2d_format_version_matches_the_puppet(self):
         p = package.open_package(io.BytesIO(self.data))
         self.assertTrue(p.files["visual/live2d/model.moc3"].startswith(b"MOC3"))

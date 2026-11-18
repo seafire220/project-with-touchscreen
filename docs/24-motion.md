@@ -246,8 +246,10 @@ since the existing checks have passed motion that looked wrong.
   each arm first, where it carries on behind it (between visible body on
   both sides, and up to the body's outline drawn straight across where the
   arm hides it), and keeps an arm with the body when the picture does not
-  show it hanging whole from the shoulder (broken up by hair in front, very
-  thin, raised, folded, or too short). Measured on the owner's test
+  show it hanging whole from the shoulder (broken up by hair in front, half
+  hidden by long hair lying along it, very thin, raised, folded, or too
+  short); where a strand of hair crosses an arm, the arm is completed under
+  it so it moves whole. Measured on the owner's test
   pictures: the area left empty when the arms swing fell from 5,540 to 436
   square pixels on Alice, and the tear at the elbow when shoulder and elbow
   move together from 2,584 to 92; on the others the remaining empty area is

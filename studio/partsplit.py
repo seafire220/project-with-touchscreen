@@ -50,6 +50,7 @@ ARM_MAIN_SHARE = 0.85
 ARM_MIN_WIDTH = 0.022
 ARM_MIN_LENGTH = 0.12
 ARM_FOLDED_SHARE = 0.3      # ... and fewer than this share of its rows cross it twice (folded back)
+ARM_HAIR_SHARE = 0.35       # ... and hair lies along less than this share of its outline (long hair over it)
 # The neck under the face: its width when no neck was found (share of face
 # width), and how much wider than the neck it is at the chin.
 NECK_SHARE = 0.36
@@ -134,12 +135,21 @@ def soft_fill(rgb, known, wanted, radius):
     return out
 
 
-def arm_unusable(arm, chin, top, height, centre_line):
-    """Why an arm cannot move on its own (it would come apart or swing from the wrong place), or None."""
+def arm_unusable(arm, chin, top, height, centre_line, hair=None, drawn=None):
+    """Why an arm cannot move on its own (it would come apart or swing from the wrong place), or None.
+
+    `drawn` is the part of the arm the picture shows (the rest was completed under hair crossing it);
+    with `hair`, an arm with hair lying along much of its outline is mostly hidden by it.
+    """
     labelled, count = ndimage.label(arm)
     sizes = ndimage.sum(arm, labelled, range(1, count + 1))
     if max(sizes) < ARM_MAIN_SHARE * arm.sum():
         return "is broken up by what lies in front of it"
+    if hair is not None:
+        shown = arm if drawn is None else drawn
+        edge = shown & ~ndimage.binary_erosion(shown)
+        if (edge & ndimage.binary_dilation(hair, iterations=2)).sum() > ARM_HAIR_SHARE * edge.sum():
+            return "is half hidden by hair"
     rows = np.nonzero(arm.any(axis=1))[0]
     if arm.sum() / len(rows) < ARM_MIN_WIDTH * height:
         return "is too thin, or mostly hidden"
@@ -408,10 +418,11 @@ def eye_parts(rgb, eye):
     return {"eye_white": white, "pupil": eye & ~white & ~lash, "eye": lash}
 
 
-def split(image, masks, invented=None):
+def split(image, masks, invented=None, still_arms=()):
     """Cut the picture into layers. Returns (layers, report).
 
-    If `invented` is a dict, it is filled with role -> mask of the pixels this
+    `still_arms` ("l", "r") keeps those arms part of the body, for an arm the
+    owner saw move wrongly. If `invented` is a dict, it is filled with role -> mask of the pixels this
     function made up (filled in under other parts) rather than copied from
     the picture. reveal.py uses them to measure how much made-up filling a
     pose uncovers. The closed eyes and open mouth are left out: showing them
@@ -576,15 +587,38 @@ def split(image, masks, invented=None):
         warn("the arms are joined or lie across the body; they stay part of the body and will not move separately")
     elif not arms.any():
         warn("no arms were found; arm gestures are unavailable")
+    # Hair hanging in front of an arm hides strips of it, which would show as gaps once the arm moves:
+    # the arm carries on under that hair, in its own colours (the hair still covers it at rest).
+    under_hair = {}
+    for side in ("l", "r"):
+        arm = arm_sides[side]
+        if not arm.any():
+            continue
+        reach = max(2, int(round(0.6 * arm.sum() / max(1, arm.any(axis=1).sum()))))
+        hidden = ndimage.binary_closing(np.pad(arm, reach), iterations=reach)[reach:-reach, reach:-reach]
+        hidden &= hair & ~arm
+        if hidden.any():
+            under_hair[side] = hidden
+            arm_sides[side] = arm | hidden
     for side, name in (("l", "left"), ("r", "right")):
+        if arm_sides[side].any() and side in still_arms:
+            warn("the %s arm stays part of the body, as asked" % name)
+            arm_sides[side] = np.zeros_like(body)
         if arm_sides[side].any():
-            why = arm_unusable(arm_sides[side], chin, int(rows[0]), height, centre_line)
+            drawn = arm_sides[side] & ~under_hair[side] if side in under_hair else arm_sides[side]
+            why = arm_unusable(arm_sides[side], chin, int(rows[0]), height, centre_line, hair, drawn)
             if why:
                 warn("the %s arm %s; it stays part of the body and will not move on its own" % (name, why))
                 arm_sides[side] = np.zeros_like(body)
 
     # --- everything else is the body, extended a little under what covers it, and completed behind
     # each arm so an arm can swing without leaving empty space
+    for side in list(under_hair):
+        if not arm_sides[side].any():
+            del under_hair[side]                       # that arm stays with the body after all
+    arm_rgb = rgb.copy()
+    for side, hidden in under_hair.items():
+        arm_rgb = soft_fill(arm_rgb, arm_sides[side] & ~hidden, hidden, 4)
     rest = body & ~hair & ~face & ~neck & ~arm_sides["l"] & ~arm_sides["r"]
     covering = body & ~rest
     covered = covering & ndimage.binary_dilation(rest, iterations=underlap)
@@ -606,7 +640,7 @@ def split(image, masks, invented=None):
         return out
 
     layers = [("torso", layer(rest_mask, rest_rgb)), ("neck", layer(neck_mask, neck_rgb)),
-              ("arm_l", layer(arm_sides["l"])), ("arm_r", layer(arm_sides["r"])),
+              ("arm_l", layer(arm_sides["l"], arm_rgb)), ("arm_r", layer(arm_sides["r"], arm_rgb)),
               ("hair_back", layer(back_mask, back_rgb)),
               ("face_base", layer(face_base_mask, face_rgb))]
     for side in ("l", "r"):
@@ -636,6 +670,8 @@ def split(image, masks, invented=None):
     layers = [(role, array) for role, array in layers if array[..., 3].any()]
     if invented is not None:
         invented["torso"] = (covered | behind) & ~rest
+        for side, hidden in under_hair.items():
+            invented["arm_" + side] = hidden
         invented["neck"] = under & ~neck
         invented["face_base"] = (hidden | (face_base_mask & ~face)) & face_base_mask
 
@@ -652,8 +688,9 @@ def split(image, masks, invented=None):
         "arm_right": bool(arm_sides["r"].any()),
         "legs": "legwear" in found or "footwear" in found,
     }
+    drawn_arms = [arm_sides[s] & ~under_hair.get(s, np.zeros_like(body)) for s in ("l", "r")]
     assigned = (hair.astype(np.int32) + face.astype(np.int32) + neck.astype(np.int32)
-                + arm_sides["l"].astype(np.int32) + arm_sides["r"].astype(np.int32) + rest.astype(np.int32))
+                + drawn_arms[0].astype(np.int32) + drawn_arms[1].astype(np.int32) + rest.astype(np.int32))
     report["unassigned_pixels"] = int((body & (assigned == 0)).sum())
     report["doubly_assigned_pixels"] = int((assigned > 1).sum())
     return layers, report

@@ -6,6 +6,7 @@
 torch>=2.5
 torchvision
 einops
+opencv-python-headless
 numpy
 Pillow
 packaging

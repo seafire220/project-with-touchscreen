@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Character Studio</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header><h1>Character Studio</h1><p class="muted">Make a character from a picture, then send it to your device.</p></header>
+<main>
+  <section id="setup" class="card" hidden>
+    <h2>First, the part-finding model</h2>
+    <p>The studio finds a character's hair, face, eyes, arms and clothes with a model that runs on this computer.
+      It is downloaded once from its authors' pages (about 1.3 GB).</p>
+    <p id="setup-missing" class="muted"></p>
+    <p><button id="btn-setup">Download it</button></p>
+    <div id="setup-progress" hidden><progress id="setup-bar" max="1" value="0"></progress> <span id="setup-text"></span></div>
+    <p id="setup-torch" class="muted" hidden>PyTorch is not installed in the studio's Python. Close the studio and
+      start it with <code>studio/start.sh</code>, which installs it, then come back here.</p>
+  </section>
+
+  <section id="new" class="card">
+    <h2>New character</h2>
+    <div id="drop" class="drop" tabindex="0">
+      <img id="drop-preview" alt="" hidden>
+      <span id="drop-text">Drop a picture here, or click to choose one</span>
+      <input id="file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+    </div>
+    <label>Name <input id="name" maxlength="60" placeholder="Mika"></label>
+    <p><button id="btn-make" disabled>Make the character</button> <span id="new-msg" class="error"></span></p>
+    <details><summary>Which pictures work best</summary>
+      <ul>
+        <li>One character, the whole body or at least head and shoulders, facing you or turned a little.</li>
+        <li>A transparent or plain one-colour background.</li>
+        <li>Eyes open, mouth closed or a little open; arms hanging at the sides if you want them to move.</li>
+        <li>At least 800 pixels tall. Use only pictures you have the right to use.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section id="job" class="card" hidden>
+    <h2 id="job-title"></h2>
+    <div class="grid">
+      <div class="picture"><img id="job-preview" alt="The character moving"><p id="job-picture-note" class="muted"></p></div>
+      <div>
+        <h3>Progress</h3>
+        <ol id="job-steps" class="steps"></ol>
+        <p id="job-error" class="error"></p>
+        <div id="job-result" hidden>
+          <h3>What it can do</h3>
+          <p id="job-can" class="chips"></p>
+          <ul id="job-notes" class="notes"></ul>
+          <div id="job-arms" hidden>
+            <h3>Arms</h3>
+            <p class="muted">If an arm moved wrongly in the preview (for example, a coat's side moved as if it were an
+              arm), keep it still and make the character again.</p>
+            <label class="inline"><input type="checkbox" id="arm-l"> Left arm (on the picture's left) moves</label>
+            <label class="inline"><input type="checkbox" id="arm-r"> Right arm (on the picture's right) moves</label>
+            <p><button id="btn-remake" class="secondary">Make it again with these arms</button></p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="job-after" hidden>
+      <h3>Who they are</h3>
+      <p class="muted">You can also change this later on the device's settings page.</p>
+      <div class="form">
+        <label>Name <input id="pf-name" maxlength="60"></label>
+        <label>Personality, in a sentence or two <textarea id="pf-personality" rows="2" maxlength="600"
+          placeholder="Cheerful and a little mischievous; gets flustered when complimented."></textarea></label>
+        <label>Their story (optional) <textarea id="pf-story" rows="3" maxlength="1500"></textarea></label>
+        <label>How they treat you <textarea id="pf-relationship" rows="2" maxlength="600"
+          placeholder="An old friend who teases you but always has your back."></textarea></label>
+        <label>Likes <input id="pf-likes" maxlength="400" placeholder="astronomy, baking, rainy days"></label>
+        <label>Dislikes <input id="pf-dislikes" maxlength="400" placeholder="spiders, being rushed"></label>
+        <label>How they speak <textarea id="pf-speaking" rows="2" maxlength="600"
+          placeholder="Casual and warm, with the odd bad pun."></textarea></label>
+        <label>Things they never do (optional) <textarea id="pf-never" rows="2" maxlength="600"></textarea></label>
+        <label>Greeting, said when they start <input id="pf-greeting" maxlength="300" placeholder="Oh! You're here! Hi there!"></label>
+      </div>
+      <p><button id="btn-persona" class="secondary">Save who they are</button> <span id="persona-msg"></span></p>
+
+      <h3>Put them on the device</h3>
+      <div class="send">
+        <label>Device address <input id="address" placeholder="companion.local"></label>
+        <label>Settings-page password <input id="password" type="password" autocomplete="off"></label>
+      </div>
+      <p><button id="btn-send">Send to the device</button>
+        <a id="download" class="button secondary" href="#">Save the .char file</a>
+        <span id="send-msg"></span></p>
+      <p class="muted">The password is used for this one upload and is not kept. Sending a character with the same
+        name again updates it on the device.</p>
+    </div>
+  </section>
+
+  <section id="history" class="card" hidden>
+    <h2>Made in this session</h2>
+    <ul id="jobs" class="jobs"></ul>
+  </section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

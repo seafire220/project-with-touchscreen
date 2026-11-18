@@ -11,7 +11,7 @@ checked, and what is missing. Hardware comes last, once this list is done.
 | Step | What exists | Checked | Missing |
 |---|---|---|---|
 | Set up the device | Wi-Fi from the phone (hotspot, then the home network), a password, then the buyer's own keys on the settings page | Unit tests, the virtual device and its browser test | A run on a real board (later) |
-| Get a character | From a picture: `studio/make_character.py` on a laptop (command line). From a Live2D-format model folder: upload its zip on the settings page | Picture pipeline on test pictures; import on eight model folders | **A one-click app** for pictures (roadmap item 6); **a default character** in the box (needs commissioned original art) |
+| Get a character | From a picture: Character Studio on a laptop (`studio/start.sh`: drop a picture in, watch a preview of it moving, fill in who it is, send it to the device), or `studio/make_character.py` on the command line. From a Live2D-format model folder: upload its zip on the settings page | Picture pipeline on test pictures; the studio's tests and a browser run into the virtual device; import on eight model folders | A run on the owner's own laptop; **a default character** in the box (needs commissioned original art) |
 | Edit its personality | A guided form (name, personality, story, its relationship to the owner, likes and dislikes, how it speaks, what it never does, greeting) that writes the persona, or free text for those who prefer it; voice per character; feelings matched to a model's own expressions | Web tests | Done |
 | Memory | The last 400 turns; notes about the owner (up to 4,000 characters); and a dated summary of each conversation, kept for years. One model call every 6 turns, or once a conversation has been quiet for 10 minutes, updates the notes and that conversation's summary. Each reply is given the notes, the latest summary and up to three older summaries that share the owner's rarer words (found on the device, no extra model call). Notes and summaries are shown, editable and deletable on the settings page | Unit and web tests; a real model (below) | Done. Later, if needed: matching by meaning as well as by words (a small on-device embedding model) |
 | Chat by voice | Press the button (or speak, with an echo-cancelling sound card); local speech recognition (free); language models from OpenAI, Anthropic, Groq, OpenRouter, Google Gemini or any compatible service, streamed; timers, alarms, web search | Unit tests; real core with real stage; a real model (below) | Done: a free on-device voice is the default (see below and `16-measurements.md`); cloud voices remain as upgrades |
@@ -51,8 +51,9 @@ speech. What stands between this and a product, in order:
    904, are offered on the settings page.
 2. ~~**A guided personality form**~~: done (2026-11-18).
 3. ~~**Memory that lasts**~~: done (2026-11-18), see below.
-4. **Characters from pictures without the command line** (the one-click
-   app, with the drawing workflow's parts) and **a default character**.
+4. **Characters from pictures without the command line**: Character Studio
+   (2026-11-18) does it on a laptop; the drawing workflow's completed parts
+   are still to come. **A default character** needs commissioned art.
 5. Then the motion polish (calibration, recorded motion) and head turns,
    and only then the boards.
 

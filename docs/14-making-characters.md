@@ -16,7 +16,44 @@ it to the device through its settings page.
   ordinary processor cores. On an Apple Silicon Mac the model can use the
   Mac's graphics (`--device mps`), *unchecked*.
 
-## One-time setup
+## The easy way: Character Studio
+
+`studio/start.sh` starts the character maker as a page in the browser
+(`studio/app.py`; it runs on this computer only):
+
+```bash
+studio/start.sh
+```
+
+The first run sets up its own Python environment in `~/.character-studio`
+(PyTorch, the rigger and the model's libraries: a few GB, several minutes).
+The page then offers to download the part-finding model once (about 1.3 GB,
+from its authors' pages). After that:
+
+1. Drop a picture in and give the character a name.
+2. Watch the steps; a preview of the character moving appears when it is
+   made (drawn on this computer; the device moves more smoothly).
+3. Check what it can do. If an arm moved wrongly in the preview (a coat's
+   side taken for an arm, say), untick it and make it again.
+4. Say who the character is (the same questions as the device's settings
+   page), or leave that for later.
+5. Send it to the device: its address (`companion.local`, or the address the
+   device shows) and the settings-page password, which is used for that one
+   upload and not kept. Or save the `.char` file and add it on the device's
+   settings page.
+
+Checked here on Linux (2026-11-18): a first run of `start.sh` in an empty
+folder (a 1.5 GB environment), the model download from the page (1.3 GB; the
+model's code comes by `git` when its zip cannot be fetched), a character
+made with the real part-finding model in about a minute on four processor
+cores, and sending into the device's real settings-page API (the virtual
+device, driven from a browser). `studio/test_app.py` covers the page's API.
+A Mac should work the same way, *unchecked*; there is no Windows launcher
+yet.
+
+## From the command line
+
+### One-time setup
 
 ```bash
 python3 -m venv ~/character-maker
@@ -48,7 +85,7 @@ git clone https://github.com/shitagaki-lab/see-through ~/see-through
 huggingface-cli download 24yearsold/l2d_sam_iter2 --local-dir ~/see-through-weights
 ```
 
-## Making a character
+### Making a character
 
 ```bash
 python studio/make_character.py picture.png --name "Aria" \

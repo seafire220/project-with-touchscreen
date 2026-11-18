@@ -256,6 +256,19 @@ class ArmTest(unittest.TestCase):
         self.assertIn("does not hang", why(diagonal), "its top is by the middle: a hand at the chin")
         self.assertIn("folded", why(arm((100, 220, 110, 125), (100, 200, 133, 148), (195, 220, 110, 148))))
         self.assertIn("short", why(arm((100, 130, 120, 140))))
+        hair = arm((100, 220, 138, 150))                 # long hair lying along the arm's outer side
+        self.assertIn("hidden by hair", partsplit.arm_unusable(arm((100, 220, 120, 140)), chin, top, size, centre, hair))
+
+    def test_an_arm_crossed_by_a_strand_of_hair_carries_on_under_it(self):
+        image = figure_with_arms()
+        ImageDraw.Draw(image).rectangle([44, 180, 72, 186], fill=HAIR + (255,))   # a strand across the left arm
+        masks = labels_for(image)
+        invented = {}
+        layers, report = partsplit.split(image, masks, invented)
+        arm = dict(layers)["arm_l"][..., 3] > 0
+        self.assertTrue(arm[183, 52:64].all(), "the arm is whole under the strand")
+        self.assertTrue(invented["arm_l"][183, 52:64].all(), "and those pixels are marked as made up")
+        self.assertTrue(report["capabilities"]["arm_left"])
 
 
 if __name__ == "__main__":

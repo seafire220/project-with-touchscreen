@@ -1,0 +1,4 @@
+# Character Studio (app.py) on top of requirements.txt. start.sh installs these, PyTorch and
+# requirements-model.txt into the studio's own environment.
+aiohttp>=3.9
+image2live2d @ git+https://github.com/Wzhang3912/image2live2d@714e7cc

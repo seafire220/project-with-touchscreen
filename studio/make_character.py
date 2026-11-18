@@ -21,7 +21,7 @@ Usage:
   make_character.py IMAGE --name NAME [--out FILE.char] [--author TEXT]
                     [--persona FILE.md] [--labels MASKS.npz]
                     [--see-through DIR --weights FILE] [--device auto|cpu|mps|cuda]
-                    [--keep DIR] [--live2d]
+                    [--keep DIR] [--live2d] [--still-arms left,right]
 
 Read docs/19-live2d-format-licensing.md before distributing characters made
 with --live2d.
@@ -112,9 +112,14 @@ def rig(layers_dir, out_path, name, live2d_dir=None):
         raise RuntimeError("the rigger failed: %s" % " / ".join(tail))
 
 
-def make(image_path, name, args, work):
+def make(image_path, name, args, work, progress=None):
+    """Make the package. progress(message), if given, hears of each step as it finishes."""
     report = {"source": os.path.basename(image_path), "steps": []}
-    step = report["steps"].append
+
+    def step(message):
+        report["steps"].append(message)
+        if progress:
+            progress(message)
     original = Image.open(image_path)
     original.load()
     masks, how = find_labels(original, args)
@@ -123,7 +128,7 @@ def make(image_path, name, args, work):
     for note in notes:
         step(note)
     invented = {}
-    layers, split_report = partsplit.split(image, masks, invented)
+    layers, split_report = partsplit.split(image, masks, invented, still_arms=getattr(args, "still_arms", ()) or ())
     layers_dir = os.path.join(work, "layers")
     os.makedirs(layers_dir, exist_ok=True)
     for role, array in layers:
@@ -202,7 +207,14 @@ def main(argv):
     parser.add_argument("--keep", help="keep the working files (layers, rigged puppet) in this folder")
     parser.add_argument("--live2d", action="store_true",
                         help="also include a Live2D-format version (see docs/19 before distributing)")
+    parser.add_argument("--still-arms", default="",
+                        help="keep these arms part of the body: left, right or left,right (picture's sides)")
     args = parser.parse_args(argv[1:])
+    sides = {"left": "l", "right": "r"}
+    try:
+        args.still_arms = {sides[w.strip()] for w in args.still_arms.split(",") if w.strip()}
+    except KeyError:
+        parser.error("--still-arms takes left, right or left,right")
     out = args.out or package.slug(args.name) + ".char"
     try:
         if args.keep:
