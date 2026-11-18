@@ -79,6 +79,11 @@
         <label>Greeting, said when they start <input id="pf-greeting" maxlength="300" placeholder="Oh! You're here! Hi there!"></label>
         <p><button id="btn-write-persona">Write the persona from these answers</button></p>
       </details>
+      <p class="muted">Or bring the personality of a character from another AI-companion app: choose its character
+        card (a PNG or JSON file). It fills the box below for you to read and change before saving. Use only cards
+        you have the right to use.</p>
+      <p><input type="file" id="card-file" accept=".png,.json,image/png,application/json">
+        <button id="btn-card" class="small">Use this card</button> <span id="card-msg"></span></p>
       <label>Persona (who the character is, and its greeting; edit freely)
         <textarea id="edit-persona" rows="14"></textarea></label>
       <label>Voice ID for this character (from your voice service; blank uses the default)

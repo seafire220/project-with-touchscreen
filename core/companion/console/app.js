@@ -353,6 +353,17 @@ $("btn-reset-move").addEventListener("click", async () => {
   } catch (err) { text($("move-msg"), err.message); }
 });
 
+$("btn-card").addEventListener("click", async () => {
+  const file = $("card-file").files[0];
+  if (!file) { text($("card-msg"), "Choose a card first."); return; }
+  try {
+    const card = await api("POST", "/api/cards/read", undefined, file);
+    $("edit-persona").value = card.persona;
+    text($("card-msg"), "Read " + card.name + "'s card" + (card.creator ? " (by " + card.creator + ")" : "") +
+      ". Check the persona below, then Save." + (card.name !== $("edit-name").textContent ? " The character keeps its own name on the device." : ""));
+  } catch (err) { text($("card-msg"), err.message); }
+});
+
 $("btn-save-feelings").addEventListener("click", async () => {
   const map = {};
   for (const select of $("feelings-list").querySelectorAll("select")) map[select.dataset.emotion] = select.value;

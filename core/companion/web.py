@@ -17,7 +17,7 @@ import time
 
 from aiohttp import web
 
-from . import package, persona
+from . import cards, package, persona
 from .memory import when
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
@@ -289,6 +289,19 @@ class Console:
             self.device.use_emotion_map(cid)
         return web.json_response({"map": self.device.characters.emotion_map(cid)})
 
+    async def read_card(self, request):
+        """A character card (PNG or JSON) as a persona to review; nothing is saved."""
+        data = await request.read()
+        try:
+            card = cards.read_card(data)
+        except cards.CardError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        text, greeting = cards.to_persona(card)
+        if package.contains_secret(text):
+            raise web.HTTPBadRequest(text="the card appears to contain an API key; it was not used")
+        return web.json_response({"name": card["name"], "persona": text, "greeting": greeting, "tags": card["tags"],
+                                  "creator": card["creator"]})
+
     # ----- movement settings: which of the character's own parameters each kind of movement uses
     async def get_movement(self, request):
         cid = self._cid(request)
@@ -551,6 +564,7 @@ def make_app(device):
     r.add_put("/api/characters/{cid}/movement", console.put_movement)
     r.add_delete("/api/characters/{cid}/movement", console.reset_movement)
     r.add_post("/api/stage/preview", console.stage_preview)
+    r.add_post("/api/cards/read", console.read_card)
     r.add_get("/api/memory/{cid}", console.get_memory)
     r.add_put("/api/memory/{cid}", console.put_memory)
     r.add_delete("/api/memory/{cid}", console.clear_memory)

@@ -45,7 +45,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "core"))
 
 import make_character  # noqa: E402
 import preview  # noqa: E402
-from companion import package, persona  # noqa: E402
+from companion import cards, package, persona  # noqa: E402
 
 STATIC = os.path.join(HERE, "app")
 MAX_PICTURE = 30 * 1024 * 1024
@@ -75,12 +75,15 @@ class Job:
         self.still = None                # PNG bytes
         self.still_arms = set()
         self.form = {"name": name}
+        self.card = None                 # (persona text, greeting, card's name) when the picture is a character card
         self.created = time.time()
 
     def summary(self):
         out = {"id": self.id, "name": self.name, "state": self.state, "steps": self.steps, "error": self.error,
                "has_preview": self.preview is not None, "has_package": self.data is not None,
                "still_arms": sorted(self.still_arms), "form": self.form}
+        if self.card:
+            out["card"] = {"name": self.card[2], "greeting": self.card[1]}
         if self.report:
             out["warnings"] = self.report.get("warnings", [])
             out["capabilities"] = self.report.get("capabilities", {})
@@ -214,6 +217,13 @@ class Studio:
             raise ValueError("this file is not a picture the studio can read (PNG, JPEG or WebP)")
         folder = tempfile.mkdtemp(prefix="job-", dir=self._jobs_dir())
         job = Job(folder, name, os.path.basename(filename or "picture.png"))
+        try:                                         # a character card: the picture and who they are together
+            card = cards.read_card(picture)
+            text, greeting = cards.to_persona(card)
+            if not package.contains_secret(text):
+                job.card = (text, greeting, card["name"])
+        except cards.CardError:
+            pass
         with open(os.path.join(folder, "picture.png"), "wb") as f:
             f.write(picture)
         self.jobs[job.id] = job
@@ -261,6 +271,9 @@ class Studio:
         job.still = zipfile.ZipFile(io.BytesIO(data)).read("preview.png")
         if job.form.get("personality"):              # a remake keeps the personality written so far
             job.data = with_persona(job.data, job.form)
+        elif job.card:
+            job.data = with_persona_text(job.data, job.card[0], job.name)
+            job.steps.append("Who they are taken from the character card")
 
     # ----- sending
     async def send(self, job, address, password):
@@ -313,11 +326,15 @@ def _say(message):
 
 def with_persona(data, form):
     """The package with a persona written from the form, under the form's name."""
-    text = persona.build(form)
+    return with_persona_text(data, persona.build(form), form["name"].strip())
+
+
+def with_persona_text(data, text, name):
+    """The package with the given persona, under the given name."""
     old = package.open_package(io.BytesIO(data))
     files = {k: v for k, v in old.files.items() if k != "manifest.json"}
     files["persona.md"] = text
-    manifest = dict(old.manifest, name=form["name"].strip(), id=package.slug(form["name"]))
+    manifest = dict(old.manifest, name=name, id=package.slug(name))
     return package.build(files, manifest)
 
 
@@ -437,6 +454,13 @@ def make_app(studio):
         studio.save_config(device_address=address)
         return web.json_response({"ok": True, "id": cid})
 
+    async def peek(request):
+        """The character card's name, if the chosen picture is one (to fill in the name)."""
+        try:
+            return web.json_response({"card": cards.read_card(await request.read())["name"]})
+        except cards.CardError:
+            return web.json_response({"card": None})
+
     async def last_address(request):
         return web.json_response({"address": studio.config().get("device_address", "companion.local")})
 
@@ -447,6 +471,7 @@ def make_app(studio):
     r.add_get("/api/status", status)
     r.add_post("/api/setup", setup)
     r.add_get("/api/device", last_address)
+    r.add_post("/api/peek", peek)
     r.add_post("/api/jobs", new_job)
     r.add_get("/api/jobs/{job}", get_job)
     r.add_get("/api/jobs/{job}/preview.gif", job_preview)

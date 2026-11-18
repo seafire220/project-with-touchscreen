@@ -32,6 +32,9 @@ function choose(file) {
   text($("drop-text"), file.name);
   if (!$("name").value) $("name").value = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").slice(0, 60);
   ready();
+  api("POST", "/api/peek", undefined, file).then((r) => {
+    if (r.card) { $("name").value = r.card; text($("drop-text"), file.name + " (a character card: " + r.card + ")"); ready(); }
+  }).catch(() => {});
 }
 function ready() { $("btn-make").disabled = !(picture && $("name").value.trim()); }
 $("drop").addEventListener("click", () => $("file").click());
@@ -127,6 +130,10 @@ function showJob(job) {
         box.checked = !(job.still_arms || []).includes(side);
       }
     }
+    $("card-note").hidden = !job.card;
+    if (job.card) text($("card-note"), "This picture is a character card: " + job.card.name + "'s personality from it is " +
+      "already in the character" + (job.card.greeting ? " (greeting: \u201c" + job.card.greeting + "\u201d)" : "") +
+      ". Answer the questions below only to replace it.");
     if (job.has_package) {
       for (const q of QUESTIONS) $("pf-" + q).value = (job.form && job.form[q]) || "";
       $("download").href = "/api/jobs/" + job.id + "/package";

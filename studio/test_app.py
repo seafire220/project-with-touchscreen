@@ -157,6 +157,37 @@ class StudioTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any("as asked" in w for w in job["warnings"]))
 
 
+@unittest.skipUnless(HAVE_RIGGER, "the image2live2d rigger is not installed")
+class CardTest(unittest.IsolatedAsyncioTestCase):
+    async def test_a_character_card_brings_its_personality_with_its_picture(self):
+        import base64
+        from PIL import PngImagePlugin
+        card = {"spec": "chara_card_v2", "data": {"name": "Mika", "description": "{{char}} bakes bread.",
+                                                 "first_mes": "\"Hello, {{user}}!\" *waves*"}}
+        info = PngImagePlugin.PngInfo()
+        info.add_text("chara", base64.b64encode(json.dumps(card).encode()).decode())
+        out = io.BytesIO()
+        figure_with_arms().save(out, "PNG", pnginfo=info)
+        with tempfile.TemporaryDirectory() as d:
+            studio = app.Studio(d, label=lambda image: labels_for(image), draw_preview=quick_preview)
+            client = TestClient(TestServer(app.make_app(studio)))
+            await client.start_server()
+            studio.port = client.port
+            try:
+                r = await client.post("/api/peek", data=out.getvalue(), headers=H)
+                self.assertEqual((await r.json())["card"], "Mika")
+                job = studio.add_job(out.getvalue(), "mika.png", "Mika")
+                studio._build(job)
+                p = package.open_package(io.BytesIO(job.data))
+                self.assertIn("Mika bakes bread.", p.persona)
+                self.assertIn("## Greeting\n\nHello!", p.persona)
+                self.assertEqual(job.summary()["card"], {"name": "Mika", "greeting": "Hello!"})
+                r = await client.post("/api/peek", data=figure_png(), headers=H)
+                self.assertIsNone((await r.json())["card"], "a plain picture is not a card")
+            finally:
+                await client.close()
+
+
 class SetupTest(unittest.IsolatedAsyncioTestCase):
     async def test_without_the_model_the_page_asks_for_it_first(self):
         with tempfile.TemporaryDirectory() as d:

@@ -217,6 +217,23 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         with open(self.device.movement_map) as f:
             self.assertEqual(json.load(f), {})
 
+    async def test_a_character_card_is_read_into_a_persona_to_review(self):
+        from test_cards import CARD, png_card
+        r = await self.client.post("/api/cards/read", data=png_card(CARD), headers=H)
+        self.assertEqual(r.status, 401, "only after logging in")
+        await self.login()
+        r = await self.client.post("/api/cards/read", data=png_card(CARD), headers=H)
+        self.assertEqual(r.status, 200, await r.text())
+        card = await r.json()
+        self.assertEqual(card["name"], "Mika")
+        self.assertIn("## Greeting", card["persona"])
+        self.assertEqual(card["greeting"], "Oh! You're here! I just made cinnamon rolls. Want one?")
+        r = await self.client.post("/api/cards/read", data=b"not a card", headers=H)
+        self.assertEqual(r.status, 400)
+        leaky = dict(CARD, data=dict(CARD["data"], description="My key is sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"))
+        r = await self.client.post("/api/cards/read", data=png_card(leaky), headers=H)
+        self.assertEqual(r.status, 400, "a card carrying a key is not used")
+
     async def test_the_movement_preview_moves_only_real_parameters_within_range(self):
         await self.login()
         self.stage.param_info = [{"name": "ParamArmLA", "min": [-10, 0], "max": [10, 0], "default": [0, 0]}]

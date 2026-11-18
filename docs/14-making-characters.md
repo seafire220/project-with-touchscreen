@@ -30,7 +30,10 @@ The first run sets up its own Python environment in `~/.character-studio`
 The page then offers to download the part-finding model once (about 1.3 GB,
 from its authors' pages). After that:
 
-1. Drop a picture in and give the character a name.
+1. Drop a picture in and give the character a name. A character card (the
+   PNG files other AI-companion apps share, with the character's
+   personality inside) brings its name and personality too: the picture
+   becomes the drawing and the card who they are.
 2. Watch the steps; a preview of the character moving appears when it is
    made (drawn on this computer; the device moves more smoothly).
 3. Check what it can do. If an arm moved wrongly in the preview (a coat's
