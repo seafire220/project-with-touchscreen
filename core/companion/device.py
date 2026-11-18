@@ -22,7 +22,8 @@ from .store import Store, redact, write_atomic
 
 log = logging.getLogger("companion")
 
-NOTES_EVERY = 6          # update the memory notes after this many turns
+NOTES_EVERY = 6          # update the memory notes, and sum the conversation up, after this many turns
+QUIET_SUMMARY = 600.0    # or once it has been quiet this many seconds, however short it was
 
 
 class Device:
@@ -55,6 +56,8 @@ class Device:
         self.run = run or _run_command
         self.stage_seen = time.time()
         self.last_use = 0.0                 # when the settings page was last used
+        self.summarising = False            # a memory update is under way
+        self.memory_retry = 0.0             # after a failed memory update, wait until then
 
     # ----- events for the console
     def emit(self, kind, data=None):
@@ -288,17 +291,39 @@ class Device:
             asyncio.ensure_future(self._maybe_update_notes())
         self.emit(kind, data)
 
-    async def _maybe_update_notes(self):
-        if not self.store.settings()["conversation"].get("memory", True):
+    async def _maybe_update_notes(self, cid=None, force=False):
+        """Fold the conversation into the notes and a dated summary: every few turns, or, with
+        `force`, as soon as there is anything new (used once a conversation has gone quiet)."""
+        if not self.store.settings()["conversation"].get("memory", True) or self.summarising:
             return
-        memory = self.memory()
-        if memory.turns_since_update < NOTES_EVERY:
+        memory = self.memory(cid)
+        pending = memory.turns_since_update
+        if not pending or (pending < NOTES_EVERY and not force):
             return
+        self.summarising = True
         try:
             count = await memory.update_notes(self.build("llm"))
             self.emit("memory", {"notes": count})
         except ProviderError as error:
+            self.memory_retry = time.time() + 15 * 60
             self.emit("error", {"message": "memory notes were not updated: %s" % error})
+        finally:
+            self.summarising = False
+
+    async def memory_watch(self, quiet=QUIET_SUMMARY, every=60.0):
+        """Sum up each character's conversation once it has gone quiet, so short chats (and the
+        last few turns before a restart or a change of character) are remembered too."""
+        while True:
+            await asyncio.sleep(every)
+            try:
+                if (self.conversation is not None and self.conversation.busy) or time.time() < self.memory_retry:
+                    continue
+                for cid in self.characters.ids():
+                    memory = self.memory(cid)
+                    if memory.turns_since_update and time.time() - memory.last_turn_time() > quiet:
+                        await self._maybe_update_notes(cid, force=True)
+            except Exception:
+                log.exception("memory watch failed")
 
     def set_state(self, state):
         if state != self.state:
@@ -489,6 +514,7 @@ class Device:
             asyncio.ensure_future(self.network_watch())
         if isinstance(self.stage, StageLink):
             asyncio.ensure_future(self.stage_watch())
+        asyncio.ensure_future(self.memory_watch())
 
     # ----- Wi-Fi
     async def network_watch(self, wait=40.0, retry=180.0, busy=120.0):

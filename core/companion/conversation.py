@@ -15,6 +15,7 @@ import logging
 
 from .audio import tone
 from .characters import split_persona
+from .memory import when
 from .providers import ProviderError
 from .search import results_for_model
 from .speech_text import SEARCH_RULE, Splitter, speech_rules
@@ -26,13 +27,19 @@ MOOD_LINGER = 6.0            # seconds a feeling stays after a reply ends, befor
 REPLY_TIMEOUT = 90.0         # longest a whole reply may take
 
 
-def system_prompt(persona, notes, now=None, search_tag=False, gestures=("nod", "shake", "bow", "tilt")):
+def system_prompt(persona, notes, now=None, search_tag=False, gestures=("nod", "shake", "bow", "tilt"), recalled=()):
+    """The model's instructions: the persona, how to speak, the time, and what the character remembers:
+    its notes and the summaries of earlier conversations recalled for this reply (oldest first)."""
     body, _ = split_persona(persona)
     now = now or datetime.datetime.now()
     rules = speech_rules(gestures) + ("\n" + SEARCH_RULE if search_tag else "")
     parts = [body, rules, "It is now %s." % now.strftime("%A %d %B %Y, %H:%M")]
     if notes.strip():
         parts.append("What you remember about the person you are talking with:\n" + notes.strip())
+    if recalled:
+        lines = ["- %s: %s" % (when(e["t"], now.timestamp()), e["summary"]) for e in recalled]
+        parts.append("From earlier conversations with them (your own summaries; bring them up only when "
+                     "they fit):\n" + "\n".join(lines))
     return "\n\n".join(p for p in parts if p)
 
 
@@ -104,7 +111,8 @@ class Conversation:
         self.stage.state("thinking")
         messages = self.memory.recent(self.history_turns) + [{"role": "user", "content": heard}]
         gestures = self.gestures if self.gestures is not None else getattr(self.stage, "gestures", ("nod", "shake", "bow", "tilt"))
-        system = system_prompt(self.persona, self.memory.notes(), search_tag=self.search is not None, gestures=gestures)
+        system = system_prompt(self.persona, self.memory.notes(), search_tag=self.search is not None, gestures=gestures,
+                               recalled=self.memory.recall(heard))
         writer = None
         try:
             queries = []

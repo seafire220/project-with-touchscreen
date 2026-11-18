@@ -100,7 +100,8 @@ One user turn:
 4. **Speech recognition.** Audio is recognised as it arrives, on the device
    by default.
 5. **Context.** The turn manager assembles: the character's persona, the
-   long-term memory summary, pinned facts, recent turns, and the current time.
+   memory notes, the latest conversation summary and the older summaries
+   that match what was said, recent turns, and the current time.
 6. **LLM.** The reply is requested as a stream.
 7. **Response processing.** As text arrives it is split at sentence
    boundaries. Emotion markers the persona is instructed to emit (for example
@@ -111,9 +112,10 @@ One user turn:
    used.
 9. **Playback and lip movement.** Audio plays as it arrives, and loudness is
    sent to the stage as described above.
-10. **Memory.** The turn is appended to the character's history. When history
-    grows past a threshold, older turns are folded into the summary by a
-    background LLM call.
+10. **Memory.** The turn is appended to the character's history. Every few
+    turns, and when a conversation goes quiet, a background LLM call folds
+    the new turns into the notes and into a dated summary of the
+    conversation (`core/companion/memory.py`, `25-product-review.md`).
 
 ```
 mic → voice activity → speech recognition → context → LLM (stream)
@@ -275,7 +277,7 @@ that no paid service is needed.
 | Data | Location | Protection |
 |---|---|---|
 | Characters | Data partition | Validated on import |
-| Memory per character: summary, pinned facts, turn history | Data partition | Readable and editable in the console; export and delete per character |
+| Memory per character: notes, dated conversation summaries, turn history | Data partition | Readable and editable in the console; cleared per character |
 | Settings | Data partition | Written atomically so a power cut cannot corrupt them |
 | API keys | Separate file readable only by the core service | Write-only in the console (shown as last four characters); masked in all logs; excluded from every export and backup |
 | Logs | Journal, size-capped | Rotated automatically |

@@ -23,6 +23,33 @@ GESTURE_WORDS = {
 }
 
 TAG = re.compile(r"\[([^\[\]]{1,80})\]")
+# A tag, or words between single asterisks ("*giggles*"), which may be a stage direction.
+TOKEN = re.compile(r"\[([^\[\]]{1,80})\]|(?<!\*)\*([^*\n]{1,60})\*(?!\*)")
+SINGLE_STAR = re.compile(r"(?<!\*)\*(?!\*)")
+
+# Stage directions models write on their own, though asked to use only the tags above ("[smile]",
+# "*giggles softly*"): the feeling or gesture each stands for, or None to leave it unsaid.
+DIRECTIONS = {
+    "smile": ("emotion", "happy"), "grin": ("emotion", "happy"), "beam": ("emotion", "happy"),
+    "wink": ("emotion", "happy"), "excited": ("emotion", "happy"), "cheerful": ("emotion", "happy"),
+    "playful": ("emotion", "happy"), "teasing": ("emotion", "happy"), "happily": ("emotion", "happy"),
+    "blush": ("emotion", "embarrassed"), "flustered": ("emotion", "embarrassed"), "nervous": ("emotion", "embarrassed"),
+    "shy": ("emotion", "embarrassed"), "shyly": ("emotion", "embarrassed"),
+    "frown": ("emotion", "sad"), "cry": ("emotion", "sad"), "sniffle": ("emotion", "sad"), "pout": ("emotion", "sad"),
+    "upset": ("emotion", "sad"), "sadly": ("emotion", "sad"),
+    "annoyed": ("emotion", "angry"), "huff": ("emotion", "angry"), "glare": ("emotion", "angry"),
+    "grumble": ("emotion", "angry"),
+    "shocked": ("emotion", "surprised"), "scared": ("emotion", "surprised"), "startled": ("emotion", "surprised"),
+    "curious": ("emotion", "thinking"), "confused": ("emotion", "thinking"), "hmm": ("emotion", "thinking"),
+    "calm": ("emotion", "neutral"),
+    "giggle": ("gesture", "laugh"), "chuckle": ("gesture", "laugh"), "snicker": ("gesture", "laugh"),
+    "gasp": ("gesture", "surprise"), "ponder": ("gesture", "think"), "lean": ("gesture", "lean_in"),
+    "jump": ("gesture", "bounce"), "hop": ("gesture", "bounce"),
+    "hum": None, "clap": None, "hug": None, "look": None, "stretch": None, "yawn": None, "pause": None,
+    "whisper": None, "cough": None, "clear": None, "sniff": None, "blink": None, "stare": None, "gaze": None,
+    "turn": None, "point": None, "hold": None, "reach": None, "smirk": ("emotion", "happy"),
+}
+_VOCABULARY = set(DIRECTIONS) | set(GESTURES) | set(EMOTIONS) | {"in", "back", "away", "down", "on", "hands", "hips"}
 SENTENCE_END = re.compile(r"([.!?…]+[\"'”’)\]]*)(\s+)")
 CLAUSE_END = re.compile(r"([,;:—–])(\s+)")
 MARKDOWN = re.compile(r"(\*\*|__|`+|^#+\s*|^\s*[-*•]\s+)", re.M)
@@ -76,9 +103,54 @@ def parse_tag(body):
     return None
 
 
+def _base(word):
+    """A word's dictionary form, as far as the stage directions need ("giggles" -> "giggle")."""
+    candidates = [word]
+    if word.endswith("ies"):
+        candidates.append(word[:-3] + "y")
+    if word.endswith("es"):
+        candidates.append(word[:-2])
+    if word.endswith("s"):
+        candidates.append(word[:-1])
+    if word.endswith("ing"):
+        candidates += [word[:-3], word[:-3] + "e", word[:-4]]
+    if word.endswith("ed"):
+        candidates += [word[:-2], word[:-1], word[:-3]]
+    return next((c for c in candidates if c in _VOCABULARY), word)
+
+
+def stage_direction(body, starred=False):
+    """A stage direction the model wrote on its own: ("emotion", name) or ("action", gesture) for
+    what it stands for, ("drop", None) to leave it unsaid, or None if it is not one (words between
+    asterisks that are only emphasis, as in "that was *really* good")."""
+    if not starred and re.fullmatch(r"\s*\d{1,3}\s*", body):
+        return ("drop", None)                 # a footnote mark, "[1]"
+    words = [_base(w) for w in re.findall(r"[a-z]+", body.lower())]
+    if not words or len(words) > 6 or re.search(r"\d", body):
+        return None
+    joined = " ".join(words)
+    for g in GESTURES:
+        if "_" in g and g.replace("_", " ") in joined:
+            return ("action", {"kind": "gesture", "name": g})
+    first = words[0]
+    if first in EMOTIONS:
+        return ("emotion", first)
+    if first in GESTURES:
+        return ("action", {"kind": "gesture", "name": first})
+    if first in DIRECTIONS:
+        meaning = DIRECTIONS[first]
+        if meaning is None:
+            return ("drop", None)
+        if meaning[0] == "gesture":
+            return ("action", {"kind": "gesture", "name": meaning[1]})
+        return meaning
+    return None if starred else ("drop", None)
+
+
 def clean_for_speech(text):
     text = MARKDOWN.sub("", text)
-    text = EMOJI.sub("", text)
+    text = EMOJI.sub("", text).replace("*", "")
+    text = re.sub(r"\s+([.,!?;:…])", r"\1", text)       # where a dropped tag left a gap
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -99,20 +171,28 @@ class Splitter:
 
     def _read_tags(self, final=False):
         raw = self.raw
+        hold = len(raw)
         open_at = raw.rfind("[")
-        if not final and open_at != -1 and "]" not in raw[open_at:] and len(raw) - open_at < 80:
-            ready, self.raw = raw[:open_at], raw[open_at:]      # a tag may still be arriving
-        else:
-            ready, self.raw = raw, ""
+        if open_at != -1 and "]" not in raw[open_at:] and len(raw) - open_at < 80:
+            hold = open_at                                      # a tag may still be arriving
+        stars = [m.start() for m in SINGLE_STAR.finditer(raw)]
+        if len(stars) % 2 and len(raw) - stars[-1] < 60:
+            hold = min(hold, stars[-1])                         # so may words between asterisks
+        if final:
+            hold = len(raw)
+        ready, self.raw = raw[:hold], raw[hold:]
         pos = 0
-        for m in TAG.finditer(ready):
+        for m in TOKEN.finditer(ready):
             self.text += ready[pos:m.start()]
-            parsed = parse_tag(m.group(1))
-            if parsed is None:
-                self.text += m.group(0)
-            else:
-                self.tags.append((len(self.text), parsed))
             pos = m.end()
+            if m.group(1) is not None:
+                parsed = parse_tag(m.group(1)) or stage_direction(m.group(1))
+            else:
+                parsed = stage_direction(m.group(2), starred=True)
+            if parsed is None:
+                self.text += m.group(0) if m.group(1) is not None else m.group(2)
+            elif parsed[0] != "drop":
+                self.tags.append((len(self.text), parsed))
         self.text += ready[pos:]
 
     def _next_cut(self, final):
@@ -199,7 +279,7 @@ def speech_rules(gestures=("nod", "shake", "bow", "tilt")):
     lines += [
         "- To set a timer, include a tag like [timer 5m tea]. For an alarm, [alarm 07:30 wake up].",
         "  To cancel one, [cancel tea]. Say in words what you did as well.",
-        "- Tags are never read out.",
+        "- Tags are never read out. Use no other tags or stage directions, in brackets or asterisks.",
     ]
     return "\n".join(lines)
 

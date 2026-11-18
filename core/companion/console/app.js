@@ -284,6 +284,7 @@ async function loadMemory() {
   if (!state.active) return;
   const m = await api("GET", "/api/memory/" + state.active);
   $("mem-notes").value = m.notes;
+  showEpisodes(m);
   const list = $("mem-history");
   list.replaceChildren();
   for (const t of m.history.slice().reverse()) {
@@ -292,8 +293,48 @@ async function loadMemory() {
     list.append(li);
   }
 }
+
+function showEpisodes(m) {
+  const list = $("mem-episodes");
+  list.replaceChildren();
+  text($("mem-episode-count"), m.episode_count === 0 ? "None yet." :
+    m.episode_count > m.episodes.length ? "The newest " + m.episodes.length + " of " + m.episode_count + "." : "");
+  for (const e of m.episodes) {
+    const li = document.createElement("li");
+    const when = document.createElement("span");
+    when.className = "who";
+    text(when, e.when);
+    const words = document.createElement("span");
+    text(words, e.summary);
+    const edit = button("Change", async () => {
+      const box = document.createElement("textarea");
+      box.rows = 3;
+      box.maxLength = 600;
+      box.value = e.summary;
+      const save = button("Save", () => api("PUT", episodePath(e), { summary: box.value }).then(loadMemory)
+        .catch((err) => alert(err.message)));
+      li.replaceChildren(when, box, save, button("Cancel", loadMemory));
+      box.focus();
+    });
+    const forget = button("Forget", () => confirm("Forget this conversation's summary?") &&
+      api("DELETE", episodePath(e)).then(loadMemory).catch((err) => alert(err.message)), "danger");
+    li.append(when, words, " ", edit, " ", forget);
+    list.append(li);
+  }
+}
+
+function episodePath(e) { return "/api/memory/" + state.active + "/episodes/" + e.id; }
+
+function button(label, onClick, className) {
+  const b = document.createElement("button");
+  text(b, label);
+  b.className = "small" + (className ? " " + className : "");
+  b.addEventListener("click", onClick);
+  return b;
+}
+
 $("btn-save-notes").addEventListener("click", () => api("PUT", "/api/memory/" + state.active, { notes: $("mem-notes").value }).then(loadMemory));
-$("btn-clear-memory").addEventListener("click", () => confirm("Forget the whole conversation and all notes for this character?") &&
+$("btn-clear-memory").addEventListener("click", () => confirm("Forget the whole conversation, all notes and all summaries for this character?") &&
   api("DELETE", "/api/memory/" + state.active).then(loadMemory));
 
 // ----- services and keys

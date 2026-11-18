@@ -18,6 +18,7 @@ import time
 from aiohttp import web
 
 from . import package, persona
+from .memory import when
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
 
@@ -327,7 +328,13 @@ class Console:
     # ----- memory
     async def get_memory(self, request):
         memory = self.device.memory(self._cid(request))
-        return web.json_response({"notes": memory.notes(), "history": memory.history()[-100:]})
+        episodes = memory.episodes()
+        now = time.time()
+        return web.json_response({
+            "notes": memory.notes(), "history": memory.history()[-100:],
+            # newest first; the page shows these, the device keeps up to memory.KEEP_EPISODES
+            "episodes": [dict(e, when=when(e["t"], now)) for e in reversed(episodes[-300:])],
+            "episode_count": len(episodes)})
 
     async def put_memory(self, request):
         body = await request.json()
@@ -336,6 +343,28 @@ class Console:
 
     async def clear_memory(self, request):
         self.device.memory(self._cid(request)).clear()
+        return web.json_response({"ok": True})
+
+    def _episode(self, request):
+        try:
+            return self.device.memory(self._cid(request)), int(request.match_info["id"])
+        except ValueError:
+            raise web.HTTPNotFound(text="no such summary")
+
+    async def put_episode(self, request):
+        memory, eid = self._episode(request)
+        body = await request.json()
+        summary = body.get("summary") if isinstance(body, dict) else None
+        if not isinstance(summary, str) or not summary.strip():
+            raise web.HTTPBadRequest(text="a summary needs some words")
+        if not memory.edit_episode(eid, summary):
+            raise web.HTTPNotFound(text="no such summary")
+        return web.json_response({"ok": True})
+
+    async def delete_episode(self, request):
+        memory, eid = self._episode(request)
+        if not memory.delete_episode(eid):
+            raise web.HTTPNotFound(text="no such summary")
         return web.json_response({"ok": True})
 
     # ----- talking from the console
@@ -431,6 +460,8 @@ def make_app(device):
     r.add_get("/api/memory/{cid}", console.get_memory)
     r.add_put("/api/memory/{cid}", console.put_memory)
     r.add_delete("/api/memory/{cid}", console.clear_memory)
+    r.add_put("/api/memory/{cid}/episodes/{id}", console.put_episode)
+    r.add_delete("/api/memory/{cid}/episodes/{id}", console.delete_episode)
     r.add_post("/api/say", console.say)
     r.add_post("/api/button", console.press)
     r.add_post("/api/interrupt", console.interrupt)

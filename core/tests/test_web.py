@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -14,6 +15,7 @@ from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 from companion import package  # noqa: E402
 from companion.audio import Speaker  # noqa: E402
 from companion.device import Device  # noqa: E402
+from companion.memory import when  # noqa: E402
 from companion.web import local_address, make_app  # noqa: E402
 from fakes import FakeLLM, FakeStage, FakeTTS  # noqa: E402
 from test_package import good_files, manifest  # noqa: E402
@@ -183,6 +185,66 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await (await self.client.get("/api/memory/aria")).json())["history"], [])
         r = await self.client.delete("/api/characters/aria", headers=H)
         self.assertEqual((await (await self.client.get("/api/characters")).json())["characters"], [])
+
+    async def test_summaries_of_earlier_conversations_can_be_read_changed_and_forgotten(self):
+        await self.login()
+        self.device.characters.install(package.build(good_files(), manifest()))
+        memory = self.device.memory("aria")
+        old = time.time() - 40 * 86400
+        memory.add_episode(4, old, "We talked about tea.")
+        memory.add_episode(9, time.time(), "We planned a picnic.")
+        m = await (await self.client.get("/api/memory/aria")).json()
+        self.assertEqual([(e["id"], e["when"]) for e in m["episodes"]], [(9, "today"), (4, when(old))], "newest first")
+        self.assertEqual(m["episode_count"], 2)
+        r = await self.client.put("/api/memory/aria/episodes/4", json={"summary": "We talked about green tea."}, headers=H)
+        self.assertEqual(r.status, 200)
+        for path, body, status in (("4", {"summary": "  "}, 400), ("4", ["no"], 400), ("77", {"summary": "x"}, 404),
+                                   ("abc", {"summary": "x"}, 404)):
+            r = await self.client.put("/api/memory/aria/episodes/" + path, json=body, headers=H)
+            self.assertEqual(r.status, status, path)
+        r = await self.client.delete("/api/memory/aria/episodes/9")
+        self.assertEqual(r.status, 403, "changes need the X-Companion header")
+        r = await self.client.delete("/api/memory/aria/episodes/9", headers=H)
+        self.assertEqual(r.status, 200)
+        r = await self.client.delete("/api/memory/aria/episodes/9", headers=H)
+        self.assertEqual(r.status, 404)
+        m = await (await self.client.get("/api/memory/aria")).json()
+        self.assertEqual([e["summary"] for e in m["episodes"]], ["We talked about green tea."])
+        exported = await (await self.client.get("/api/characters/aria/export")).read()
+        self.assertNotIn(b"green tea", exported, "summaries never leave in a package")
+
+    async def test_a_conversation_is_summed_up_once_it_goes_quiet_however_short(self):
+        self.device.characters.install(package.build(good_files(), manifest()))
+        llm = FakeLLM("- Likes tea\nEPISODE: They said hello and we talked about tea.")
+        self.device.provider_factory = lambda which, device: {"llm": llm, "tts": FakeTTS()}.get(which)
+        memory = self.device.memory("aria")
+        memory.add_turn("hello, I love tea", "Tea is lovely!")
+        await self.device._maybe_update_notes("aria")
+        self.assertEqual(llm.calls, [], "one turn is not enough while the conversation goes on")
+        watch = asyncio.ensure_future(self.device.memory_watch(quiet=0.0, every=0.01))
+        try:
+            for _ in range(300):
+                await asyncio.sleep(0.01)
+                if memory.episodes():
+                    break
+        finally:
+            watch.cancel()
+        self.assertEqual([e["summary"] for e in memory.episodes()], ["They said hello and we talked about tea."])
+        self.assertEqual((memory.notes(), memory.turns_since_update, len(llm.calls)), ("- Likes tea\n", 0, 1))
+
+    async def test_a_failed_memory_update_is_reported_and_retried_later(self):
+        self.device.characters.install(package.build(good_files(), manifest()))
+        self.device.provider_factory = lambda which, device: {"llm": FakeLLM(fail="start")}.get(which)
+        self.device.memory("aria").add_turn("hello", "hi")
+        self.device.subscribers.add(q := asyncio.Queue())
+        await self.device._maybe_update_notes("aria", force=True)
+        self.assertIn("memory notes were not updated", (await asyncio.wait_for(q.get(), 1))["message"])
+        self.assertGreater(self.device.memory_retry, time.time() + 600)
+        self.assertEqual(self.device.memory("aria").turns_since_update, 1, "kept for the next try")
+        self.device.store.update_settings({"conversation": {"memory": False}})
+        self.device.memory_retry = 0
+        await self.device._maybe_update_notes("aria", force=True)
+        self.assertTrue(q.empty(), "with memory off, nothing is asked")
 
     async def test_the_button_toggles_listening(self):
         await self.login()

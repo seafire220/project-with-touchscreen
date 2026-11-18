@@ -48,7 +48,7 @@ running Raspberry Pi OS (`13-build-and-install.md`).
 | `/var/lib/companion/config/secrets.json` | **The owner's API keys**, readable only by the service | The owner, in the settings page |
 | `/var/lib/companion/config/console-password` | The settings-page password, hashed | The owner |
 | `/var/lib/companion/characters/<id>/` | Installed characters (unpacked `.char` files) | The owner |
-| `/var/lib/companion/memory/<id>/` | What each character remembers (conversation, notes) | Conversations; the owner can edit or clear |
+| `/var/lib/companion/memory/<id>/` | What each character remembers (conversation, notes, dated summaries of conversations) | Conversations; the owner can edit or clear |
 | `/var/lib/companion/current.inp` | Link to what the screen shows: the active character, or a message card | The device |
 | `/etc/systemd/system/companion-*.service` | Starts the core, and the character full screen on the display | Software update |
 | `/etc/default/companion` | Optional: force a particular sound card | Rarely |
