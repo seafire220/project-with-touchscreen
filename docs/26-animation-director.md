@@ -40,10 +40,26 @@ each frame. They talk over a local socket in short JSON commands such as
 3. **Gesture layer.** Nineteen keyframed clips (nod, firm nod, shake, tilt,
    bow, bounce, laugh, sigh, sway, look away, look down, lean in, lean
    back, start in surprise, think, hands on hips, wave, raised brows,
-   shrug) are added on
-   top of everything else. Each starts and ends at zero, so it blends in
-   and out. A new gesture cuts the old one short with a 0.25 s fade. A
-   character is only offered the gestures it has the controls for.
+   shrug) are added on top of everything else. Each starts and ends at
+   zero, so it blends in and out. A character is only offered the
+   gestures it has the controls for.
+
+   Several gestures can play at once on different parts of the body.
+   The body is split into **channels**: head, torso, eyes, brows,
+   expression (smile, smiling eyes, blush), left arm and right arm. A
+   gesture holds the channels it moves strongly, so a nod plays through
+   a wave. When two want the same channel, the one that matters more
+   gets it:
+   - a gesture asked for (a tag, or the settings page) comes first;
+   - then one the words call for, or a new mood's entry gesture;
+   - last, one the mood starts by itself.
+
+   The one that gives way lets go of that channel with a quarter-second
+   fade and carries on with the rest; if it has nothing left, it ends.
+   Two asked-for gestures on the same channel take turns. Where a gesture
+   holds a channel, the living motion there (drift, breathing, beats)
+   gives way to it by 70%, eased in and out, so the gesture reads
+   clearly.
 4. **Expressions.** A Live2D-format model's own expression files are
    blended in for the mood, as chosen under *Feelings* on the settings
    page.
@@ -175,8 +191,16 @@ Four ways, plus a safety net:
 3. **The mood by itself.** When nothing is playing and at least 0.8 s has
    passed since the last gesture, the mood picks a gesture from its
    weighted list at random intervals (happy every 4 to 8 s, sad every 8 to
-   15 s, half as often again when idle). While listening, it only nods and
-   tilts, at 60% strength. The owner can turn this off.
+   15 s, half as often again when idle). It prefers gestures it has not
+   made lately (small ones for 20 s, big ones for a minute) and rarely
+   repeats its last pick. While listening, it only nods and tilts, at 60%
+   strength. The owner can turn this off.
+
+**The budget.** The gestures the character starts by itself (everything
+but those asked for) are kept to 10 a minute. At most 2 of those may be
+big (a wave, laugh, shrug, bow, lean in or hands on hips), and at most 6
+may come from the mood alone. Gestures asked for always play and count
+towards the totals.
 4. **The words themselves.** The plan described above adds nods, shakes,
    tilts, waves, laughs and raised brows where the words call for them.
 5. **Stage directions the model invents** (`[smile]`, `*giggles*`) become
@@ -210,8 +234,6 @@ Four ways, plus a safety net:
   or settle at the end of a phrase.
 - A gesture plays the same way every time: no variations, no wind-up or
   hold, no left-right mirror.
-- One gesture plays at a time. There is no idea of body parts being busy,
-  so a nod cannot run while the arms wave on their own timing.
 - Idle time is pleasant but generic. The character never stretches, hums,
   looks out of the window, or gets sleepy at night or bored after an hour.
 - Listening is passive. The character does not nod at the rhythm of your
@@ -251,6 +273,15 @@ out on those channels and keep going on the rest: a wave holds the right
 arm while the head still nods with the words. A higher-priority behaviour
 can take a channel from a lower one, which then lets go through its own
 retract phase rather than snapping back.
+
+*Built (2026-11-18), for gestures:* channels, holding, priorities, take-over
+with a fade, the living layer giving way, and the budget, as Part 1
+describes. The channels are those above, except that the face is split into
+brows and expression, and the mouth stays with the speech layer. A gesture
+holds a channel where it moves a control by 0.25 or more, unless the library
+lists its channels under `"holds"`. Until clips have phases, a gesture lets
+go with a 0.25 s fade rather than a retract. Idle actions and reactions,
+the layers that would also use channels, are not built yet.
 
 ### The director: what plays, and when
 
@@ -465,7 +496,7 @@ Each event is a syllable, a gesture and a strength.
 |---|---|---|---|
 | 1 | Mouth shapes from the phonemes the voice already makes | Side-by-side clips show the mouth rounding and closing on the right sounds; no lag against the audio | Built: five vowel shapes, rendered on the real stage (open "a" and "o", narrower "i" and "u", "i" wider); closed lips not yet |
 | 2 | The speech planner, and gestures with phases that land on their word | Strokes land within 0.1 s of their word; nods on yes, shakes on no, tilts on questions in a scripted test reply | Built without phases. With the device's voice, 73% of word starts are marked within 0.1 s (90% within 0.16 s); streamed voices are looser (Part 1). The full core and stage, with the real voice, played a speech-caused look down on "sorry" |
-| 3 | Channels, the scheduler and the budget | A nod plays through a wave; no channel ever snaps; gestures per minute stay in a set band over a ten-minute conversation | A per-sentence budget is built; the rest is to do |
+| 3 | Channels, the scheduler and the budget | A nod plays through a wave; no channel ever snaps; gestures per minute stay in a set band over a ten-minute conversation | Built. On the real stage, a nod during a wave moves the head while the waving arm stays pixel for pixel as in the wave alone. Gestures started on top of each other never move a control faster per frame than the steepest gesture alone. In a simulated ten-minute conversation: 8 to 13 gestures a minute, at most 2 big ones not asked for. The mood repeats its last gesture 8% of the time (38% before). Scoring candidates by the moment (a question, a pause) waits for the director's drives (step 4) |
 | 4 | Drives (energy, boredom, sleepiness), idle actions and times of day | An hour of idling in fast-forward shows varied actions, no repeat within the cooldown, sleepy at night | To do |
 | 5 | Listening and reactions | With a microphone, nods in the speaker's pauses; it looks up when speech starts | To do |
 | 6 | Clips version 2, recorded clips (MediaPipe), the timeline page and the debug view | A recorded stretch and a recorded laugh play on three test characters; the debug view shows each layer live | To do |

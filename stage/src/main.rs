@@ -34,7 +34,7 @@ use winit::window::{Fullscreen, WindowBuilder};
 use behaviour::{Behaviour, State};
 use control::{Command, Events, Script};
 use mapping::Mapper;
-use motion::{Library, Motion};
+use motion::{Library, Motion, Start};
 use overrides::Overrides;
 use puppet_info::PuppetInfo;
 use window::{App, AppFrame, GlPreference};
@@ -293,15 +293,24 @@ impl StageApp {
 				Err(e) => self.events.emit(json!({"event": "error", "message": e})),
 			},
 			Command::Gesture(name, intensity) => match self.motion.play(&name, intensity) {
-				Ok(()) => self.events.emit(json!({"event": "gesture", "name": name, "cause": "command"})),
+				Ok(Start::Now) => self.events.emit(json!({"event": "gesture", "name": name, "cause": "command"})),
+				// It starts (and is reported, as "queued") when the one before it is done.
+				Ok(Start::Queued) => self.events.emit(json!({"event": "gesture_waiting", "name": name})),
+				Ok(Start::Skipped(why)) => {
+					self.events.emit(json!({"event": "gesture_skipped", "name": name, "cause": "command", "why": why}))
+				}
 				Err(e) => self.events.emit(json!({"event": "error", "message": e})),
 			},
 			Command::RandomGestures(on) => self.motion.set_random(on),
 			Command::Perform(perf) => self.speech.start(perf),
 			Command::Syllable(k) => {
 				for (name, strength) in self.speech.syllable(k) {
-					if let Ok(true) = self.motion.suggest(&name, strength) {
-						self.events.emit(json!({"event": "gesture", "name": name, "cause": "speech"}));
+					match self.motion.suggest(&name, strength) {
+						Ok(Start::Now) => self.events.emit(json!({"event": "gesture", "name": name, "cause": "speech"})),
+						Ok(Start::Skipped(why)) => self
+							.events
+							.emit(json!({"event": "gesture_skipped", "name": name, "cause": "speech", "why": why})),
+						_ => {}
 					}
 				}
 			}
@@ -498,6 +507,7 @@ impl App for StageApp {
 				"fps": (self.frames_since_beat as f64 / since as f64 * 10.0).round() / 10.0,
 				"state": self.behaviour.state().name(),
 				"mood": self.motion.mood(),
+				"playing": self.motion.playing(),
 				// Average milliseconds per frame on the processor: moving the character, and
 				// handing its drawing to the graphics chip (which then draws in parallel).
 				"update_ms": per_frame(self.update_time),

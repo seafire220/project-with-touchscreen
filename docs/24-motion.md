@@ -280,6 +280,13 @@ since the existing checks have passed motion that looked wrong.
   shapes the mouth and starts each movement as its mark arrives. When the
   language model leaves out its feeling tags, the feeling is guessed from
   the words.
+- Channels (2026-11-18, `26-animation-director.md` step 3): gestures on
+  different parts of the body (head, torso, eyes, brows, expression, each
+  arm) play at the same time, so a nod plays through a wave. One asked for
+  takes a part of the body over from one the character started itself,
+  with a short fade. Where a gesture holds a part, the living motion there
+  gives way. The character's own gestures are kept to a budget (10 a
+  minute, 2 of them big), and the mood prefers ones it has not made lately.
 - Not built yet: motion clips recorded from people, and the debug view.
   The fill behind the arms uses today's smooth colour fill; See-through's
   completed layers would draw it properly.
