@@ -22,6 +22,7 @@ from .speech_text import SEARCH_RULE, Splitter, speech_rules
 log = logging.getLogger("companion.conversation")
 
 FIRST_WORDS_TIMEOUT = 20.0   # seconds to wait for the model's first sentence
+MOOD_LINGER = 6.0            # seconds a feeling stays after a reply ends, before calming to neutral
 REPLY_TIMEOUT = 90.0         # longest a whole reply may take
 
 
@@ -63,6 +64,20 @@ class Conversation:
         self.gestures = gestures
         self.current = None
         self._task = None
+        self.mood_linger = MOOD_LINGER
+        self._calm = None
+
+    def _calm_later(self):
+        """Let the reply's feeling stay a little, then return to neutral (unless a new reply starts)."""
+        async def calm():
+            await asyncio.sleep(self.mood_linger)
+            self.stage.express("neutral")
+        self._calm = asyncio.ensure_future(calm())
+
+    def _stop_calming(self):
+        if self._calm is not None and not self._calm.done():
+            self._calm.cancel()
+        self._calm = None
 
     @property
     def busy(self):
@@ -83,6 +98,7 @@ class Conversation:
         return self._task
 
     async def respond(self, heard):
+        self._stop_calming()
         reply = self.current = Reply(heard)
         self.on_event("heard", {"text": heard})
         self.stage.state("thinking")
@@ -116,7 +132,10 @@ class Conversation:
             if reply.interrupted:
                 self.speaker.stop()
             self.stage.mouth(0.0)
-            self.stage.express("neutral")
+            if reply.interrupted or reply.error:
+                self.stage.express("neutral")
+            else:
+                self._calm_later()
             said = " ".join(reply.spoken).strip()
             if said or reply.interrupted:
                 self.memory.add_turn(heard, said, interrupted=reply.interrupted)
@@ -241,5 +260,5 @@ class Conversation:
         except ProviderError as error:
             self.on_event("error", {"message": str(error)})
         finally:
-            self.stage.express("neutral")
+            self._calm_later()
             self.stage.state("idle")

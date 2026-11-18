@@ -267,6 +267,19 @@ class ConversationTest(unittest.TestCase):
         for emotion in ("happy", "sad", "angry", "surprised", "embarrassed", "thinking", "neutral"):
             self.assertIn(emotion, library["moods"])
 
+    def test_a_feeling_stays_a_little_after_the_reply_then_calms(self):
+        async def go():
+            conv = self.make(llm=FakeLLM("[happy] That is wonderful news, well done!"))
+            conv.mood_linger = 0.1
+            await conv.respond("I passed my exam")
+            right_after = list(self.stage.commands)
+            await asyncio.sleep(0.2)
+            return right_after, list(self.stage.commands)
+        right_after, later = run(go())
+        self.assertIn({"express": "happy"}, right_after)
+        self.assertNotIn({"express": "neutral"}, right_after, "the feeling does not snap away when speech ends")
+        self.assertEqual(later[-1], {"express": "neutral"})
+
     def test_the_greeting_is_spoken(self):
         tts = FakeTTS()
         run(self.make(tts=tts).greet())

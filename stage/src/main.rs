@@ -399,8 +399,8 @@ impl App for StageApp {
 		let (energy, beats) = self.motion.style();
 		self.behaviour.set_style(energy, beats);
 		let mut pose = self.behaviour.update(dt);
-		if let Some(g) = self.motion.apply(dt, &mut pose, self.behaviour.state(), !self.opts.still) {
-			self.events.emit(json!({"event": "gesture", "name": g, "cause": "mood"}));
+		if let Some((g, cause)) = self.motion.apply(dt, &mut pose, self.behaviour.state(), !self.opts.still) {
+			self.events.emit(json!({"event": "gesture", "name": g, "cause": cause}));
 		}
 		let mut values = self.mapper.resolve(&pose);
 		self.overrides.apply(dt, &mut values);

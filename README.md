@@ -78,6 +78,7 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 22. [Board options for the Standard device](docs/22-board-options.md)
 23. [Drawing workflow: hidden areas, alternate poses, new views (candidate assessment)](docs/23-drawing-workflow.md)
 24. [Motion: a generic skeleton every character is fitted to](docs/24-motion.md)
+25. [Does the whole product fit together?](docs/25-product-review.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner

@@ -203,7 +203,12 @@ pub struct Motion {
 	/// False while the model's own expression shows the face: the mood then
 	/// moves only posture and liveliness.
 	face: bool,
+	/// Gestures asked for while another asked-for one plays; they follow it.
+	queued: Vec<(usize, f32)>,
 }
+
+/// Asked-for gestures waiting their turn, at most.
+const QUEUE: usize = 2;
 
 /// Controls that belong to the face, which a model's own expression replaces.
 const FACE: [&str; 5] = ["smile", "eye_smile", "cheek", "brows", "brow_form"];
@@ -228,6 +233,7 @@ impl Motion {
 			next_random: 0.0,
 			rng: seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).max(1),
 			face: true,
+			queued: Vec::new(),
 		};
 		m.next_random = m.random_gap(1.0);
 		m
@@ -300,11 +306,22 @@ impl Motion {
 		if !self.available[i] {
 			return Err(format!("this character cannot make the gesture '{name}'"));
 		}
+		// One asked-for gesture after another: the next waits for the one playing.
+		if asked && self.playing.iter().any(|p| p.asked && p.cut.is_none()) {
+			if self.queued.len() < QUEUE {
+				self.queued.push((i, intensity));
+			}
+			return Ok(());
+		}
+		self.begin(i, intensity, asked);
+		Ok(())
+	}
+
+	fn begin(&mut self, i: usize, intensity: f32, asked: bool) {
 		for p in &mut self.playing {
 			p.cut.get_or_insert(self.t);
 		}
 		self.playing.push(Playing { clip: i, start: self.t, weight: intensity.clamp(0.0, 1.5), asked, cut: None });
-		Ok(())
 	}
 
 	/// How lively idle motion should be, and how strong the beats with speech.
@@ -312,19 +329,22 @@ impl Motion {
 		(self.energy.value, self.beats.value)
 	}
 
-	/// Advance and add the mood and any gestures to `pose`. Returns the
-	/// name of a gesture that started by itself, if one did.
-	pub fn apply(&mut self, dt: f32, pose: &mut Pose, state: State, idle_motion: bool) -> Option<String> {
+	/// Advance and add the mood and any gestures to `pose`. Returns a gesture
+	/// that started now without a command, and why: "queued" (asked for earlier,
+	/// waiting its turn) or "mood" (started by the mood).
+	pub fn apply(&mut self, dt: f32, pose: &mut Pose, state: State, idle_motion: bool) -> Option<(String, &'static str)> {
 		self.t += dt;
-		let mood = &self.lib.moods[self.mood];
 		let k = self.intensity;
 		let mut target = [0.0f32; KEYS.len()];
-		for (key, v) in &mood.offsets {
-			if self.face || !FACE.contains(&KEYS[*key]) {
-				target[*key] = v * k;
+		let (energy, beats, mood_gestures) = {
+			let mood = &self.lib.moods[self.mood];
+			for (key, v) in &mood.offsets {
+				if self.face || !FACE.contains(&KEYS[*key]) {
+					target[*key] = v * k;
+				}
 			}
-		}
-		let (energy, beats) = (1.0 + (mood.energy - 1.0) * k, 1.0 + (mood.beats - 1.0) * k);
+			(1.0 + (mood.energy - 1.0) * k, 1.0 + (mood.beats - 1.0) * k, mood.gestures.clone())
+		};
 		self.energy.update(energy, dt);
 		self.beats.update(beats, dt);
 
@@ -339,12 +359,17 @@ impl Motion {
 		if was_playing && self.playing.is_empty() {
 			self.last_end = self.t;
 		}
+		if !self.queued.is_empty() && !self.playing.iter().any(|p| p.asked && p.cut.is_none()) {
+			let (i, intensity) = self.queued.remove(0);
+			self.begin(i, intensity, true);
+			started = Some((self.lib.clips[i].name.clone(), "queued"));
+		}
 		if self.random && idle_motion && self.playing.is_empty() && self.t - self.last_end > RANDOM_REST && self.t >= self.next_random {
 			// Listening calls for small responses only; idling for fewer gestures.
 			let (pool, scale): (Vec<(String, f32)>, f32) = match state {
 				State::Listening => (vec![("nod".into(), 2.0), ("tilt".into(), 1.0)], 1.0),
-				State::Idle => (mood.gestures.clone(), 1.5),
-				_ => (mood.gestures.clone(), 1.0),
+				State::Idle => (mood_gestures.clone(), 1.5),
+				_ => (mood_gestures, 1.0),
 			};
 			let pool: Vec<(String, f32)> = pool
 				.into_iter()
@@ -357,7 +382,7 @@ impl Motion {
 					if pick < *w {
 						let strength = if state == State::Listening { 0.6 } else { k.max(0.5) };
 						if self.start(g, strength, false).is_ok() {
-							started = Some(g.clone());
+							started = Some((g.clone(), "mood"));
 						}
 						break;
 					}
@@ -397,7 +422,7 @@ mod tests {
 		let mut started = Vec::new();
 		for _ in 0..(seconds / DT) as usize {
 			let mut p = Pose::default();
-			if let Some(g) = m.apply(DT, &mut p, state, true) {
+			if let Some((g, _)) = m.apply(DT, &mut p, state, true) {
 				started.push(g);
 			}
 			poses.push(p);
@@ -465,6 +490,19 @@ mod tests {
 		assert_eq!(m.set_emotion("happy", 1.0).unwrap(), None);
 		let (poses, _) = run(&mut m, 1.0, State::Speaking);
 		assert!(poses.iter().any(|p| p.arm_right > 0.3), "the wave plays out");
+	}
+
+	#[test]
+	fn gestures_asked_for_one_after_another_play_in_turn() {
+		let mut m = Motion::new(Library::builtin(), all, 1);
+		m.set_random(false);
+		m.play("nod", 1.0).unwrap();
+		m.play("tilt", 1.0).unwrap();
+		let (poses, started) = run(&mut m, 3.0, State::Speaking);
+		assert_eq!(started, vec!["tilt".to_string()], "the tilt starts when the nod is done");
+		let nod_end = (0.75 / DT) as usize;
+		assert!(poses[..nod_end - 2].iter().all(|p| p.head_roll.abs() < 1e-4), "no tilt during the nod");
+		assert!(poses.iter().any(|p| p.head_roll > 0.4), "then the whole tilt");
 	}
 
 	#[test]
