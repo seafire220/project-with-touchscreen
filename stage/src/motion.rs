@@ -7,7 +7,9 @@
 //! idling instead of replacing them. Both are written once, in control units,
 //! in `stage/motions/library.json`, and reach each character through its
 //! calibration; a gesture is offered only to characters that have every
-//! control it needs.
+//! control it needs. A need may name alternatives ("arm_left_b|arm_right_b":
+//! either elbow will do), so a character with one moving arm still puts a
+//! hand on its hip; tracks for controls it lacks are left out.
 
 use serde_json::Value;
 
@@ -15,9 +17,9 @@ use crate::behaviour::{Pose, State};
 use crate::smooth::Spring;
 
 /// The controls moods and gestures may move, in `Pose` field names.
-pub const KEYS: [&str; 16] = [
+pub const KEYS: [&str; 18] = [
 	"head_yaw", "head_pitch", "head_roll", "body_yaw", "body_pitch", "body_roll", "gaze_x", "gaze_y", "brows",
-	"brow_form", "smile", "eye_smile", "cheek", "arm_left", "arm_right", "shoulders",
+	"brow_form", "smile", "eye_smile", "cheek", "arm_left", "arm_right", "arm_left_b", "arm_right_b", "shoulders",
 ];
 
 fn slot<'a>(pose: &'a mut Pose, key: usize) -> &'a mut f32 {
@@ -37,6 +39,8 @@ fn slot<'a>(pose: &'a mut Pose, key: usize) -> &'a mut f32 {
 		"cheek" => &mut pose.cheek,
 		"arm_left" => &mut pose.arm_left,
 		"arm_right" => &mut pose.arm_right,
+		"arm_left_b" => &mut pose.arm_left_b,
+		"arm_right_b" => &mut pose.arm_right_b,
 		_ => &mut pose.shoulders,
 	}
 }
@@ -53,7 +57,8 @@ fn key_index(name: &str) -> Result<usize, String> {
 #[derive(Clone, Debug)]
 pub struct Clip {
 	pub name: String,
-	pub needs: Vec<usize>,
+	/// Each need is met by any one of its controls.
+	pub needs: Vec<Vec<usize>>,
 	tracks: Vec<(usize, Vec<(f32, f32)>)>,
 	pub duration: f32,
 }
@@ -112,7 +117,7 @@ impl Library {
 				.and_then(Value::as_array)
 				.ok_or(format!("gesture {name}: no 'needs'"))?
 				.iter()
-				.map(|k| key_index(k.as_str().unwrap_or("")))
+				.map(|k| k.as_str().unwrap_or("").split('|').map(key_index).collect::<Result<Vec<_>, _>>())
 				.collect::<Result<Vec<_>, _>>()?;
 			let mut tracks = Vec::new();
 			let mut duration: f32 = 0.0;
@@ -216,7 +221,8 @@ const FACE: [&str; 5] = ["smile", "eye_smile", "cheek", "brows", "brow_form"];
 impl Motion {
 	/// `has` says whether the character has a parameter for a control.
 	pub fn new(lib: Library, has: impl Fn(&str) -> bool, seed: u64) -> Self {
-		let available = lib.clips.iter().map(|c| c.needs.iter().all(|k| has(KEYS[*k]))).collect();
+		let available =
+			lib.clips.iter().map(|c| c.needs.iter().all(|any| any.iter().any(|k| has(KEYS[*k])))).collect();
 		let mood = lib.moods.iter().position(|m| m.name == "neutral").unwrap_or(0);
 		let mut m = Self {
 			lib,
@@ -512,6 +518,24 @@ mod tests {
 		assert!(m.gestures().contains(&"nod".to_string()));
 		assert!(!m.gestures().contains(&"wave".to_string()));
 		assert!(m.play("wave", 1.0).is_err());
+	}
+
+	#[test]
+	fn hands_on_hips_needs_an_elbow_and_bends_it() {
+		let no_elbows = |k: &str| !k.ends_with("_b");
+		assert!(!Motion::new(Library::builtin(), no_elbows, 1).gestures().contains(&"hands_on_hips".to_string()));
+		let one_arm = |k: &str| !k.starts_with("arm_left");
+		assert!(Motion::new(Library::builtin(), one_arm, 1).gestures().contains(&"hands_on_hips".to_string()),
+			"one hand on the hip");
+		assert!(Motion::new(Library::builtin(), no_elbows, 1).gestures().contains(&"wave".to_string()),
+			"a wave still swings an arm without an elbow");
+		let mut m = Motion::new(Library::builtin(), all, 1);
+		m.set_random(false);
+		m.play("hands_on_hips", 1.0).unwrap();
+		let (poses, _) = run(&mut m, 1.5, State::Idle);
+		let held = poses.last().unwrap();
+		assert!((held.arm_left - 0.6).abs() < 0.05 && (held.arm_left_b + 0.9).abs() < 0.05, "{held:?}");
+		assert!((held.arm_right - 0.6).abs() < 0.05 && (held.arm_right_b + 0.9).abs() < 0.05);
 	}
 
 	#[test]

@@ -2,10 +2,12 @@
 """Head close-ups in strips of poses, drawn by the stage, with the rest outline over each.
 
     pose_strips.py STAGE OUT.png PUPPET.inp [PUPPET2.inp ...] [--rows turn,nod,diagonal,body,tilt]
+                   [--view head|body]
 
 For each puppet and each row, renders the pose at -30, -15, 0, 15 and 30 (body
-turn and lean at -10 to 10) with every other setting held at rest, so only
-that movement shows. The outline of the character at rest is drawn in cyan on
+turn and lean, and arms, at -10 to 10) with every other setting held at rest,
+so only that movement shows. The arm rows (arm_a: both arms' A setting,
+arm_b: both B settings) are best seen with --view body, the whole character. The outline of the character at rest is drawn in cyan on
 every frame: what moves off it, and what is left behind, is easy to see.
 Several puppets give rows one above the other, for before and after.
 
@@ -36,6 +38,8 @@ ROWS = {
     "tilt": lambda s: {"ParamAngleZ": 30 * s},
     "body": lambda s: {"ParamBodyAngleX": 10 * s},
     "lean": lambda s: {"ParamBodyAngleY": 10 * s},
+    "arm_a": lambda s: {"ParamArmLA": 10 * s, "ParamArmRA": 10 * s},
+    "arm_b": lambda s: {"ParamArmLB": 10 * s, "ParamArmRB": 10 * s},
 }
 
 
@@ -53,8 +57,18 @@ def head_view(path):
     return (cx - side / 2, top - 0.08 * side, cx + side / 2, top + 0.92 * side)
 
 
-def render(stage, puppet, rows):
-    view = head_view(puppet)
+def body_view(path):
+    """The whole character at rest, square, with a margin, in puppet coordinates."""
+    with open(path, "rb") as f:
+        puppet = live2d_export.Puppet(f.read())
+    pts = np.vstack([puppet.world(p, puppet.defaults()) for p in puppet.parts])
+    cx, cy = (pts[:, 0].min() + pts[:, 0].max()) / 2, (pts[:, 1].min() + pts[:, 1].max()) / 2
+    side = 1.25 * max(pts[:, 0].max() - pts[:, 0].min(), pts[:, 1].max() - pts[:, 1].min())
+    return (cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2)
+
+
+def render(stage, puppet, rows, whole=False):
+    view = body_view(puppet) if whole else head_view(puppet)
     lines, captures, t = [], [], 0.5
     poses = [("rest", {})] + [(row, ROWS[row](s)) for row in rows for s in STEPS]
     for _, values in poses:
@@ -98,8 +112,14 @@ def main(argv):
         i = argv.index("--rows")
         rows = argv[i + 1].split(",")
         argv = argv[:i] + argv[i + 2:]
+    whole = False
+    if "--view" in argv:
+        i = argv.index("--view")
+        whole = argv[i + 1] == "body"
+        argv = argv[:i] + argv[i + 2:]
     stage, out_path, puppets = argv[1], argv[2], argv[3:]
-    results = [(os.path.basename(os.path.dirname(os.path.abspath(p))) or p, render(stage, p, rows)) for p in puppets]
+    results = [(os.path.basename(os.path.dirname(os.path.abspath(p))) or p, render(stage, p, rows, whole))
+               for p in puppets]
     label_w, gap = 150, 4
     sheet = Image.new("RGB", (label_w + len(STEPS) * (SIZE + gap), 24 + len(rows) * len(results) * (SIZE + gap)),
                       (255, 255, 255))

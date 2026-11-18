@@ -43,6 +43,13 @@ PRIORITY = ["eyes", "mouth", "nose", "eyewear", "headwear", "hair", "earwear", "
 UNDERLAP_SHARE = 0.016
 # Labelled areas smaller than this share of their part are treated as stray.
 STRAY_SHARE = 0.03
+# An arm moves on its own only if the picture shows it hanging from the shoulder, mostly whole: its
+# largest piece holds this share of it (hair in front can break an arm into pieces), it is at least this
+# wide and this long (shares of the character's height), and it starts below the chin.
+ARM_MAIN_SHARE = 0.85
+ARM_MIN_WIDTH = 0.022
+ARM_MIN_LENGTH = 0.12
+ARM_FOLDED_SHARE = 0.3      # ... and fewer than this share of its rows cross it twice (folded back)
 # The neck under the face: its width when no neck was found (share of face
 # width), and how much wider than the neck it is at the chin.
 NECK_SHARE = 0.36
@@ -124,6 +131,76 @@ def soft_fill(rgb, known, wanted, radius):
     for c in range(3):
         blurred = ndimage.gaussian_filter(filled[..., c] * area, sigma)
         out[..., c][wanted] = np.clip(blurred[wanted] / np.maximum(weight[wanted], 1e-6), 0, 255).astype(np.uint8)
+    return out
+
+
+def arm_unusable(arm, chin, top, height, centre_line):
+    """Why an arm cannot move on its own (it would come apart or swing from the wrong place), or None."""
+    labelled, count = ndimage.label(arm)
+    sizes = ndimage.sum(arm, labelled, range(1, count + 1))
+    if max(sizes) < ARM_MAIN_SHARE * arm.sum():
+        return "is broken up by what lies in front of it"
+    rows = np.nonzero(arm.any(axis=1))[0]
+    if arm.sum() / len(rows) < ARM_MIN_WIDTH * height:
+        return "is too thin, or mostly hidden"
+    # A hanging arm's top is its shoulder, out at the side; a raised arm's top is its hand, often near
+    # the middle (hands at the chin).
+    upper = arm & (np.arange(arm.shape[0])[:, None] <= rows[0] + 0.08 * (rows[-1] - rows[0]))
+    out_top = abs(np.nonzero(upper)[1].mean() - centre_line)
+    out_all = abs(np.nonzero(arm)[1].mean() - centre_line)
+    if rows[0] < chin or rows[0] > top + 0.5 * height or out_top < 0.5 * out_all:
+        return "does not hang from the shoulder (raised, or not an arm)"
+    if rows[-1] - rows[0] < ARM_MIN_LENGTH * height:
+        return "is too short"
+    # Folded back on itself (a hand raised to the chin): many rows cross the arm twice.
+    doubled = 0
+    for y in rows:
+        line = np.concatenate([[False], arm[y], [False]])
+        starts, ends = np.nonzero(line[1:] & ~line[:-1])[0], np.nonzero(~line[1:] & line[:-1])[0]
+        doubled += int(np.sum(ends - starts >= 3) >= 2)
+    if doubled > ARM_FOLDED_SHARE * len(rows):
+        return "is folded up (a hand raised)"
+    return None
+
+
+def behind_arm(body, arm, outward):
+    """Where the body carries on behind an arm, as an artist completes it before the arm can move.
+
+    Two rules, row by row: the arm's pixels between visible body on both sides of it (the arm lies
+    over the body there); and, where the arm hides the body's outer edge, the arm's pixels inside
+    that edge, drawn straight from where it shows above the arm to where it shows below. The rest of
+    the arm's area is background. `outward` is -1 for an arm on the picture's left, +1 on its right.
+    """
+    h, w = body.shape
+    out = np.zeros_like(body)
+    arm_rows = np.nonzero(arm.any(axis=1))[0]
+    if not len(arm_rows):
+        return out
+    xs = np.arange(w)
+    for y in arm_rows:
+        filled = np.nonzero(body[y])[0]
+        if len(filled):
+            out[y] = arm[y] & (xs > filled.min()) & (xs < filled.max())
+    # The body's outer edge on the arm's side, row by row, and whether the arm hides it there.
+    top, bottom = arm_rows[0], arm_rows[-1]
+    reach = max(3, int(0.5 * (bottom - top)))
+    known_y, known_x, hidden = [], [], []
+    for y in range(max(0, top - reach), min(h, bottom + reach + 1)):
+        filled = np.nonzero(body[y])[0]
+        if not len(filled):
+            continue
+        edge = filled.min() if outward < 0 else filled.max()
+        beside = [edge + outward * k for k in (1, 2, 3) if 0 <= edge + outward * k < w]
+        if any(arm[y, x] for x in beside):
+            hidden.append(y)
+        else:
+            known_y.append(y)
+            known_x.append(edge)
+    if hidden and known_y:
+        line = np.interp(hidden, known_y, known_x)
+        for y, edge in zip(hidden, line):
+            inside = (xs >= edge) if outward < 0 else (xs <= edge)
+            out[y] |= arm[y] & inside
     return out
 
 
@@ -499,13 +576,25 @@ def split(image, masks, invented=None):
         warn("the arms are joined or lie across the body; they stay part of the body and will not move separately")
     elif not arms.any():
         warn("no arms were found; arm gestures are unavailable")
+    for side, name in (("l", "left"), ("r", "right")):
+        if arm_sides[side].any():
+            why = arm_unusable(arm_sides[side], chin, int(rows[0]), height, centre_line)
+            if why:
+                warn("the %s arm %s; it stays part of the body and will not move on its own" % (name, why))
+                arm_sides[side] = np.zeros_like(body)
 
-    # --- everything else is the body, extended a little under what covers it
+    # --- everything else is the body, extended a little under what covers it, and completed behind
+    # each arm so an arm can swing without leaving empty space
     rest = body & ~hair & ~face & ~neck & ~arm_sides["l"] & ~arm_sides["r"]
     covering = body & ~rest
     covered = covering & ndimage.binary_dilation(rest, iterations=underlap)
-    rest_rgb = soft_fill(rgb, rest, covered, underlap)
-    rest_mask = rest | covered
+    behind = np.zeros_like(body)
+    for side, outward in (("l", -1), ("r", 1)):
+        if arm_sides[side].any():
+            behind |= behind_arm(rest, arm_sides[side], outward)
+    widths = [int(arm_sides[side].sum() / max(1, arm_sides[side].any(axis=1).sum())) for side in ("l", "r")]
+    rest_rgb = soft_fill(rgb, rest, covered | behind, max(underlap, max(widths) // 2))
+    rest_mask = rest | covered | behind
 
     def layer(mask, colours=rgb):
         out = np.zeros((h, w, 4), np.uint8)
@@ -546,7 +635,7 @@ def split(image, masks, invented=None):
     layers += [("mouth", layer(mouth, mouth_rgb)), ("hair_front", layer(hair))]
     layers = [(role, array) for role, array in layers if array[..., 3].any()]
     if invented is not None:
-        invented["torso"] = covered & ~rest
+        invented["torso"] = (covered | behind) & ~rest
         invented["neck"] = under & ~neck
         invented["face_base"] = (hidden | (face_base_mask & ~face)) & face_base_mask
 

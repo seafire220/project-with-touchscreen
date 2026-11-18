@@ -384,11 +384,14 @@ def plan(puppet):
     shared = {}
     for frame_id, parts in by_frame.items():
         frame = puppet.nodes[frame_id]
+        # Parts in frames below this one (an arm hanging from its own node at the shoulder) share its
+        # movements where they lie: nothing turns at rest, so their points help sample the field.
+        below = [p for p in puppet.parts if frame in p.ancestors() and frame_of(p) is not frame]
         for param in puppet.params:
             moved = [p for p in parts if any(q is param for q, _ in p.deforms)]
             if len(moved) < FIELD_MIN_PARTS:
                 continue
-            field = Field(param, moved, frame)
+            field = Field(param, moved + [p for p in below if any(q is param for q, _ in p.deforms)], frame)
             if field.fit is not None:
                 shared[(frame_id, param.name)] = field
     # A warp applies a field where the part's own movements have taken its points; Inochi2D applies it

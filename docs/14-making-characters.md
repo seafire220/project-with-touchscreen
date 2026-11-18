@@ -85,7 +85,14 @@ Works, with limits:
 
 - Faces partly in profile: turning the head shows a small patch beside the
   face at the far ends of a turn.
-- Arms crossed in front of the body stay part of the body and do not move.
+- Arms hanging at the sides move: each turns at the shoulder and bends at
+  the elbow, and the body is painted in behind them, so the character can
+  wave, put one or both hands on its hips and shrug. An arm that is mostly
+  hidden (behind long hair), very thin in the picture, raised (a hand at
+  the chin) or crossed in front of the body stays part of the body and does
+  not move; the tool's notes say which, and gestures that need it are not
+  offered. Check the preview: the part-finding model sometimes marks a coat's
+  sides as arms.
 - No visible neck: a plain one is added under the face.
 
 ## Also in the Live2D format (optional)

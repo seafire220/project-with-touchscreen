@@ -28,6 +28,8 @@ pub enum Control {
 	Smile,
 	ArmLeft,
 	ArmRight,
+	ArmLeftB,
+	ArmRightB,
 	Shoulders,
 	EyeSmileLeft,
 	EyeSmileRight,
@@ -37,7 +39,7 @@ pub enum Control {
 }
 
 impl Control {
-	pub const ALL: [Control; 23] = [
+	pub const ALL: [Control; 25] = [
 		Control::MouthOpen,
 		Control::BlinkLeft,
 		Control::BlinkRight,
@@ -55,6 +57,8 @@ impl Control {
 		Control::Smile,
 		Control::ArmLeft,
 		Control::ArmRight,
+		Control::ArmLeftB,
+		Control::ArmRightB,
 		Control::Shoulders,
 		Control::EyeSmileLeft,
 		Control::EyeSmileRight,
@@ -82,6 +86,8 @@ impl Control {
 			Control::Smile => "smile",
 			Control::ArmLeft => "arm_left",
 			Control::ArmRight => "arm_right",
+			Control::ArmLeftB => "arm_left_b",
+			Control::ArmRightB => "arm_right_b",
 			Control::Shoulders => "shoulders",
 			Control::EyeSmileLeft => "eye_smile_left",
 			Control::EyeSmileRight => "eye_smile_right",
@@ -135,6 +141,8 @@ impl Control {
 			Control::Smile => pose.smile,
 			Control::ArmLeft => pose.arm_left,
 			Control::ArmRight => pose.arm_right,
+			Control::ArmLeftB => pose.arm_left_b,
+			Control::ArmRightB => pose.arm_right_b,
 			Control::Shoulders => pose.shoulders,
 			Control::EyeSmileLeft | Control::EyeSmileRight => pose.eye_smile,
 			Control::Cheek => pose.cheek,
@@ -165,6 +173,8 @@ impl Control {
 			Control::Smile => &[("ParamMouthForm", 0, false)],
 			Control::ArmLeft => &[("ParamArmLA", 0, false)],
 			Control::ArmRight => &[("ParamArmRA", 0, false)],
+			Control::ArmLeftB => &[("ParamArmLB", 0, false)],
+			Control::ArmRightB => &[("ParamArmRB", 0, false)],
 			Control::Shoulders => &[("ParamShoulderY", 0, false)],
 			Control::EyeSmileLeft => &[("ParamEyeLSmile", 0, false)],
 			Control::EyeSmileRight => &[("ParamEyeRSmile", 0, false)],
@@ -380,6 +390,22 @@ mod tests {
 		assert_eq!(value(&out, "ParamMouthForm").x, 2.0);
 		let down = m.resolve(&Pose { smile: -0.5, ..Default::default() });
 		assert_eq!(value(&down, "ParamMouthForm").x, 0.0, "halfway from neutral to the lowest value");
+	}
+
+	#[test]
+	fn the_elbows_have_their_own_controls() {
+		let info = PuppetInfo {
+			params: vec![
+				param("ParamArmRA", false, [-10.0, 0.0], [10.0, 0.0], [0.0, 0.0]),
+				param("ParamArmRB", false, [-10.0, 0.0], [10.0, 0.0], [0.0, 0.0]),
+			],
+			..Default::default()
+		};
+		let mut m = Mapper::auto(&info);
+		// A wave as the studio's characters hold it: the arm at 0.5, the forearm up at 0.85.
+		let out = m.resolve(&Pose { arm_right: 0.5, arm_right_b: 0.85, ..Default::default() });
+		assert_eq!(value(&out, "ParamArmRA").x, 5.0);
+		assert!((value(&out, "ParamArmRB").x - 8.5).abs() < 1e-5);
 	}
 
 	#[test]

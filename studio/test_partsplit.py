@@ -207,5 +207,56 @@ class PartSplitTest(unittest.TestCase):
             partsplit.split(self.image, masks)
 
 
+class ArmTest(unittest.TestCase):
+    """Arms on plain masks: what is filled behind them, and which arms may move on their own."""
+
+    def test_the_body_carries_on_behind_an_arm_that_hides_its_edge(self):
+        body = np.zeros((100, 100), bool)
+        body[10:90, 30:70] = True
+        arm = np.zeros_like(body)
+        arm[20:70, 22:36] = True                     # over the body's left edge
+        behind = partsplit.behind_arm(body & ~arm, arm, -1)
+        self.assertTrue(behind[45, 30:36].all(), "the edge runs on straight behind the arm")
+        self.assertFalse(behind[45, 22:30].any(), "beyond the edge stays empty")
+        self.assertFalse((behind & ~arm).any(), "only what the arm hides is filled")
+
+    def test_an_arm_lying_over_the_body_is_filled_from_side_to_side(self):
+        body = np.zeros((100, 100), bool)
+        body[10:90, 20:80] = True
+        arm = np.zeros_like(body)
+        arm[30:60, 40:50] = True
+        self.assertTrue(partsplit.behind_arm(body & ~arm, arm, -1)[30:60, 40:50].all())
+
+    def test_an_arm_hanging_clear_of_the_body_leaves_background_behind_it(self):
+        body = np.zeros((100, 100), bool)
+        body[10:90, 40:70] = True
+        arm = np.zeros_like(body)
+        arm[20:70, 20:32] = True
+        self.assertFalse(partsplit.behind_arm(body, arm, -1).any())
+
+    def test_only_arms_hanging_whole_from_the_shoulder_move_on_their_own(self):
+        size, chin, top, centre = 400, 80, 10, 200
+
+        def arm(*boxes):
+            m = np.zeros((size, size), bool)
+            for y0, y1, x0, x1 in boxes:
+                m[y0:y1, x0:x1] = True
+            return m
+
+        def why(m):
+            return partsplit.arm_unusable(m, chin, top, size, centre)
+        self.assertIsNone(why(arm((100, 220, 120, 140))))
+        self.assertIn("broken up", why(arm((100, 155, 120, 140), (165, 220, 120, 140))))
+        self.assertIn("thin", why(arm((100, 220, 120, 124))))
+        self.assertIn("does not hang", why(arm((40, 160, 120, 140))), "starts above the chin: raised")
+        diagonal = np.zeros((size, size), bool)
+        for y in range(100, 220):
+            x = int(190 - (y - 100) * 0.6)
+            diagonal[y, x - 10:x + 10] = True
+        self.assertIn("does not hang", why(diagonal), "its top is by the middle: a hand at the chin")
+        self.assertIn("folded", why(arm((100, 220, 110, 125), (100, 200, 133, 148), (195, 220, 110, 148))))
+        self.assertIn("short", why(arm((100, 130, 120, 140))))
+
+
 if __name__ == "__main__":
     unittest.main()

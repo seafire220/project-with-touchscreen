@@ -123,7 +123,11 @@ original artwork (a character made or commissioned for testing).
    owner's Mac); compare its completed layers with our fills (`reveal.py`).
 2. Cut its arm layers into upper arm, forearm and hand, rig them to turn at
    the joints, and measure gaps at the gesture poses (wave, shrug, hands on
-   hips).
+   hips). Done for upper arm and forearm on the owner's test pictures
+   (2026-11-18, `24-motion.md`): true rotation at the shoulder and elbow,
+   rounded elbows, the body painted in behind the arms with today's fill,
+   and each character's own wave and hip poses; hands still turn with the
+   forearm.
 3. Rig the same layers with PSD2Live, Anime2.5DRig and Iki and compare pose
    strips with ours.
 4. Only then try a local open model for one alternate arm drawing, as a

@@ -1,5 +1,5 @@
 {
- "about": "Moods and gestures on the stage's generic controls (docs/24-motion.md). Values are in control units: -1 to 1 (0 to 1 for eye_smile and cheek), turned into each character's own parameter values by its calibration. Gestures add to whatever the character is doing; keys are [seconds, value] and each track starts and ends at 0. A gesture is offered for a character only if every control in 'needs' maps to one of its parameters.",
+ "about": "Moods and gestures on the stage's generic controls (docs/24-motion.md). Values are in control units: -1 to 1 (0 to 1 for eye_smile and cheek), turned into each character's own parameter values by its calibration. Gestures add to whatever the character is doing; keys are [seconds, value] and each track starts and ends at 0. A gesture is offered for a character only if every control in 'needs' maps to one of its parameters ('a|b': either will do). Arms: arm_left/arm_right turn the whole arm at the shoulder, arm_left_b/arm_right_b the forearm at the elbow; characters made by the studio put a waving arm at 0.5 and 0.85 and a hand on the hip at 0.6 and -0.9 (studio/refine.py).",
 
  "moods": {
   "neutral": {
@@ -136,23 +136,28 @@
               "brows": [[0, 0], [0.4, 0.25], [1.8, 0.25], [2.3, 0]]}
   },
   "hands_on_hips": {
-   "needs": ["arm_left", "arm_right"],
-   "tracks": {"arm_left": [[0, 0], [0.5, 0.35], [2.5, 0.35], [3.0, 0]],
-              "arm_right": [[0, 0], [0.5, 0.35], [2.5, 0.35], [3.0, 0]],
-              "shoulders": [[0, 0], [0.5, 0.2], [2.5, 0.2], [3.0, 0]],
-              "body_pitch": [[0, 0], [0.5, -0.05], [2.5, -0.05], [3.0, 0]]}
+   "needs": ["arm_left|arm_right", "arm_left_b|arm_right_b"],
+   "tracks": {"arm_left": [[0, 0], [0.55, 0.6], [2.5, 0.6], [3.0, 0]],
+              "arm_right": [[0, 0], [0.55, 0.6], [2.5, 0.6], [3.0, 0]],
+              "arm_left_b": [[0, 0], [0.55, -0.9], [2.5, -0.9], [3.0, 0]],
+              "arm_right_b": [[0, 0], [0.55, -0.9], [2.5, -0.9], [3.0, 0]],
+              "shoulders": [[0, 0], [0.55, 0.2], [2.5, 0.2], [3.0, 0]],
+              "body_pitch": [[0, 0], [0.55, -0.05], [2.5, -0.05], [3.0, 0]]}
   },
   "wave": {
    "needs": ["arm_right"],
-   "tracks": {"arm_right": [[0, 0], [0.35, 0.35], [0.6, 0.23], [0.85, 0.35], [1.1, 0.23], [1.35, 0.35], [1.8, 0]],
-              "head_roll": [[0, 0], [0.35, 0.15], [1.35, 0.15], [1.8, 0]],
-              "smile": [[0, 0], [0.3, 0.4], [1.4, 0.4], [1.8, 0]]}
+   "tracks": {"arm_right": [[0, 0], [0.4, 0.5], [0.65, 0.46], [0.9, 0.5], [1.15, 0.46], [1.4, 0.5], [1.85, 0]],
+              "arm_right_b": [[0, 0], [0.4, 0.85], [0.65, 0.7], [0.9, 0.95], [1.15, 0.7], [1.4, 0.85], [1.85, 0]],
+              "head_roll": [[0, 0], [0.4, 0.15], [1.4, 0.15], [1.85, 0]],
+              "smile": [[0, 0], [0.3, 0.4], [1.45, 0.4], [1.85, 0]]}
   },
   "shrug": {
    "needs": ["shoulders"],
    "tracks": {"shoulders": [[0, 0], [0.3, 0.8], [0.8, 0.8], [1.1, 0]],
               "arm_left": [[0, 0], [0.3, 0.2], [0.8, 0.2], [1.1, 0]],
               "arm_right": [[0, 0], [0.3, 0.2], [0.8, 0.2], [1.1, 0]],
+              "arm_left_b": [[0, 0], [0.3, 0.3], [0.8, 0.3], [1.1, 0]],
+              "arm_right_b": [[0, 0], [0.3, 0.3], [0.8, 0.3], [1.1, 0]],
               "brows": [[0, 0], [0.3, 0.4], [0.8, 0.4], [1.1, 0]],
               "head_roll": [[0, 0], [0.3, 0.15], [0.8, 0.15], [1.1, 0]]}
   }

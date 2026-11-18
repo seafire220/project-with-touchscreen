@@ -222,5 +222,150 @@ class RefineTest(unittest.TestCase):
         self.assertEqual(back["param"][0]["name"], "ParamAngleX")
 
 
+def puppet_with_arm(bend=None):
+    """The puppet above with a left arm as the rigger makes it: upper arm and forearm overlapping at the
+    elbow, each turned by moved copies of its points at the ends of ParamArmLA (24 degrees about the
+    shoulder) and ParamArmLB (55 degrees about the elbow)."""
+    p = puppet()
+    body = p["nodes"]["children"][0]
+    up, lo = part("16_arm_l_up", -110, -80, -90, 60, 2), part("16_arm_l_lo", -110, 20, -90, 170, 2)
+    sleeve = part("16_sleeve", -112, -82, -96, -40, 2)
+    body["children"][1:1] = [up, lo, sleeve]
+    shoulder, elbow = (-100.0, -80.0), (-100.0, 40.0)
+
+    def turned_by(node, centre, degrees):
+        pts = refine._pairs(node["mesh"]["verts"])
+        if bend == "squash" and node is lo and centre == elbow:
+            return [[0.0, (y - centre[1]) * 0.1 * degrees / 55.0] for x, y in pts]     # not a turn
+        moved = refine.rotated(pts, centre, math.radians(degrees))
+        return [[mx - x, my - y] for (x, y), (mx, my) in zip(pts, moved)]
+
+    def keyed(node, centre, degrees, weight=1.0):
+        rest = [[0.0, 0.0]] * (len(node["mesh"]["verts"]) // 2)
+        ends = [turned_by(node, centre, -degrees * weight), turned_by(node, centre, degrees * weight)]
+        return {"node": node["uuid"], "param_name": "deform", "values": [[ends[0]], [rest], [ends[1]]],
+                "isSet": [[True]] * 3, "interpolate_mode": "Linear"}
+    p["param"].append({"name": "ParamArmLA", "axis_points": [[0.0, 0.5, 1.0], [0.0]],
+                       "bindings": [keyed(up, shoulder, 24), keyed(lo, shoulder, 24), keyed(sleeve, shoulder, 24, 0.5)]})
+    p["param"].append({"name": "ParamArmLB", "axis_points": [[0.0, 0.5, 1.0], [0.0]],
+                       "bindings": [keyed(lo, elbow, 55)]})
+    return p, shoulder, elbow
+
+
+def place(p, suffix, values):
+    """A part's points at control values (-10 to 10), as Inochi2D places them: its own moved copies
+    blended in straight lines, then each node above it turned about its own position."""
+    def find(node, path):
+        if node.get("type") == "Part" and node["name"].endswith(suffix):
+            return path + [node]
+        for child in node.get("children") or []:
+            found = find(child, path + [node])
+            if found:
+                return found
+    chain = find(p["nodes"], [])
+
+    def at(param, binding):
+        axis = param["axis_points"][0]
+        position = (values.get(param["name"], 0.0) + 10.0) / 20.0
+        for i in range(len(axis) - 1):
+            if position <= axis[i + 1] or i == len(axis) - 2:
+                t = min(max((position - axis[i]) / (axis[i + 1] - axis[i]), 0.0), 1.0)
+                a, b = binding["values"][i][0], binding["values"][i + 1][0]
+                if isinstance(a, list):
+                    return [((1 - t) * u[0] + t * v[0], (1 - t) * u[1] + t * v[1]) for u, v in zip(a, b)]
+                return (1 - t) * a + t * b
+    pts = refine._pairs(chain[-1]["mesh"]["verts"])
+    for param in p["param"]:
+        for b in param["bindings"]:
+            if b["node"] == chain[-1]["uuid"] and b["param_name"] == "deform":
+                pts = [(x + dx, y + dy) for (x, y), (dx, dy) in zip(pts, at(param, b))]
+    for node in reversed(chain):
+        turn = sum(at(param, b) for param in p["param"] for b in param["bindings"]
+                   if b["node"] == node["uuid"] and b["param_name"] == "transform.r.z")
+        tx, ty = node["transform"]["trans"][:2]
+        c, s = math.cos(turn), math.sin(turn)
+        pts = [(tx + c * x - s * y, ty + s * x + c * y) for x, y in pts]
+    return pts
+
+
+class ArmTest(unittest.TestCase):
+    def setUp(self):
+        self.p, self.shoulder, self.elbow = puppet_with_arm()
+        self.original = copy.deepcopy(self.p)
+        self.report = refine.refine_arms(self.p)["arms"]
+
+    def point(self, suffix, target, values):
+        """Where the part's point that sits at `target` at rest goes."""
+        rest = place(self.p, suffix, {})
+        i = min(range(len(rest)), key=lambda k: math.hypot(rest[k][0] - target[0], rest[k][1] - target[1]))
+        return place(self.p, suffix, values)[i]
+
+    def test_the_arm_hangs_from_a_node_that_turns_at_the_shoulder(self):
+        self.assertEqual(sorted(self.report), ["l"])
+        for got, want in zip(self.report["l"]["shoulder"] + self.report["l"]["elbow"], self.shoulder + self.elbow):
+            self.assertAlmostEqual(got, want, places=1)
+        node = next(n for n in refine._nodes(self.p["nodes"]) if n.get("name") == "arm_l")
+        self.assertEqual([c["name"] for c in node["children"]], ["16_arm_l_up", "16_arm_l_lo"])
+        kinds = {b["param_name"] for b in binding_list(self.p, "ParamArmLA") if b["node"] == node["uuid"]}
+        self.assertEqual(kinds, {"transform.r.z"})
+
+    def test_nothing_moves_at_rest(self):
+        for suffix in ("arm_l_up", "arm_l_lo"):
+            before = mesh_points(self.original, suffix)
+            for (x0, y0), (x1, y1) in zip(before, place(self.p, suffix, {})):
+                self.assertAlmostEqual(x0, x1, places=6)
+                self.assertAlmostEqual(y0, y1, places=6)
+
+    def test_the_elbow_holds_together_however_both_turn(self):
+        for a in (-10, -3, 0, 4, 6, 10):
+            for b in (-10, -9, -2.5, 0, 5, 8.5, 10):
+                values = {"ParamArmLA": a, "ParamArmLB": b}
+                up, lo = self.point("arm_l_up", self.elbow, values), self.point("arm_l_lo", self.elbow, values)
+                self.assertLess(math.hypot(up[0] - lo[0], up[1] - lo[1]), 1e-6, values)
+
+    def test_a_forearm_keeps_its_length_between_keys(self):
+        rest = math.hypot(170 - 40, 10)
+        for b in (0.7, 3.3, 7.9, -4.4):
+            elbow = self.point("arm_l_lo", self.elbow, {"ParamArmLB": b})
+            hand = self.point("arm_l_lo", (-110, 170), {"ParamArmLB": b})
+            self.assertGreater(math.hypot(hand[0] - elbow[0], hand[1] - elbow[1]), rest - 1.0, b)
+
+    def test_the_hand_goes_to_the_hip_and_up_to_wave(self):
+        wrist = (-110.0, 170.0)
+        length = math.hypot(*(e - s for e, s in zip(self.elbow, self.shoulder))) + math.hypot(10, 130)
+        hip = (-80.0 + refine.HIP_INSET * length, wrist[1] - refine.HIP_UP * length)   # the torso's edge is at x=-80
+        hand = self.point("arm_l_lo", wrist, {"ParamArmLA": refine.POSE_A["hip"], "ParamArmLB": refine.POSE_B["hip"]})
+        self.assertLess(math.hypot(hand[0] - hip[0], hand[1] - hip[1]), 2.0, (hand, hip))
+        elbow = self.point("arm_l_lo", self.elbow, {"ParamArmLA": refine.POSE_A["hip"]})
+        self.assertLess(elbow[0], self.elbow[0] - 20, "the elbow points out")
+        values = {"ParamArmLA": refine.POSE_A["wave"], "ParamArmLB": refine.POSE_B["wave"]}
+        hand, elbow = self.point("arm_l_lo", wrist, values), self.point("arm_l_lo", self.elbow, values)
+        self.assertLess(hand[1], elbow[1] - 100, "the forearm points up to wave")
+
+    def test_keys_are_close_enough_for_straight_lines_between(self):
+        turns = [v[0] for v in next(b for b in binding_list(self.p, "ParamArmLA")
+                                    if b["param_name"] == "transform.r.z")["values"]]
+        self.assertLessEqual(max(abs(b - a) for a, b in zip(turns, turns[1:])), refine.SWING_STEP + 1e-9)
+        bend = binding(self.p, "ParamArmLB", "arm_l_lo")
+        pts = refine._pairs(next(n for n in refine._nodes(self.p["nodes"]) if n.get("name") == "16_arm_l_lo")["mesh"]["verts"])
+        angles = [refine.fit_rotation(pts, [(x + d[0], y + d[1]) for (x, y), d in zip(pts, v[0])])[1] if any(
+            abs(c) > 1e-9 for d in v[0] for c in d) else 0.0 for v in bend["values"]]
+        self.assertLessEqual(max(abs(b - a) for a, b in zip(angles, angles[1:])), refine.BEND_STEP + 1e-6)
+
+    def test_parts_the_rigger_moved_with_the_arm_keep_their_movement(self):
+        sleeve = binding(self.p, "ParamArmLA", "sleeve")
+        axis = next(x for x in self.p["param"] if x["name"] == "ParamArmLA")["axis_points"][0]
+        old = binding(self.original, "ParamArmLA", "sleeve")["values"]
+        for position, column in ((0.0, 0), (0.5, 1), (1.0, 2)):
+            i = axis.index(position)
+            for got, want in zip(sleeve["values"][i][0][5], old[column][0][5]):
+                self.assertAlmostEqual(got, want, places=3)
+
+    def test_an_arm_the_rigger_did_not_turn_rigidly_is_left_alone(self):
+        p, _, _ = puppet_with_arm(bend="squash")
+        self.assertEqual(refine.refine_arms(p)["arms"], "left as rigged")
+        self.assertFalse(any(n.get("name") == "arm_l" for n in refine._nodes(p["nodes"])))
+
+
 if __name__ == "__main__":
     unittest.main()

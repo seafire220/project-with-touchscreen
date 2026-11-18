@@ -64,10 +64,15 @@ pub struct Pose {
 	pub brows: f32,
 	/// -1 downturned to 1 smiling (the mouth's shape).
 	pub smile: f32,
-	/// -1 to 1: arms in towards the body or out from it; small values only
-	/// unless the character has drawings for bigger poses.
+	/// -1 to 1: the whole arm, at the shoulder: in towards the body or out from it.
+	/// Our own characters put named poses at fixed values (studio/refine.py):
+	/// 0.5 the arm of a wave, 0.6 the arm of a hand on the hip, 1 out and up.
 	pub arm_left: f32,
 	pub arm_right: f32,
+	/// -1 to 1: the forearm, at the elbow: -0.9 a hand on the hip, 0.85 up
+	/// to wave. Moods and gestures move these; at rest they stay 0.
+	pub arm_left_b: f32,
+	pub arm_right_b: f32,
 	/// -1 to 1: shoulders lowered or raised.
 	pub shoulders: f32,
 	/// 0 to 1: smiling eyes.
@@ -436,6 +441,8 @@ impl Behaviour {
 			smile: smile.clamp(-1.0, 1.0),
 			arm_left,
 			arm_right,
+			arm_left_b: 0.0,
+			arm_right_b: 0.0,
 			shoulders: if self.idle_motion { 0.15 * breath } else { 0.0 },
 			// Moods and gestures move these (motion.rs).
 			eye_smile: 0.0,

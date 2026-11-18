@@ -229,11 +229,38 @@ since the existing checks have passed motion that looked wrong.
   embarrassed, a wave and a nod: every mood played in order, both asked-for
   gestures played out, entry gestures played where nothing asked for was
   playing.
+- Arms (2026-11-18): two more controls, the elbows (`arm_left_b`,
+  `arm_right_b`, on `ParamArmLB` and `ParamArmRB`), so a gesture can raise a
+  forearm or bend it back to the hip. On our own characters the studio
+  (`studio/refine.py`) hangs each arm from a node at the shoulder that truly
+  rotates, turns the forearm about the elbow inside it (stored every 10
+  degrees, so the Live2D-format copy stays within 2 pixels), rounds both
+  pieces off at the elbow so the joint stays closed, and solves each arm's
+  own poses from its lengths and how it is drawn: a waving arm at A 0.5 and
+  B 0.85, a hand on the hip at A 0.6 and B -0.9 (the hand placed on the
+  body's outline a fifth of an arm above where it hangs, the elbow out).
+  The gesture library uses those values: the wave raises the forearm and
+  waves it at the elbow, hands on hips bends both arms (or the one that
+  moves: a need can name alternatives, `"arm_left_b|arm_right_b"`), and the
+  shrug opens the forearms. `studio/partsplit.py` paints the body in behind
+  each arm first, where it carries on behind it (between visible body on
+  both sides, and up to the body's outline drawn straight across where the
+  arm hides it), and keeps an arm with the body when the picture does not
+  show it hanging whole from the shoulder (broken up by hair in front, very
+  thin, raised, folded, or too short). Measured on the owner's test
+  pictures: the area left empty when the arms swing fell from 5,540 to 436
+  square pixels on Alice, and the tear at the elbow when shoulder and elbow
+  move together from 2,584 to 92; on the others the remaining empty area is
+  the arm's own place where background shows through, as it should.
+  Gestures checked by playing them through the stage's motion system
+  (wave, hands on hips, shrug) on four characters.
 - Not built yet: calibration files, motion clips recorded from people, the
   calibration page for imported models (including mapping their own
-  expressions to our moods), and the debug view. Big arm gestures (hands on
-  hips, wave) move the arms only as far as deformation looks right; drawn arm
-  poses come from the drawing workflow.
+  expressions to our moods), and the debug view. Imported Live2D-format
+  models get the arm gestures at the same control values, which mean
+  whatever their own `ParamArm*` settings do; the calibration page will let
+  a buyer fix that. The fill behind the arms uses today's smooth colour
+  fill; See-through's completed layers would draw it properly.
 
 Our own characters have no gaze or brow parameters yet (the rigger does not
 make them), so on them these controls do nothing until the studio adds them;

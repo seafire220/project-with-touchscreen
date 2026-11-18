@@ -59,6 +59,15 @@ class MakeCharacterTest(unittest.TestCase):
                              for b in params["ParamAngleZ"]["bindings"]))
         self.assertEqual(params["ParamMouthOpenY"]["axis_points"][0], [0.0, refine.MOUTH_SHOWN, 1.0])
 
+    def test_the_arms_turn_at_shoulder_and_elbow_with_rounded_ends(self):
+        arms = self.report["refine"]["arms"]
+        self.assertEqual(sorted(arms), ["l", "r"])
+        self.assertTrue(all(arms[side]["elbow_radius"] > 2 for side in arms))
+        p = package.open_package(io.BytesIO(self.data))
+        puppet, _ = refine.read_puppet(p.files["visual/puppet.inp"])
+        names = {n.get("name") for n in refine._nodes(puppet["nodes"])}
+        self.assertTrue({"arm_l", "arm_r"} <= names)
+
     def test_the_live2d_format_version_matches_the_puppet(self):
         p = package.open_package(io.BytesIO(self.data))
         self.assertTrue(p.files["visual/live2d/model.moc3"].startswith(b"MOC3"))

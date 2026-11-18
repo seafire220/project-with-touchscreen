@@ -37,6 +37,21 @@ The neck and head ride on the spine, so they move a few pixels, together;
 each arm moves with its shoulder. A lean raises or lowers the shoulders,
 neck and head together.
 
+Arms
+----
+The rigger cuts each arm at the elbow into an upper arm and a forearm that
+overlap there, and turns them by storing moved copies of their points at
+the ends of the A (shoulder) and B (elbow) controls. Between the ends the
+points slide in straight lines, so a swinging arm shortens; and the two
+controls add up their movements instead of one following the other, so a
+raised arm that also bends comes apart at the elbow. Here the whole arm
+hangs from a node at the shoulder that truly rotates (A), and the forearm
+turns about the elbow inside it (B, stored every 10 degrees, so the
+straight lines between are within a pixel). The controls put named poses
+at fixed values, solved for each character's arm from its lengths and how
+it is drawn: a waving arm at A 5 and B 8.5, a hand on the hip at A 6 and
+B -9 (see ARM_IN and the values below it).
+
 Blink, breathing and hair physics are left as the rigger made them.
 
 Usage: refine.py IN.inp OUT.inp
@@ -362,6 +377,7 @@ def refine(puppet):
         param["bindings"] = kept
     report.update(refine_mouth(puppet, parts))
     report.update(refine_body(puppet, parts, g))
+    report.update(refine_arms(puppet))
     return report
 
 
@@ -482,6 +498,235 @@ def refine_body(puppet, parts, g):
     return {"body": done}
 
 
+# Arms. Angles are measured from straight down, outward positive. The controls run from -10 to 10;
+# each puts named poses at fixed values, solved for each character's own arm (its lengths and how it
+# is drawn), so a gesture asking for "hand on hip" gets the hand on that character's hip:
+#   A (shoulder): -10 slightly in, 0 as drawn, 5 the waving arm, 6 the arm of a hand on the hip,
+#                 10 out and up;
+#   B (elbow):    -10 past the hip, -9 hand on hip, 0 as drawn, 8.5 forearm up to wave, 10 past it.
+# stage/motions/library.json uses the same values (0.5 and 0.85 for a wave, 0.6 and -0.9 for hips).
+ARM_IN, ARM_UP = -15.0, 80.0          # upper arm's angle at A = -10 and 10
+WAVE_UPPER, WAVE_FORE = 35.0, 160.0   # waving: upper arm out a little, forearm up and a little out
+HIP_UP = 0.22                         # hand on hip: the hand this far above where it hangs (arm lengths),
+HIP_INSET = 0.03                      # ... just inside the body's outline there; the elbow points out
+POSE_A = {"wave": 5.0, "hip": 6.0}
+POSE_B = {"wave": 8.5, "hip": -9.0}
+BEND_PAST = 15.0                      # degrees B goes past the hip and wave poses at its ends
+# The most one key may be from the next. The Live2D-format copy blends between keys in straight
+# lines, so close keys keep a turning arm its length; on the device the shoulder turns exactly.
+SWING_STEP = math.radians(12.5)
+BEND_STEP = math.radians(10.0)
+RIGID_TOLERANCE = 0.5       # pixels: a movement this close to a rotation is one
+
+
+def fit_rotation(points_, moved):
+    """The rotation about some centre that best takes points_ to moved: (centre, angle, worst miss)."""
+    n = float(len(points_))
+    vx = sum(p[0] for p in points_) / n
+    vy = sum(p[1] for p in points_) / n
+    wx = sum(p[0] for p in moved) / n
+    wy = sum(p[1] for p in moved) / n
+    cos_sum = sum((a[0] - vx) * (b[0] - wx) + (a[1] - vy) * (b[1] - wy) for a, b in zip(points_, moved))
+    sin_sum = sum((a[0] - vx) * (b[1] - wy) - (a[1] - vy) * (b[0] - wx) for a, b in zip(points_, moved))
+    angle = math.atan2(sin_sum, cos_sum)
+    c, s = math.cos(angle), math.sin(angle)
+    tx, ty = wx - (c * vx - s * vy), wy - (s * vx + c * vy)
+    det = 2.0 - 2.0 * c
+    if det < 1e-9:
+        return None, 0.0, 0.0
+    centre = (((1 - c) * tx - s * ty) / det, (s * tx + (1 - c) * ty) / det)
+    miss = max(math.hypot(c * a[0] - s * a[1] + tx - b[0], s * a[0] + c * a[1] + ty - b[1])
+               for a, b in zip(points_, moved))
+    return centre, angle, miss
+
+
+def rotated(pts, centre, angle):
+    c, s = math.cos(angle), math.sin(angle)
+    cx, cy = centre
+    return [(cx + c * (x - cx) - s * (y - cy), cy + s * (x - cx) + c * (y - cy)) for x, y in pts]
+
+
+def arm_keys(knots, step):
+    """Keys along a control (0 to 1) and their angles (radians), through the given (control value from
+    -10 to 10, angle) knots in straight lines, no two keys more than step apart."""
+    knots = sorted(knots)
+    keys = []
+    for (v0, a0), (v1, a1) in zip(knots, knots[1:]):
+        count = max(1, int(math.ceil(abs(a1 - a0) / step - 1e-9)))
+        keys += [((v0 + (v1 - v0) * i / count + 10.0) / 20.0, a0 + (a1 - a0) * i / count) for i in range(count)]
+    return keys + [((knots[-1][0] + 10.0) / 20.0, knots[-1][1])]
+
+
+def outward_angle(vector, outward):
+    """A direction's angle from straight down, in degrees, outward positive (outward: +1 for an arm
+    on the picture's left, whose outside is towards -x; -1 on the right)."""
+    return outward * math.degrees(math.atan2(-vector[0], vector[1]))
+
+
+def arm_poses(shoulder, elbow, wrist, outward, body_edge=None):
+    """The arm's control knots: (A knots, B knots) as (value, rotation in radians) from the drawing.
+
+    body_edge(y) gives the body's outer edge on this arm's side at height y, for the hand on the hip.
+    """
+    upper = (elbow[0] - shoulder[0], elbow[1] - shoulder[1])
+    fore = (wrist[0] - elbow[0], wrist[1] - elbow[1])
+    up0, fore0 = outward_angle(upper, outward), outward_angle(fore, outward)
+    l_up, l_fore = math.hypot(*upper), math.hypot(*fore)
+    length = l_up + l_fore
+    # Hand on hip: the hand on the body's outline a little above where it hangs, the elbow pointing out
+    # (two-bone reach: the elbow is where the upper arm and the forearm meet on the way to the hand).
+    hip_y = wrist[1] - HIP_UP * length
+    edge = body_edge(hip_y) if body_edge else None
+    # No further out than the hand hangs: a cape or a wide coat makes the outline there too wide.
+    edge = wrist[0] if edge is None or -outward * edge > -outward * wrist[0] else edge
+    hip_x = edge + outward * HIP_INSET * length
+    to_hip = (hip_x - shoulder[0], hip_y - shoulder[1])
+    reach = min(math.hypot(*to_hip), 0.999 * length)
+    cos_at_shoulder = (l_up ** 2 + reach ** 2 - l_fore ** 2) / (2 * l_up * reach)
+    swing = math.degrees(math.acos(max(-1.0, min(1.0, cos_at_shoulder))))
+    hip_upper = outward_angle(to_hip, outward) + swing          # the elbow on the outer side
+    c, s = math.cos(math.radians(outward * (hip_upper - up0))), math.sin(math.radians(outward * (hip_upper - up0)))
+    bent_elbow = (shoulder[0] + c * upper[0] - s * upper[1], shoulder[1] + s * upper[0] + c * upper[1])
+    hip_fore = outward_angle((hip_x - bent_elbow[0], hip_y - bent_elbow[1]), outward)
+    hip_bend = hip_fore - fore0 - (hip_upper - up0)
+    wave_bend = WAVE_FORE - fore0 - (WAVE_UPPER - up0)
+    a = [(-10.0, ARM_IN - up0), (0.0, 0.0), (POSE_A["wave"], WAVE_UPPER - up0), (POSE_A["hip"], hip_upper - up0),
+         (10.0, max(ARM_UP, hip_upper + 5.0) - up0)]
+    b = [(-10.0, hip_bend - BEND_PAST), (POSE_B["hip"], hip_bend), (0.0, 0.0), (POSE_B["wave"], wave_bend),
+         (10.0, wave_bend + BEND_PAST)]
+    rad = math.radians
+    return [(v, rad(d)) for v, d in a], [(v, rad(d)) for v, d in b], {
+        "drawn_upper_deg": round(up0, 1), "drawn_forearm_deg": round(fore0, 1),
+        "hip_upper_deg": round(hip_upper, 1), "hip_bend_deg": round(hip_bend, 1), "wave_bend_deg": round(wave_bend, 1)}
+
+
+def body_edge_finder(puppet, outward, band):
+    """body_edge(y): the torso's outermost point on one side near height y (the torso as completed behind
+    the arms), in the arm parts' coordinates, or None."""
+    torso = next((n for n in _nodes(puppet["nodes"]) if n.get("type") == "Part"
+                  and role_of(n.get("name", "")) == "torso"), None)
+    if torso is None:
+        return None
+    pts = _pairs(torso["mesh"]["verts"])
+
+    def edge(y):
+        near = [x for x, vy in pts if abs(vy - y) <= band]
+        if not near:
+            return None
+        return min(near) if outward > 0 else max(near)
+    return edge
+
+
+def resample(binding, old_axis, new_axis):
+    """A binding's values at new key positions, by Inochi2D's own straight-line rule between the old ones."""
+    def at(position):
+        for i in range(len(old_axis) - 1):
+            if position <= old_axis[i + 1] or i == len(old_axis) - 2:
+                t = (position - old_axis[i]) / (old_axis[i + 1] - old_axis[i])
+                t = min(max(t, 0.0), 1.0)
+                a, b = binding["values"][i][0], binding["values"][i + 1][0]
+                if isinstance(a, list):
+                    return [[round((1 - t) * p[0] + t * q[0], 3), round((1 - t) * p[1] + t * q[1], 3)]
+                            for p, q in zip(a, b)]
+                return (1 - t) * a + t * b
+    out = dict(binding)
+    out["values"] = [[at(position)] for position in new_axis]
+    out["isSet"] = [[True]] * len(new_axis)
+    return out
+
+
+def _deform(binding_list, uid):
+    return next((b for b in binding_list if b["node"] == uid and b["param_name"] == "deform"), None)
+
+
+def _end_offsets(binding, end):
+    """The offsets a deform binding stores at one end of its control (0: start, -1: end)."""
+    return binding["values"][end][0]
+
+
+def refine_arms(puppet):
+    """Each arm: a node at the shoulder that turns the whole arm, and the forearm turning about the
+    elbow inside it. Returns a short report."""
+    params = {p["name"]: p for p in puppet.get("param", [])}
+    nodes = list(_nodes(puppet["nodes"]))
+    parent_of = {id(c): n for n in nodes for c in (n.get("children") or [])}
+    next_uuid = max([n["uuid"] for n in nodes] + [p.get("uuid", 0) for p in puppet.get("param", [])]) + 1
+    done = {}
+    for side in ("l", "r"):
+        swing, bend = params.get("ParamArm%sA" % side.upper()), params.get("ParamArm%sB" % side.upper())
+        upper = next((n for n in nodes if n.get("type") == "Part" and role_of(n.get("name", "")) == "arm_%s_up" % side), None)
+        fore = next((n for n in nodes if n.get("type") == "Part" and role_of(n.get("name", "")) == "arm_%s_lo" % side), None)
+        if not (swing and bend and upper and fore) or len(swing["axis_points"][0]) < 2:
+            continue
+        body = parent_of.get(id(upper))
+        if body is None or parent_of.get(id(fore)) is not body:
+            continue
+        if any(abs(v) > 1e-9 for n in (upper, fore) for v in n["transform"]["trans"][:2]):
+            continue                                   # the rigger leaves parts at their parent's origin
+        up_swing, fore_swing = _deform(swing["bindings"], upper["uuid"]), _deform(swing["bindings"], fore["uuid"])
+        fore_bend = _deform(bend["bindings"], fore["uuid"])
+        if not (up_swing and fore_swing and fore_bend):
+            continue
+        up_pts = [tuple(v) for v in _pairs(upper["mesh"]["verts"])]
+        fore_pts = [tuple(v) for v in _pairs(fore["mesh"]["verts"])]
+        shoulder, swing_angle, miss = fit_rotation(up_pts, [(x + d[0], y + d[1]) for (x, y), d in
+                                                            zip(up_pts, _end_offsets(up_swing, -1))])
+        elbow, bend_angle, miss2 = fit_rotation(fore_pts, [(x + d[0], y + d[1]) for (x, y), d in
+                                                           zip(fore_pts, _end_offsets(fore_bend, -1))])
+        if shoulder is None or elbow is None or max(miss, miss2) > RIGID_TOLERANCE:
+            continue                                   # not the rigger's rigid chain: leave it
+        outward = 1.0 if swing_angle > 0 else -1.0
+
+        # The node at the shoulder, holding the arm; the parts keep their points where they were.
+        arm = {"uuid": next_uuid, "name": "arm_%s" % side, "type": "Node", "enabled": True, "zsort": 0.0,
+               "transform": {"trans": [round(shoulder[0], 3), round(shoulder[1], 3), 0.0],
+                             "rot": [0.0, 0.0, 0.0], "scale": [1.0, 1.0]},
+               "lockToRoot": False, "pinToMesh": False, "children": []}
+        next_uuid += 1
+        children = body["children"]
+        at = min(children.index(upper), children.index(fore))
+        for n in sorted((upper, fore), key=children.index):
+            children.remove(n)
+            n["transform"]["trans"] = [round(-shoulder[0], 3), round(-shoulder[1], 3), 0.0]
+            arm["children"].append(n)
+        children.insert(at, arm)
+
+        # The wrist: the forearm's point farthest from the elbow.
+        wrist = max(fore_pts, key=lambda q: math.hypot(q[0] - elbow[0], q[1] - elbow[1]))
+        band = 0.04 * (math.hypot(elbow[0] - shoulder[0], elbow[1] - shoulder[1]) +
+                       math.hypot(wrist[0] - elbow[0], wrist[1] - elbow[1]))
+        swing_knots, bend_knots, poses = arm_poses(shoulder, elbow, wrist, outward,
+                                                   body_edge_finder(puppet, outward, band))
+
+        # A: the node turns. Other parts the rigger moved with the arm keep their movement, at the new keys.
+        keys = arm_keys(swing_knots, SWING_STEP)
+        old_axis, new_axis = swing["axis_points"][0], [k for k, _ in keys]
+        kept = [resample(b, old_axis, new_axis) for b in swing["bindings"]
+                if b["node"] not in (upper["uuid"], fore["uuid"])]
+        kept.append({"node": arm["uuid"], "param_name": "transform.r.z",
+                     "values": [[round(outward * a, 6)] for _, a in keys],
+                     "isSet": [[True]] * len(keys), "interpolate_mode": "Linear"})
+        swing["bindings"], swing["axis_points"] = kept, [new_axis, [0.0]]
+
+        # B: the forearm turns about the elbow, stored at keys close enough for straight lines between.
+        keys = arm_keys(bend_knots, BEND_STEP)
+        old_axis, new_axis = bend["axis_points"][0], [k for k, _ in keys]
+        kept = [resample(b, old_axis, new_axis) for b in bend["bindings"] if b["node"] != fore["uuid"]]
+        columns = []
+        for _, a in keys:
+            moved = rotated(fore_pts, elbow, outward * a)
+            columns.append([[[round(mx - x, 3), round(my - y, 3)] for (x, y), (mx, my) in zip(fore_pts, moved)]])
+        kept.append({"node": fore["uuid"], "param_name": "deform", "values": columns,
+                     "isSet": [[True]] * len(keys), "interpolate_mode": "Linear"})
+        bend["bindings"], bend["axis_points"] = kept, [new_axis, [0.0]]
+        done[side] = dict(poses, shoulder=[round(v, 1) for v in shoulder], elbow=[round(v, 1) for v in elbow])
+    return {"arms": done or "left as rigged"}
+
+
+def _pairs(flat):
+    return [(flat[i], flat[i + 1]) for i in range(0, len(flat), 2)]
+
+
 MOUTH_PARAM = "ParamMouthOpenY"
 # Openness at which the open mouth is fully visible, and how visible the
 # mouth line still is there.
@@ -524,7 +769,93 @@ def finish(data):
     """Refine a rigger puppet file. Returns (new file bytes, report)."""
     puppet, rest = read_puppet(data)
     report = refine(puppet)
+    if isinstance(report.get("arms"), dict):
+        rest = round_elbows(puppet, rest, report["arms"])
     return write_puppet(puppet, rest), report
+
+
+TEXTURES = b"TEX_SECT"
+ELBOW_MARGIN = 1.15         # the round end's radius, as a share of half the arm's width at the elbow
+
+
+def read_texture_section(rest):
+    """[(encoding, bytes)] and whatever follows the texture section."""
+    if rest[:8] != TEXTURES:
+        raise ValueError("the puppet has no texture section")
+    count = struct.unpack(">I", rest[8:12])[0]
+    pos, out = 12, []
+    for _ in range(count):
+        length = struct.unpack(">I", rest[pos:pos + 4])[0]
+        out.append((rest[pos + 4], rest[pos + 5:pos + 5 + length]))
+        pos += 5 + length
+    return out, rest[pos:]
+
+
+def write_texture_section(textures, after):
+    out = [TEXTURES, struct.pack(">I", len(textures))]
+    for encoding, data in textures:
+        out += [struct.pack(">I", len(data)), bytes([encoding]), data]
+    return b"".join(out) + after
+
+
+def round_elbows(puppet, rest, arms):
+    """Round each arm piece off at the elbow, as Live2D artists cut a joint.
+
+    The rigger cuts an arm in two with a wide overlap, so each piece reaches a fifth of the arm's
+    length past the elbow; once the elbow bends far, those ends stick out past each other in a cross.
+    Each piece keeps its own side of the elbow and a disc of the elbow's own pixels, the same disc in
+    both, so the joint stays closed however far it bends and the picture at rest is unchanged.
+    """
+    import io
+    import numpy as np
+    from PIL import Image
+    textures, after = read_texture_section(rest)
+    by_name = {role_of(n.get("name", "")): n for n in _nodes(puppet["nodes"]) if n.get("type") == "Part"}
+    for side, joints in arms.items():
+        upper, fore = by_name.get("arm_%s_up" % side), by_name.get("arm_%s_lo" % side)
+        if upper is None or fore is None or upper["textures"][0] == fore["textures"][0]:
+            continue
+        shoulder, elbow = np.array(joints["shoulder"]), np.array(joints["elbow"])
+        along = (elbow - shoulder) / max(np.linalg.norm(elbow - shoulder), 1e-6)
+        pictures = {}
+        for node, keep in ((upper, -1.0), (fore, 1.0)):
+            index = node["textures"][0]
+            encoding, data = textures[index]
+            if encoding != 0:
+                break                                   # only PNG textures are rewritten
+            with Image.open(io.BytesIO(data)) as im:
+                rgba = np.asarray(im.convert("RGBA")).copy()
+            verts = np.array(node["mesh"]["verts"], float).reshape(-1, 2)
+            uvs = np.array(node["mesh"]["uvs"], float).reshape(-1, 2) * [rgba.shape[1], rgba.shape[0]]
+            scale, offset = [], []
+            for axis in (0, 1):                         # texture pixels = scale * points + offset
+                a, b = np.polyfit(verts[:, axis], uvs[:, axis], 1)
+                scale.append(a)
+                offset.append(b)
+            if min(abs(v) for v in scale) < 1e-9:
+                break
+            ys, xs = np.mgrid[0:rgba.shape[0], 0:rgba.shape[1]]
+            px = (xs + 0.5 - offset[0]) / scale[0]
+            py = (ys + 0.5 - offset[1]) / scale[1]
+            past = (px - elbow[0]) * along[0] + (py - elbow[1]) * along[1]
+            near = np.hypot(px - elbow[0], py - elbow[1])
+            pictures[index] = (rgba, past, near, keep)
+        if len(pictures) != 2:
+            continue
+        # Half the arm's width at the elbow, measured across the arm in the upper piece's picture.
+        rgba, past, near, _ = pictures[upper["textures"][0]]
+        # (the farthest drawn pixel from the elbow along the line across it: the pivot sits mid-arm)
+        across = (np.abs(past) <= 1.5) & (rgba[..., 3] > 127)
+        half = float(near[across].max()) if across.any() else 0.0
+        radius = max(2.0, ELBOW_MARGIN * half)
+        for index, (rgba, past, near, keep) in pictures.items():
+            gone = (past * keep < 0) & (near > radius)
+            rgba[gone] = 0
+            out = io.BytesIO()
+            Image.fromarray(rgba, "RGBA").save(out, "PNG", optimize=True)
+            textures[index] = (0, out.getvalue())
+        arms[side]["elbow_radius"] = round(radius, 1)
+    return write_texture_section(textures, after)
 
 
 def _nodes(node):

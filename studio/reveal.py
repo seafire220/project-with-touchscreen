@@ -35,7 +35,7 @@ import live2d_export
 
 EDGE_MARGIN = 4.0     # picture pixels: holes this close to the rest outline count as the outline moving
 
-# Turn, nod and tilt at both ends; the body turn and lean; and a turn with the body following.
+# Turn, nod and tilt at both ends; the body turn and lean; a turn with the body following; arm poses.
 POSES = [
     ("turn left", {"ParamAngleX": -30.0}), ("turn right", {"ParamAngleX": 30.0}),
     ("nod up", {"ParamAngleY": 30.0}), ("nod down", {"ParamAngleY": -30.0}),
@@ -43,6 +43,11 @@ POSES = [
     ("turn and nod", {"ParamAngleX": 30.0, "ParamAngleY": 30.0}),
     ("body turn", {"ParamBodyAngleX": 10.0}), ("body lean", {"ParamBodyAngleY": 10.0}),
     ("turn with body", {"ParamAngleX": 30.0, "ParamBodyAngleX": 10.0}),
+    # Arms: A swings the whole arm at the shoulder, B bends the forearm at the elbow.
+    ("arms out", {"ParamArmLA": 10.0, "ParamArmRA": 10.0}), ("arms in", {"ParamArmLA": -10.0, "ParamArmRA": -10.0}),
+    ("elbows out", {"ParamArmLB": 10.0, "ParamArmRB": 10.0}), ("elbows in", {"ParamArmLB": -10.0, "ParamArmRB": -10.0}),
+    ("arms out, elbows out", {"ParamArmLA": 10.0, "ParamArmRA": 10.0, "ParamArmLB": 10.0, "ParamArmRB": 10.0}),
+    ("arms out, elbows in", {"ParamArmLA": 10.0, "ParamArmRA": 10.0, "ParamArmLB": -10.0, "ParamArmRB": -10.0}),
 ]
 
 
