@@ -1,9 +1,11 @@
 # Animation: how it works now, and a richer design (the director)
 
 Status: 2026-11-18. Part 1 describes the animation system as built
-(`stage/src/behaviour.rs`, `motion.rs`, `mapping.rs`, `stage/motions/library.json`,
-`core/companion/conversation.py`, `speech_text.py`). Part 2 is a proposed
-design for a richer system, not built yet. `24-motion.md` covers the
+(`stage/src/behaviour.rs`, `motion.rs`, `speech.rs`, `mapping.rs`,
+`stage/motions/library.json`, `core/companion/conversation.py`,
+`performance.py`, `speech_text.py`). Part 2 is a design for a richer
+system. Its first two steps, mouth shapes and movements that go with the
+words, are built, and Part 1 describes them. `24-motion.md` covers the
 generic skeleton and the fitting of characters to it, which both parts use.
 
 ## Part 1: how it works now
@@ -35,9 +37,10 @@ each frame. They talk over a local socket in short JSON commands such as
      list).
 
    A change of mood blends in over about half a second.
-3. **Gesture layer.** Eighteen keyframed clips (nod, firm nod, shake, tilt,
+3. **Gesture layer.** Nineteen keyframed clips (nod, firm nod, shake, tilt,
    bow, bounce, laugh, sigh, sway, look away, look down, lean in, lean
-   back, start in surprise, think, hands on hips, wave, shrug) are added on
+   back, start in surprise, think, hands on hips, wave, raised brows,
+   shrug) are added on
    top of everything else. Each starts and ends at zero, so it blends in
    and out. A new gesture cuts the old one short with a 0.25 s fade. A
    character is only offered the gestures it has the controls for.
@@ -52,23 +55,115 @@ each frame. They talk over a local socket in short JSON commands such as
 
 ### While it talks
 
-- **The mouth** follows the loudness of the voice. As the core plays each
-  sentence's audio, it measures the loudness every 20 ms and sends it,
-  timed to when the sound will be heard. The mouth opens in about 35 ms
-  and closes in about 70 ms. This is openness only, with no separate
-  shapes for "oo" or "ee".
+- **How far the mouth opens** follows the loudness of the voice. As the
+  core plays each sentence's audio, it measures the loudness every 20 ms
+  and sends it, timed to when the sound will be heard. The mouth opens in
+  about 35 ms and closes in about 70 ms.
+- **The mouth's shape** follows the syllables. Before a sentence plays, the
+  core (`performance.py`) splits it into syllables and finds each one's
+  vowel from the phonemes espeak-ng gives for each word, or from the
+  spelling if espeak-ng is missing. Each vowel maps to one of five shapes:
+  open "a", half-open "e", wide "i", round "o" and small round "u". It then
+  works out where each syllable is heard in the audio by counting
+  phonemes. In a voice's speech each phoneme lasts about as long as any
+  other (35 to 45 ms in the device's voice), so a syllable's place among
+  the sentence's phonemes is close to its place in time. Clause ends with
+  a pause after them anchor the count:
+  - When the voice makes the whole sentence first (the device's own
+    voice), the syllables are spread over the time the voice sounds. Each
+    clause that has a pause before it starts where the sound starts again.
+    A clause after a full stop nearly always has one; after a comma often
+    not.
+  - When the audio streams in (cloud voices), a clock counts phonemes at a
+    usual pace while the voice sounds. At each pause it decides which
+    clause starts there (a long pause most likely after a full stop),
+    restarts the count there and corrects the pace. At a full stop it
+    waits for the pause, so it never runs on into the next sentence.
+
+  A mark is sent as each syllable is heard. The stage (`speech.rs`) scales
+  the opening by the vowel: an "i" opens to 60% of an "a", a "u" to 55%.
+  It also widens the mouth ("i", "e") or rounds it ("o", "u") on the
+  mouth-shape control, in about 60 ms. Loudness still decides when the
+  mouth opens and shuts, so it never moves without sound.
 - **Beats.** When the loudness jumps (a stressed syllable: a rise of 0.18
   over its recent level, at most one every 0.28 s), the head gives a small
   quick nod, the brows lift on strong ones, and an arm makes a small
   accent, left and right in turn. The mood scales all of this.
+- **Movements with the words.** The same plan picks a few movements from
+  the sentence's words, with no extra call to the language model:
+
+  | Words | Movement | Chance |
+  |---|---|---|
+  | A sentence starting "yes", "sure", "exactly"; "no problem" | nod | 90% |
+  | "no", "not", "never", "don't" (not in a question, not "no problem") | small head shake | 75% |
+  | A question | tilt on its last word | 65% |
+  | "maybe", "I think", "not sure" | tilt, or sometimes a shrug | 60% |
+  | "hello", "hi" at the start of the first sentence | wave | 85% |
+  | "bye", "good night", "see you" | wave | 80% |
+  | "haha", "hehe", "lol" | laugh | 90% |
+  | "thanks", "thank you" | nod | 70% |
+  | "sorry", "unfortunately" | look down | 60% |
+  | "really", "amazing", "love", a word in capitals | brows raised | 55% |
+  | "first", "next", "finally" (two or more) | a small nod on each | 80% |
+  | A sentence ending "!" | small nod at its end | 40% |
+
+  Each movement starts one syllable before its word, two for a wave,
+  shrug or bow, so that it lands on the word. Each sentence gets at most
+  two, or one if the language model asked for a gesture itself. At most
+  one may be big (a wave, laugh, shrug, bow, lean in, or hands on hips).
+  After a big one, the next two sentences get none, except a laugh. The
+  chances mean the same sentence is not always performed the same way.
+  Only gestures the character has are planned. A planned movement never
+  cuts short one the language model asked for.
 - **Feelings in step with the words.** The language model is told to put
   a feeling tag such as `[happy]` before a sentence. Each sentence's
   feeling is sent as its audio starts, so the face changes with the words.
   After the reply the feeling lingers for 6 s, then calms to neutral.
 
+### When the tags are missing or wrong
+
+The character must still look alive when the language model forgets its
+tags, writes them its own way, or something fails:
+
+- **Talking never depends on tags.** The mouth opens with the voice's
+  loudness and the beats come from its stresses whatever else happens.
+  The planned movements need no tags. The mood also keeps adding its own
+  gestures now and then, unless the owner has turned that off.
+- **No feeling tag in a reply.** Each sentence's feeling is guessed from
+  its words: "sorry" or "miss you" give sad, "wow" or "no way" surprised,
+  "love" or "awesome" happy, "hmm" or "maybe" thinking. A word counts 1, a
+  phrase 1.5, and a "!" adds a little. Only a clear winner counts; a plain
+  or mixed sentence keeps the feeling it had. Once the model tags anything
+  in a reply, nothing more is guessed, so a tagged reply is never
+  second-guessed.
+- **Tags written other ways** still count:
+  - labels and capitals: `[Emotion: Happy!]`, `[mood: thinking]`;
+  - parentheses and angle brackets: `(smiles)`, `<sad>`;
+  - stage directions: `*giggles softly*`, `*waves*`, `*puts hands on hips*`;
+  - other words for the feelings: `[joyful]`, `[worried]`, `*nervously*`,
+    `<Angrily>`;
+  - an emoji, when there is no tag: 😊 happy, 😢 sad, 🤔 thinking. Emoji are
+    never read out.
+
+  Other words in square or angle brackets are dropped rather than read
+  out (`[pause]`, `[citation needed]`, `[1]`).
+- **Words that only look like tags are still said.** Emphasis keeps its
+  words ("that was *really* good"). A feeling word stressed inside a
+  sentence is said, not acted ("I'm *glad* you came", "let's *pause*
+  here"). A remark in parentheses that is not a direction is said
+  ("I missed you (a lot, honestly)").
+- **When the plan fails**, for example on an unexpected error or a missing
+  espeak-ng, the sentence is spoken with the loudness-only mouth and the
+  beats. The error is written to the log and the reply carries on.
+- **When the syllables cannot be found** (a very even voice, a whisper),
+  a mark is placed anyway every 0.3 s of steady sound, so the shapes and
+  movements keep going.
+- **With an older stage or core**, the new messages are ignored and the
+  character talks exactly as before.
+
 ### How bigger animations are chosen
 
-Three ways, plus a safety net:
+Four ways, plus a safety net:
 
 1. **The language model asks.** It is told which gestures this character
    can make ("[wave] wave", "[hands_on_hips] put your hands on your hips")
@@ -82,17 +177,39 @@ Three ways, plus a safety net:
    weighted list at random intervals (happy every 4 to 8 s, sad every 8 to
    15 s, half as often again when idle). While listening, it only nods and
    tilts, at 60% strength. The owner can turn this off.
-4. **Stage directions the model invents** (`[smile]`, `*giggles*`) become
+4. **The words themselves.** The plan described above adds nods, shakes,
+   tilts, waves, laughs and raised brows where the words call for them.
+5. **Stage directions the model invents** (`[smile]`, `*giggles*`) become
    the matching feeling or gesture instead of being read out.
 
 ### What it cannot do yet
 
-- The mouth only opens and closes; it has no shapes for the sounds.
-- The beats follow loudness, not meaning. The character does not shake
-  its head at "no", nod at "yes", tilt at a question or count on a list.
-- A gesture starts with its sentence, not on the word it belongs to, and
-  plays the same way every time: no variations, no wind-up or hold, no
-  left-right mirror.
+- The mouth has five vowel shapes but no closed lips for "m", "b" and "p"
+  or lip-on-teeth for "f" and "v". The mouth only closes when the sound
+  drops. On characters made from a picture, the mouth-shape control lifts
+  or lowers the corners, so "o" and "u" show mainly as a smaller opening,
+  not a rounded one. Imported Live2D-format models with a proper mouth
+  shape do better.
+- Syllable times are estimated, not known. Measured against the exact
+  timings of the device's voice (`core/tools/measure_syllable_marks.py`,
+  12 sentences, 6 speakers, 3 speeds, 3,204 syllables):
+
+  | Sound | Vowels within 0.1 s | Median error | 90% within |
+  |---|---|---|---|
+  | Made whole (the device's voice) | 79% (87% at its usual speaker and speed) | 0.05 s | 0.15 s |
+  | Streamed (cloud voices) | 39% | 0.15 s | 0.58 s |
+  | Streamed, before this change (loudness peaks) | 27% | 0.21 s | 0.80 s |
+
+  Streamed marks drift within a long clause, because the voice's pace is
+  only known at its pauses. Learning each voice's pace does not help: one
+  voice varies 10 to 20% from sentence to sentence. Holding back each
+  clause's sound until its pause, for sentences after the first, would
+  make them as good as whole ones; that is not built.
+- The planner knows words, not intent. It cannot tell a teasing "no" from
+  a firm one, and it does not yet lean in on "you", point to itself on "I",
+  or settle at the end of a phrase.
+- A gesture plays the same way every time: no variations, no wind-up or
+  hold, no left-right mirror.
 - One gesture plays at a time. There is no idea of body parts being busy,
   so a nod cannot run while the arms wave on their own timing.
 - Idle time is pleasant but generic. The character never stretches, hums,
@@ -209,6 +326,15 @@ audio length, then pinned to the loudness: vowels fall where the sound is
 loud, pauses where it is quiet. Within a tenth of a second is close enough
 for gestures.
 
+*Built (2026-11-18), more simply:* the core marks each syllable in the
+audio by counting phonemes between pauses (Part 1 has the details and
+the measured accuracy), and the speaker sends each mark as it is heard.
+Pinning to loudness peaks was tried and measured: it made things worse,
+because in running speech the loudness does not rise once per syllable.
+Movements start a syllable or two before their word. There are no phases
+yet; they come with clips version 2. The rules for "you", "I" and phrase
+ends are not built.
+
 ### Mouth shapes (visemes)
 
 The same timed phonemes give mouth shapes:
@@ -224,6 +350,11 @@ the shapes map onto those two; models with one parameter per vowel use
 those instead. Loudness still sets how far the mouth opens, so the mouth
 always matches what is heard. Where the phonemes cannot be used (a cloud
 voice), the mouth falls back to today's loudness only.
+
+*Built (2026-11-18):* the five vowel shapes, on the openness and
+mouth-shape parameters. They work with cloud voices too: the phonemes come
+from the text, and the syllables are found in the streamed sound. Still to
+do: closed lips, lip-on-teeth, and models with one parameter per vowel.
 
 ### Idle life
 
@@ -306,7 +437,7 @@ Three ways to make clips:
 - **Settings page:** temperament, a gesture and idle-action list with
   on/off switches, and a debug view (below).
 
-Example performance message:
+Example performance message, as designed:
 
 ```json
 {"perform": {"length": 2.4, "feeling": "happy", "strength": 0.8,
@@ -316,17 +447,29 @@ Example performance message:
   "mouth": [[0.00, "closed"], [0.08, "a"], [0.21, "i"], [0.30, "m"]]}}
 ```
 
+As built, times are counted in syllables, not seconds, so nothing needs
+to know the audio's length in advance. The feeling is still its own
+`emotion` command:
+
+```json
+{"perform": {"syllables": "eaoiea", "events": [[0, "wave", 0.9], [4, "tilt", 0.6]]}}
+{"syllable": 0}
+{"syllable": 1}
+```
+
+Each event is a syllable, a gesture and a strength.
+
 ### Build order
 
-| Step | What | Done when |
-|---|---|---|
-| 1 | Mouth shapes from the phonemes the voice already makes | Side-by-side clips show the mouth rounding and closing on the right sounds; no lag against the audio |
-| 2 | The speech planner, and gestures with phases that land on their word | Strokes land within 0.1 s of their word; nods on yes, shakes on no, tilts on questions in a scripted test reply |
-| 3 | Channels, the scheduler and the budget | A nod plays through a wave; no channel ever snaps; gestures per minute stay in a set band over a ten-minute conversation |
-| 4 | Drives (energy, boredom, sleepiness), idle actions and times of day | An hour of idling in fast-forward shows varied actions, no repeat within the cooldown, sleepy at night |
-| 5 | Listening and reactions | With a microphone, nods in the speaker's pauses; it looks up when speech starts |
-| 6 | Clips version 2, recorded clips (MediaPipe), the timeline page and the debug view | A recorded stretch and a recorded laugh play on three test characters; the debug view shows each layer live |
-| 7 | Temperament per character | Shy and confident test personas visibly move differently with the same reply |
+| Step | What | Done when | Status |
+|---|---|---|---|
+| 1 | Mouth shapes from the phonemes the voice already makes | Side-by-side clips show the mouth rounding and closing on the right sounds; no lag against the audio | Built: five vowel shapes, rendered on the real stage (open "a" and "o", narrower "i" and "u", "i" wider); closed lips not yet |
+| 2 | The speech planner, and gestures with phases that land on their word | Strokes land within 0.1 s of their word; nods on yes, shakes on no, tilts on questions in a scripted test reply | Built without phases. With the device's voice, 73% of word starts are marked within 0.1 s (90% within 0.16 s); streamed voices are looser (Part 1). The full core and stage, with the real voice, played a speech-caused look down on "sorry" |
+| 3 | Channels, the scheduler and the budget | A nod plays through a wave; no channel ever snaps; gestures per minute stay in a set band over a ten-minute conversation | A per-sentence budget is built; the rest is to do |
+| 4 | Drives (energy, boredom, sleepiness), idle actions and times of day | An hour of idling in fast-forward shows varied actions, no repeat within the cooldown, sleepy at night | To do |
+| 5 | Listening and reactions | With a microphone, nods in the speaker's pauses; it looks up when speech starts | To do |
+| 6 | Clips version 2, recorded clips (MediaPipe), the timeline page and the debug view | A recorded stretch and a recorded laugh play on three test characters; the debug view shows each layer live | To do |
+| 7 | Temperament per character | Shy and confident test personas visibly move differently with the same reply | To do (the planner already takes an expressiveness) |
 
 **The debug view.** A page that shows, live, what each layer and channel
 is doing, which behaviour the director picked and why (its score), and the

@@ -269,6 +269,17 @@ since the existing checks have passed motion that looked wrong.
   parameter it lacks) are reported and the automatic choice is used, so
   they can never stop it showing. Mapping a model's own expressions to our
   moods is the "Feelings" section beside it.
+- Talking (2026-11-18, `26-animation-director.md` steps 1 and 2): the
+  mouth takes a shape for each syllable's vowel (open "a" and "o",
+  narrower "i" and "u", wider "i" and "e", rounder "o" and "u" on the
+  mouth-shape control), and movements go with the words: nods on yes and
+  thanks, a small shake on no, a tilt on questions, a wave on hello and
+  goodbye, a laugh on "haha", raised brows on strong words, a look down on
+  sorry. The core (`performance.py`) plans them from the words and marks
+  in the audio where each syllable is heard; the stage (`speech.rs`)
+  shapes the mouth and starts each movement as its mark arrives. When the
+  language model leaves out its feeling tags, the feeling is guessed from
+  the words.
 - Not built yet: motion clips recorded from people, and the debug view.
   The fill behind the arms uses today's smooth colour fill; See-through's
   completed layers would draw it properly.

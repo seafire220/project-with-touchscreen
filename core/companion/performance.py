@@ -9,9 +9,16 @@ Before a sentence's sound plays, the core plans its performance:
     one or two before its word so that it lands on the word;
   * when the language model tagged no feeling at all, a feeling guessed from the words.
 
-`SyllableMarks` then places a mark in the sentence's audio where each syllable is heard; the stage
-changes the mouth's shape and starts each movement as the marks arrive. If any of this fails, the
-stage still opens the mouth with the voice's loudness and nods with its stresses, as before.
+A mark then goes into the sentence's audio where each syllable is heard (`syllable_offsets` for a sentence
+made whole, `SyllableMarks` for one that streams in); the stage changes the mouth's shape and starts each
+movement as the marks arrive. If any of this fails, the stage still opens the mouth with the voice's
+loudness and nods with its stresses, as before.
+
+Where a syllable is heard comes from counting phonemes: in a voice's speech each lasts about as long as any
+other (35 to 45 ms in the device's voice), so a syllable's place among the sentence's phonemes is close to
+its place in time. Pauses at commas and full stops anchor the count. Measured against the exact timings of
+the device's voice (`core/tools/measure_syllable_marks.py`), marks in a whole sentence land within 0.1 s of
+their vowel four times in five.
 """
 import math
 import re
@@ -27,7 +34,11 @@ for shape, letters in (("a", "aɑæɐʌ"), ("e", "eɛəɜɘɚɝ"), ("i", "iɪɨy
     for letter in letters:
         IPA_SHAPES[letter] = shape
 IPA_KEEP = set("ːˑ̯̃")          # marks that do not end a vowel
+STRESS = set("ˈˌ")              # marks that take no time
+WORD_GAP = 1.2                  # the time between words, in phonemes
+VOWEL_LEAD = 0.5                # a mark comes this many phonemes before its vowel, so the shape is on its way
 CLAUSE_END = re.compile(r"[,;:—–.!?…]+(?=\s|$)")
+SENTENCE_END = re.compile(r"[.!?…]")
 WORD = re.compile(r"[^\W_](?:[^\W_]|['’-][^\W_])*")
 
 # Movements by meaning: (gesture, strength, syllables before its word to start).
@@ -78,44 +89,59 @@ FEELING_LOOKUP = {w: f for f, words in FEELING_WORDS.items() for w in words.spli
 # Syllables and mouth shapes
 # --------------------------------------------------------------------------------------------------
 
-def shapes_from_ipa(ipa):
-    """The mouth shapes of a word's syllables, from its phonemes. Two vowels in a row are one syllable (the
-    diphthong in "day"); a vowel after a long one, or a third in a row, starts a new one ("doing", "going")."""
-    out, run = [], 0                     # run: vowels in a row so far
+def syllables_from_ipa(ipa):
+    """A word's syllables from its phonemes: [(mouth shape, where its mark goes, in phonemes from the word's
+    start)], and the word's length in phonemes. Two vowels in a row are one syllable (the diphthong in
+    "day"); a vowel after a long one, or a third in a row, starts a new one ("doing", "going")."""
+    out, run, pos = [], 0, 0.0           # run: vowels in a row so far
     for ch in ipa:
         if ch in IPA_SHAPES:
             if run == 0 or run == 2:         # a third vowel in a row starts a new syllable ("going": goʊ-ɪŋ)
-                out.append(IPA_SHAPES[ch])
+                out.append((IPA_SHAPES[ch], max(0.0, pos - VOWEL_LEAD)))
                 run = 1 if run == 2 else run
             run += 1
         elif ch == "ː":
             run = 0
         elif ch not in IPA_KEEP:
             run = 0
-    return out
+        if ch not in STRESS:
+            pos += 1.0
+    return out, pos
+
+
+def shapes_from_ipa(ipa):
+    """The mouth shapes of a word's syllables, from its phonemes."""
+    return [shape for shape, _ in syllables_from_ipa(ipa)[0]]
+
+
+def syllables_from_spelling(word):
+    """A word's syllables guessed from its letters (when espeak-ng is missing), as `syllables_from_ipa`."""
+    w = word.lower()
+    if w.isdigit():
+        return [("e", float(i)) for i in range(max(1, len(w)))], float(max(1, len(w)))
+    groups = [(m.group(), m.start()) for m in re.finditer(r"[aeiouy]+", w)]
+    if len(groups) > 1 and w.endswith("e") and not w.endswith(("le", "ee", "ye")) and groups[-1][0] == "e":
+        groups = groups[:-1]                     # a silent final e: "make", "time"
+    out = []
+    for g, at in groups:
+        if g.startswith("oo") or g.startswith("u"):
+            shape = "u"
+        elif g.startswith("ou"):
+            shape = "a" if w.startswith("ou") or "out" in w else "u"
+        else:
+            shape = {"a": "a", "e": "e", "i": "i", "y": "i", "o": "o"}[g[0]]
+        out.append((shape, max(0.0, at - VOWEL_LEAD)))
+    return out or [("e", 0.0)], float(max(1, len(w)))
 
 
 def shapes_from_spelling(word):
-    """The mouth shapes of a word's syllables, guessed from its letters (when espeak-ng is missing)."""
-    w = word.lower()
-    if w.isdigit():
-        return ["e"] * max(1, len(w))
-    groups = re.findall(r"[aeiouy]+", w)
-    if len(groups) > 1 and w.endswith("e") and not w.endswith(("le", "ee", "ye")) and groups[-1] == "e":
-        groups = groups[:-1]                     # a silent final e: "make", "time"
-    out = []
-    for g in groups:
-        if g.startswith("oo") or g.startswith("u"):
-            out.append("u")
-        elif g.startswith("ou"):
-            out.append("a" if w.startswith("ou") or "out" in w else "u")
-        else:
-            out.append({"a": "a", "e": "e", "i": "i", "y": "i", "o": "o"}[g[0]])
-    return out or ["e"]
+    """The mouth shapes of a word's syllables, guessed from its letters."""
+    return [shape for shape, _ in syllables_from_spelling(word)[0]]
 
 
-def word_shapes(words, voice="en-us"):
-    """Each word's syllable shapes: from espeak-ng's phonemes (one word per line) when it is installed."""
+def word_syllables(words, voice="en-us"):
+    """Each word's syllables and length (as `syllables_from_ipa`): from espeak-ng's phonemes, one word per
+    line, when it is installed; else from the spelling."""
     espeak = phonemes.espeak_path()
     if espeak and words:
         try:
@@ -123,10 +149,19 @@ def word_shapes(words, voice="en-us"):
                                  text=True, timeout=10)
             lines = [line.strip() for line in run.stdout.splitlines() if line.strip()]
             if run.returncode == 0 and len(lines) == len(words):
-                return [shapes_from_ipa(line) or shapes_from_spelling(word) for line, word in zip(lines, words)]
+                out = []
+                for line, word in zip(lines, words):
+                    found = syllables_from_ipa(line)
+                    out.append(found if found[0] else syllables_from_spelling(word))
+                return out
         except (OSError, subprocess.TimeoutExpired):
             pass
-    return [shapes_from_spelling(w) for w in words]
+    return [syllables_from_spelling(w) for w in words]
+
+
+def word_shapes(words, voice="en-us"):
+    """Each word's syllable shapes."""
+    return [[shape for shape, _ in found] for found, _ in word_syllables(words, voice)]
 
 
 # --------------------------------------------------------------------------------------------------
@@ -172,26 +207,35 @@ class Planner:
         self.sentences_since_big = 99
 
     def plan(self, text, available, asked=(), first=False):
-        """The performance for one sentence: {"syllables", "clauses", "events"}, or None for no words."""
+        """The performance for one sentence, or None for no words:
+        {"syllables": a mouth shape per syllable, "events": [[syllable, gesture, strength], ...],
+         "timing": {"at": each syllable's place in phonemes, "length": the sentence's length in phonemes,
+                    "clauses": [[first syllable, place, "end" after a full stop or "clause"], ...]}}."""
         words = WORD.findall(text)
         if not words:
             return None
-        shapes = word_shapes(words, self.voice)
-        starts, n = [], 0
-        for s in shapes:
+        found = word_syllables(words, self.voice)
+        starts, word_at, at, shapes, n, pos = [], [], [], [], 0, 0.0
+        for sylls, length in found:
             starts.append(n)
-            n += len(s)
-        syllables = "".join("".join(s) for s in shapes)
-        # Clause starts: the syllable after each clause-ending mark.
-        clauses = [0]
+            word_at.append(pos)
+            for shape, offset in sylls:
+                shapes.append(shape)
+                at.append(round(pos + offset, 2))
+            n += len(sylls)
+            pos += length + WORD_GAP
+        # Each clause after the first starts at the word after a clause-ending mark.
+        clauses = []
         positions = [m.start() for m in WORD.finditer(text)]
         for mark in CLAUSE_END.finditer(text):
             following = next((i for i, p in enumerate(positions) if p > mark.start()), None)
-            if following is not None and starts[following] not in clauses:
-                clauses.append(starts[following])
+            if following and all(c[0] != starts[following] for c in clauses):
+                kind = "end" if SENTENCE_END.search(mark.group()) else "clause"
+                clauses.append([starts[following], round(word_at[following], 2), kind])
         events = self._events(text, words, starts, set(available), set(asked), first)
-        return {"syllables": syllables, "clauses": clauses,
-                "events": [[k, name, round(strength, 2)] for k, name, strength in events]}
+        return {"syllables": "".join(shapes),
+                "events": [[k, name, round(strength, 2)] for k, name, strength in events],
+                "timing": {"at": at, "length": round(pos, 2), "clauses": clauses}}
 
     def _events(self, text, words, starts, available, asked, first):
         lower = [w.lower().replace("’", "'") for w in words]
@@ -280,86 +324,169 @@ class Planner:
 # Where the syllables are heard
 # --------------------------------------------------------------------------------------------------
 
-STEP = 0.01          # seconds per loudness reading for finding syllables
-FLOOR_DB = -40.0     # quieter than this is not a syllable
-RISE_DB = 3.0        # a rise this much above the dip before it starts a syllable
-MIN_GAP = 0.08       # seconds between syllables, at least
-PAUSE = 0.15         # seconds of quiet that end a clause
-STEADY = 0.3         # seconds of loud sound without a clear syllable before one is marked anyway
+STEP = 0.01                  # seconds per loudness reading
+FLOOR_DB = -40.0             # quieter than this is silence (or 35 dB under the loudest sound, if higher)
+GAP_DB = 5.0                 # a dip that stays within this of the silence...
+GAP_MIN = 0.07               # ...for this many seconds may be a clause's pause
+CLEAR_PAUSE = 0.2            # quiet this long is a pause, whether or not a clause ends there
+PAUSE = 0.15                 # in sound that streams in, quiet this long is a pause
+LONG_PAUSE = 0.3             # a pause this long more likely follows a full stop than a comma
+SECONDS_PER_PHONEME = 0.047  # a voice's usual pace (the device's voice: 0.04 to 0.055)
+PRIOR_PHONEMES = 10.0        # how much the usual pace counts against the pace heard so far
+HOLD = 0.6                   # seconds of sound past a full stop, at least, before its pause is given up
+
+
+def even_timing(count):
+    """Timing for syllables known only by their number: evenly spaced."""
+    return {"at": [3.0 * k for k in range(count)], "length": 3.0 * count, "clauses": []}
 
 
 def _levels(samples, rate):
     """Loudness in dB, one reading every STEP seconds, lightly smoothed."""
     n = max(1, int(rate * STEP))
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+    if np is not None:
+        a = np.frombuffer(samples, dtype=np.int16) if isinstance(samples, (bytes, bytearray)) else np.asarray(samples)
+        frames = len(a) // n
+        if frames == 0:
+            return []
+        power = (a[:frames * n].astype(np.float64) ** 2).reshape(frames, n).mean(axis=1)
+        db = np.where(power > 0, 10 * np.log10(np.maximum(power, 1e-12) / 32768.0 ** 2), -100.0)
+        total = np.concatenate([[0.0], np.cumsum(db)])
+        index = np.arange(frames)
+        low = np.maximum(0, index - 2)
+        return ((total[index + 1] - total[low]) / (index + 1 - low)).tolist()
+    import array
+    a = array.array("h", samples) if isinstance(samples, (bytes, bytearray)) else samples
     out = []
-    for i in range(0, len(samples) - n + 1, n):
-        seg = samples[i:i + n]
-        power = sum(s * s for s in seg) / n
+    for i in range(0, len(a) - n + 1, n):
+        power = sum(s * s for s in a[i:i + n]) / n
         out.append(10 * math.log10(power / (32768.0 ** 2)) if power > 0 else -100.0)
     return [sum(out[max(0, i - 2):i + 1]) / len(out[max(0, i - 2):i + 1]) for i in range(len(out))]
 
 
-def syllable_offsets(samples, rate, count):
-    """Where `count` syllables start in a whole sentence's audio (sample offsets), from its loudness:
-    the `count` most prominent peaks, each starting at the dip before it."""
-    import array
-    if count <= 0:
+def _match(expected, kinds, pauses, scale):
+    """Clause starts to pauses, both in order, at the least total cost: [(clause, pause)]. A clause after a
+    full stop nearly always has a pause before it; one after a comma often has none; and a voice may pause
+    where no clause ends."""
+    rows, cols = len(expected), len(pauses)
+    cost = [[math.inf] * (cols + 1) for _ in range(rows + 1)]
+    how = [[None] * (cols + 1) for _ in range(rows + 1)]
+    cost[0] = [0.0] * (cols + 1)
+    for b in range(1, rows + 1):
+        miss = 2.0 if kinds[b - 1] == "end" else 1.0
+        cost[b][0], how[b][0] = cost[b - 1][0] + miss, "miss"
+        for k in range(1, cols + 1):
+            best, step = cost[b][k - 1], "unused"
+            if cost[b - 1][k] + miss < best:
+                best, step = cost[b - 1][k] + miss, "miss"
+            d = abs(pauses[k - 1] - expected[b - 1]) / scale
+            if d < 2.5 and cost[b - 1][k - 1] + d < best:
+                best, step = cost[b - 1][k - 1] + d, "match"
+            cost[b][k], how[b][k] = best, step
+    pairs, b, k = [], rows, cols
+    while b > 0:
+        step = how[b][k]
+        if step == "match":
+            pairs.append((b - 1, k - 1))
+            b, k = b - 1, k - 1
+        elif step == "miss":
+            b -= 1
+        else:
+            k -= 1
+    return pairs[::-1]
+
+
+def syllable_offsets(samples, rate, timing):
+    """Where each planned syllable is heard in a whole sentence's audio (sample offsets).
+
+    The syllables' places among the sentence's phonemes are spread over the time the voice sounds; each
+    clause that has a pause before it starts where the sound starts again."""
+    at = list(timing["at"])
+    count = len(at)
+    if count == 0:
         return []
-    db = _levels(array.array("h", samples) if isinstance(samples, (bytes, bytearray)) else samples, rate)
-    if not db:
-        return [0] * count
-    peaks = []
-    for i in range(1, len(db) - 1):
-        if db[i] >= db[i - 1] and db[i] > db[i + 1] and db[i] > FLOOR_DB:
-            left = min(db[max(0, i - 25):i + 1])
-            right = min(db[i:i + 26])
-            prominence = db[i] - max(left, right)
-            if prominence >= 1.0:
-                dip = i                      # back down the rise to where it starts (not across a quiet stretch)
-                while dip > 0 and db[dip - 1] < db[dip] and i - dip < 25:
-                    dip -= 1
-                peaks.append((prominence, i, dip))
-    peaks.sort(key=lambda p: -p[0])
-    chosen = []
-    for prominence, i, dip in peaks:
-        if all(abs(i - j) * STEP >= MIN_GAP for _, j, _ in chosen):
-            chosen.append((prominence, i, dip))
-        if len(chosen) == count:
-            break
-    starts = sorted(dip for _, _, dip in chosen)
-    # Fewer peaks than syllables: share out the rest in the longest stretches between them.
-    end = len(db)
-    while len(starts) < count:
-        edges = [0] + starts + [end]
-        gaps = [(edges[k + 1] - edges[k], k) for k in range(len(edges) - 1)]
-        size, k = max(gaps)
-        starts.append(edges[k] + size // 2)
-        starts.sort()
     n = max(1, int(rate * STEP))
-    return [s * n for s in starts]
+    db = _levels(samples, rate)
+    floor = max(FLOOR_DB, max(db) - 35) if db else FLOOR_DB
+    voiced = [d > floor for d in db]
+    if not any(voiced):
+        frames = max(1, len(db))
+        return [n * (frames * k // count) for k in range(count)]
+    first = voiced.index(True)
+    last = len(db) - 1 - voiced[::-1].index(True)
+    # Dips that may be pauses.
+    gaps, f = [], first
+    while f <= last:
+        if db[f] <= floor + GAP_DB:
+            g = f
+            while g <= last and db[g] <= floor + GAP_DB:
+                g += 1
+            if (g - f) * STEP >= GAP_MIN:
+                gaps.append((f, g))
+            f = g
+        else:
+            f += 1
+    clauses = [c for c in timing.get("clauses", ()) if 0 < c[0] < count]
+    total = max(float(timing.get("length") or 0.0), at[-1] + 1.0)
+    span = last + 1 - first
+    pairs = _match([first + c[1] / total * span for c in clauses], [c[2] for c in clauses],
+                   [(a + b) / 2 for a, b in gaps], 0.1 * span + 15)
+    matched = {g for _, g in pairs}
+    pauses = [gap for i, gap in enumerate(gaps) if i in matched or (gap[1] - gap[0]) * STEP >= CLEAR_PAUSE]
+    paused = set()
+    for a, b in pauses:
+        paused.update(range(a, b))
+    sounding = [f for f in range(first, last + 1) if f not in paused]     # frames the clock runs in
+    before = {f: k for k, f in enumerate(sounding)}
+    anchors = [(0.0, 0.0)]
+    for c, g in pairs:
+        start = gaps[g][1]
+        while start not in before and start <= last:
+            start += 1
+        if start in before and clauses[c][1] > anchors[-1][0]:
+            anchors.append((clauses[c][1], float(before[start])))
+    anchors.append((total, float(len(sounding))))
+    out = []
+    for u in at:
+        k = 0
+        while k + 2 < len(anchors) and anchors[k + 1][0] <= u:
+            k += 1
+        (u0, s0), (u1, s1) = anchors[k], anchors[k + 1]
+        x = s0 + (u - u0) / max(1e-6, u1 - u0) * (s1 - s0)
+        frame = sounding[min(len(sounding) - 1, max(0, math.ceil(x - 1e-9)))]
+        out.append(max(frame, out[-1]) if out else frame)
+    return [f * n for f in out]
 
 
 class SyllableMarks:
     """Marks where a sentence's syllables are heard, as its audio streams in (when it does not come whole).
 
-    A syllable starts where the loudness rises clearly after a dip. The count is kept to the sentence's
-    planned syllables, and a pause snaps it to the nearest clause start, so a miscount never drifts far.
+    A clock counts the sentence's phonemes at the voice's pace while it sounds. At each pause it decides
+    which clause starts there (a long pause most likely after a full stop), restarts the count there and
+    corrects the pace. At a full stop it waits for the pause, for a while, so it never runs on into the next
+    sentence. Syllables due at once are marked as the latest of them.
     """
 
-    def __init__(self, rate, count, clauses=(0,)):
+    def __init__(self, rate, timing, seconds_per_phoneme=SECONDS_PER_PHONEME):
         self.rate = rate
-        self.count = count
-        self.clauses = list(clauses) or [0]
+        self.at = list(timing["at"])
+        self.count = len(self.at)
+        self.clauses = [tuple(c) for c in timing.get("clauses", ()) if 0 < c[0] < self.count]
         self.n = max(1, int(rate * STEP))
+        self.pace = self.usual = seconds_per_phoneme / STEP          # readings per phoneme
         self.pending = b""
         self.history = []
+        self.loudest = -100.0
+        self.started = False
+        self.sounding = 0.0          # readings with sound since the start (pauses do not count)
+        self.quiet = 0
+        self.anchor = (0.0, 0.0)     # (place in phonemes, sounding readings)
         self.next = 0
-        self.low, self.high, self.rising = 1e9, -1e9, False
-        self.since = 99.0
-        self.quiet = 0.0
-        self.paused = False
-        self.loud = 0.0          # loud sound since the last mark
-        self.marked = False
+        self.clause = -1             # the last clause the count restarted at
 
     def feed(self, chunk):
         """Audio in; audio out, with ("syllable", k) marks between the bytes where syllable k starts."""
@@ -372,9 +499,7 @@ class SyllableMarks:
             power = sum(s * s for s in frame) / self.n
             level = 10 * math.log10(power / (32768.0 ** 2)) if power > 0 else -100.0
             self.history = (self.history + [level])[-3:]
-            level = sum(self.history) / len(self.history)
-            self.since += STEP
-            mark = self._step(level)
+            mark = self._step(sum(self.history) / len(self.history))
             if mark is not None:
                 out.append(data[start:pos])
                 out.append(("syllable", mark))
@@ -388,39 +513,56 @@ class SyllableMarks:
         return [rest] if rest else []
 
     def _step(self, level):
-        if level < FLOOR_DB:
-            self.quiet += STEP
-            if self.quiet >= PAUSE and not self.paused:
-                self.paused = True
-                self._snap()
-        else:
-            self.quiet, self.paused = 0.0, False
-            self.loud += STEP
-            # The first sound is the first syllable; and a voice too even to show its syllables still
-            # gets one now and then, so the mouth and the movements keep going.
-            if self.next < self.count and (self.next == 0 and not self.marked or self.loud >= STEADY):
-                return self._mark(level)
-        if not self.rising:
-            self.low = min(self.low, level)
-            if level > self.low + RISE_DB and level > FLOOR_DB and self.since >= MIN_GAP and self.next < self.count:
-                return self._mark(level)
-        else:
-            self.high = max(self.high, level)
-            if level < self.high - RISE_DB:
-                self.rising, self.low = False, level
-        return None
+        self.loudest = max(self.loudest, level)
+        if level <= max(FLOOR_DB, self.loudest - 35):
+            if self.started:
+                self.quiet += 1
+                pause = int(PAUSE / STEP)
+                if self.quiet < pause:
+                    self.sounding += 1           # a stop between sounds, part of the word
+                elif self.quiet == pause:
+                    self.sounding -= pause - 1   # a pause after all
+            return None
+        self.started = True
+        if self.quiet >= int(PAUSE / STEP):
+            self._resume(self.quiet * STEP)
+        self.quiet = 0
+        self.sounding += 1
+        due = None
+        while self.next < self.count:
+            u0, s0 = self.anchor
+            when = s0 + (self.at[self.next] - u0) * self.pace
+            if when > self.sounding or self._waiting(when):
+                break
+            due, self.next = self.next, self.next + 1
+        return due
 
-    def _mark(self, level):
-        self.rising, self.high, self.since, self.loud, self.marked = True, level, 0.0, 0.0, True
-        k, self.next = self.next, self.next + 1
-        return k
+    def _waiting(self, when):
+        """At a full stop, wait for its pause (a voice nearly always makes one): for a while, or for half
+        as long again as the sentence has taken, if longer (a slower voice than the count)."""
+        upcoming = self.clauses[self.clause + 1] if self.clause + 1 < len(self.clauses) else None
+        return (upcoming is not None and upcoming[2] == "end" and self.next >= upcoming[0]
+                and self.sounding - when < max(HOLD / STEP, 0.5 * (when - self.anchor[1])))
 
-    def _snap(self):
-        """A pause ends a clause: the next syllable is the first of the clause nearest the count."""
-        near = min(self.clauses, key=lambda c: (abs(c - self.next), -c))
-        if abs(near - self.next) <= 3:
-            self.next = near
-        else:
-            ahead = [c for c in self.clauses if c > self.next]
-            if ahead:
-                self.next = ahead[0]
+    def _resume(self, pause):
+        """Sound again after a pause: decide which clause starts now."""
+        u0, s0 = self.anchor
+        now = u0 + (self.sounding - s0) / self.pace
+        scale = max(5.0, 0.3 * (now - u0))
+        best, skipped = None, 0.0
+        for i in range(self.clause + 1, len(self.clauses)):
+            first, place, kind = self.clauses[i]
+            cost = abs(place - now) / scale + skipped
+            if (pause >= LONG_PAUSE) != (kind == "end"):
+                cost += 0.5
+            if best is None or cost < best[0]:
+                best = (cost, i)
+            skipped += 1.5 if kind == "end" else 0.5
+        if best is None or best[0] > 2.5:
+            return
+        self.clause = best[1]
+        first, place, _ = self.clauses[self.clause]
+        if place > 0:
+            self.pace = (self.sounding + self.usual * PRIOR_PHONEMES) / (place + PRIOR_PHONEMES)
+        self.anchor = (place, self.sounding)
+        self.next = first

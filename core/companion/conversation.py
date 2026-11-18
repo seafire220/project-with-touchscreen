@@ -17,7 +17,7 @@ import random
 
 from .audio import tone
 from .characters import split_persona
-from .performance import Planner, SyllableMarks, guess_feeling, syllable_offsets
+from .performance import Planner, SyllableMarks, even_timing, guess_feeling, syllable_offsets
 from .memory import when
 from .providers import ProviderError
 from .search import results_for_model
@@ -221,7 +221,8 @@ class Conversation:
                         plan = self._plan(text, asked, first)
                         first = False
                         if plan:
-                            await audio_queue.put(("perform", plan))
+                            await audio_queue.put(("perform", {"syllables": plan["syllables"],
+                                                               "events": plan["events"]}))
                         await self._queue_sound(text, plan, audio_queue)
                     item = await self._next(sentences, False)
                 await audio_queue.put(None)
@@ -278,13 +279,14 @@ class Conversation:
     async def _queue_sound(self, text, plan, audio_queue):
         """Queue a sentence's sound, with a mark where each of its syllables is heard."""
         count = len(plan["syllables"]) if plan else 0
+        timing = (plan.get("timing") or even_timing(count)) if count else None
         whole = getattr(self.tts, "full", None)
         if whole and count:
-            # Made whole anyway (the device's own voice): place each syllable at its loudness peak.
+            # Made whole anyway (the device's own voice): place the syllables over the whole sound.
             pcm = await whole(text)
             await audio_queue.put(("text", text))
             try:
-                offsets = [o * 2 for o in syllable_offsets(pcm, self.tts.rate, count)]
+                offsets = [o * 2 for o in syllable_offsets(pcm, self.tts.rate, timing)]
             except Exception:
                 log.exception("could not place a sentence's syllables")
                 offsets = []
@@ -298,7 +300,11 @@ class Conversation:
                 for piece in range(cut, end, step):
                     await audio_queue.put(("audio", pcm[piece:min(end, piece + step)]))
             return
-        marks = SyllableMarks(self.tts.rate, count, plan["clauses"]) if count else None
+        try:
+            marks = SyllableMarks(self.tts.rate, timing) if count else None
+        except Exception:
+            log.exception("could not follow a sentence's syllables")
+            marks = None
         started = False
         async for chunk in self.tts.stream(text):
             if not started:                      # counted as said only once its sound exists
