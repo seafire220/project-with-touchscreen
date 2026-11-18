@@ -17,7 +17,7 @@ import time
 
 from aiohttp import web
 
-from . import package
+from . import package, persona
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
 
@@ -261,8 +261,9 @@ class Console:
 
     async def get_persona(self, request):
         cid = self._cid(request)
-        return web.json_response({"persona": self.device.characters.persona(cid),
-                                  "device": self.device.characters.device_settings(cid)})
+        device = self.device.characters.device_settings(cid)
+        return web.json_response({"persona": self.device.characters.persona(cid), "device": device,
+                                  "form": device.get("persona_form") or {}, "questions": list(persona.NAMES)})
 
     async def get_emotions(self, request):
         cid = self._cid(request)
@@ -290,14 +291,21 @@ class Console:
         cid = self._cid(request)
         body = await request.json()
         try:
-            if "persona" in body:
+            written = None
+            if "form" in body:
+                # The guided form: the answers are kept, so the form can be opened again.
+                form = persona.clean(body["form"])
+                written = persona.build(form)
+                self.device.characters.set_persona(cid, written)
+                self.device.characters.set_device_settings(cid, {"persona_form": form})
+            elif "persona" in body:
                 self.device.characters.set_persona(cid, str(body["persona"]))
             if "voice" in body:
                 self.device.characters.set_device_settings(cid, {"voice": str(body["voice"])[:200]})
         except ValueError as error:
             raise web.HTTPBadRequest(text=str(error))
         self.device.conversation = None
-        return web.json_response({"ok": True})
+        return web.json_response({"ok": True, "persona": written} if written else {"ok": True})
 
     async def clone_voice(self, request):
         cid = self._cid(request)

@@ -61,7 +61,25 @@
     <p class="error" id="char-error"></p>
     <div id="char-edit" hidden>
       <h3>Edit <span id="edit-name"></span></h3>
-      <label>Persona (who the character is, and its greeting)
+      <details id="persona-form" open>
+        <summary>Describe the character (the persona is written from your answers)</summary>
+        <label>Name <input id="pf-name" maxlength="60"></label>
+        <label>Personality, in a sentence or two <textarea id="pf-personality" rows="2" maxlength="600"
+          placeholder="Cheerful and a little mischievous; teases gently; gets flustered when complimented."></textarea></label>
+        <label>Their story (optional) <textarea id="pf-story" rows="3" maxlength="1500"
+          placeholder="Where they come from, what they do, what matters to them."></textarea></label>
+        <label>How they treat you <textarea id="pf-relationship" rows="2" maxlength="600"
+          placeholder="An old friend who looks out for you and loves hearing about your day."></textarea></label>
+        <label>Likes <input id="pf-likes" maxlength="400" placeholder="astronomy, baking, rainy days"></label>
+        <label>Dislikes <input id="pf-dislikes" maxlength="400" placeholder="spiders, being rushed"></label>
+        <label>How they speak <textarea id="pf-speaking" rows="2" maxlength="600"
+          placeholder="Casual and warm, with the odd playful joke."></textarea></label>
+        <label>Things they never do (optional) <textarea id="pf-never" rows="2" maxlength="600"
+          placeholder="Never gives medical advice; never pretends to be a real person."></textarea></label>
+        <label>Greeting, said when they start <input id="pf-greeting" maxlength="300" placeholder="Oh! You're here! Hi there!"></label>
+        <p><button id="btn-write-persona">Write the persona from these answers</button></p>
+      </details>
+      <label>Persona (who the character is, and its greeting; edit freely)
         <textarea id="edit-persona" rows="14"></textarea></label>
       <label>Voice ID for this character (from your voice service; blank uses the default)
         <input id="edit-voice"></label>

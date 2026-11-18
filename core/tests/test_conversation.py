@@ -286,6 +286,29 @@ class ConversationTest(unittest.TestCase):
         self.assertEqual(tts.texts, ["Hi! I'm Aria."])
 
 
+class PersonaFormTest(unittest.TestCase):
+    def test_answers_become_a_persona_with_a_greeting(self):
+        from companion import persona
+        from companion.characters import split_persona
+        text = persona.build({"name": "Mika", "personality": "Cheerful.", "story": "Grew up near an observatory.",
+                              "relationship": "Your old friend.", "likes": "stars", "dislikes": "spiders",
+                              "speaking": "Warm and playful.", "never": "Never gives medical advice.",
+                              "greeting": "Hi there!"})
+        body, greeting = split_persona(text)
+        self.assertEqual(greeting, "Hi there!")
+        self.assertTrue(body.startswith("# Mika"))
+        for words in ("You are Mika", "Cheerful.", "## Your story", "You like: stars", "You dislike: spiders",
+                      "Warm and playful.", "spoken aloud", "## Never"):
+            self.assertIn(words, body)
+
+    def test_empty_answers_are_left_out(self):
+        from companion import persona
+        text = persona.build({"name": "Mika"})
+        self.assertNotIn("## Your story", text)
+        self.assertNotIn("## Greeting", text)
+        self.assertIn("## How you speak", text, "the spoken-reply rule is always there")
+
+
 class AudioTest(unittest.TestCase):
     def test_loudness(self):
         import array

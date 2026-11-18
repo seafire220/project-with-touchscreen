@@ -112,6 +112,23 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
             r = await self.client.put("/api/characters/aria/emotions", json=bad, headers=H)
             self.assertEqual(r.status, 400, bad)
 
+    async def test_a_persona_can_be_written_from_a_few_questions(self):
+        await self.login()
+        self.device.characters.install(package.build(good_files(), manifest()))
+        form = {"name": "Mika", "personality": "Cheerful and teasing.", "likes": "astronomy, baking",
+                "speaking": "Casual and warm.", "greeting": "Oh! You're here!"}
+        r = await self.client.put("/api/characters/aria/persona", json={"form": form}, headers=H)
+        self.assertEqual(r.status, 200)
+        written = (await r.json())["persona"]
+        self.assertIn("You are Mika", written)
+        self.assertEqual(self.device.characters.persona("aria"), written)
+        r = await self.client.get("/api/characters/aria/persona")
+        data = await r.json()
+        self.assertEqual(data["form"]["likes"], "astronomy, baking", "the answers are kept for next time")
+        for bad in ({"name": ""}, {"name": "Mika", "mood": "x"}, {"name": "Mika", "story": "x" * 5000}, "Mika"):
+            r = await self.client.put("/api/characters/aria/persona", json={"form": bad}, headers=H)
+            self.assertEqual(r.status, 400, bad)
+
     async def test_wrong_passwords_are_slowed_and_then_locked_out(self):
         await self.login()
         await self.client.post("/api/logout", headers=H)

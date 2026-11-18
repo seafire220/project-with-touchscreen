@@ -205,6 +205,8 @@ async function editCharacter(c) {
   text($("edit-name"), c.name);
   $("edit-persona").value = data.persona;
   $("edit-voice").value = (data.device && data.device.voice) || "";
+  for (const q of PERSONA_QUESTIONS) $("pf-" + q).value = (data.form && data.form[q]) || "";
+  if (!$("pf-name").value) $("pf-name").value = c.name;
   $("char-edit").hidden = false;
   loadFeelings(c.id);
   $("char-edit").scrollIntoView();
@@ -245,6 +247,18 @@ $("btn-save-feelings").addEventListener("click", async () => {
     await api("PUT", "/api/characters/" + state.editing + "/emotions", { map });
     text($("feelings-msg"), "Saved.");
   } catch (err) { text($("feelings-msg"), err.message); }
+});
+
+const PERSONA_QUESTIONS = ["name", "personality", "story", "relationship", "likes", "dislikes", "speaking", "never", "greeting"];
+
+$("btn-write-persona").addEventListener("click", async () => {
+  const form = {};
+  for (const q of PERSONA_QUESTIONS) form[q] = $("pf-" + q).value;
+  try {
+    const r = await api("PUT", "/api/characters/" + state.editing + "/persona", { form });
+    $("edit-persona").value = r.persona;
+    text($("edit-msg"), "Written and saved. Check it below; you can still edit it freely.");
+  } catch (err) { text($("edit-msg"), err.message); }
 });
 
 $("btn-save-persona").addEventListener("click", async () => {
