@@ -23,6 +23,8 @@ class StageLink:
         self.on_event = on_event
         self.writer = None
         self.params = set()
+        self.param_info = []        # [{"name", "min", "max", "default"}], from the stage when it is ready
+        self.controls = []          # [{"control", "param", "min", "max", "rest"}]: what drives what now
         self.expression = "neutral"
         # What the character can do, as the stage reports when it is ready.
         self.emotions = []
@@ -55,6 +57,8 @@ class StageLink:
                     if event.get("event") == "ready":
                         self.expression = "neutral"            # a new stage starts at rest
                         self.params = set(event.get("param_names") or [])
+                        self.param_info = list(event.get("param_info") or [])
+                        self.controls = list(event.get("controls") or [])
                         self.emotions = list(event.get("emotions") or [])
                         if "gestures" in event:
                             self.gestures = list(event.get("gestures") or [])
@@ -108,3 +112,18 @@ class StageLink:
     def load(self, puppet_path):
         """Ask the stage to show another character (the stage is restarted with it by the service manager)."""
         self.send({"quit": True})
+
+
+# The stage's motion controls, in the order the movement settings show them, with plain names.
+CONTROLS = (
+    ("head_yaw", "Head turn"), ("head_pitch", "Head nod"), ("head_roll", "Head tilt"),
+    ("body_yaw", "Body turn"), ("body_pitch", "Body lean"), ("body_roll", "Body sway"),
+    ("gaze_x", "Eyes left and right"), ("gaze_y", "Eyes up and down"),
+    ("arm_left", "Left arm"), ("arm_right", "Right arm"), ("arm_left_b", "Left elbow"), ("arm_right_b", "Right elbow"),
+    ("shoulders", "Shoulders"), ("smile", "Mouth shape (smile)"), ("brow_left", "Left brow"), ("brow_right", "Right brow"),
+    ("brow_form_left", "Left brow shape"), ("brow_form_right", "Right brow shape"),
+    ("eye_smile_left", "Left eye smile"), ("eye_smile_right", "Right eye smile"), ("cheek", "Blush"),
+    ("mouth_open", "Mouth open"), ("blink_left", "Left eye open"), ("blink_right", "Right eye open"),
+    ("breath", "Breathing"),
+)
+CONTROL_NAMES = dict(CONTROLS)

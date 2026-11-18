@@ -91,6 +91,22 @@
         <div id="feelings-list"></div>
         <p><button id="btn-save-feelings">Save feelings</button> <span id="feelings-msg"></span></p>
       </div>
+      <div id="edit-movement">
+        <h4>Movement</h4>
+        <p>Which of the character's own settings each kind of movement uses. The device chooses them by their
+          usual names; change one if a movement looks wrong. An arm that swings the wrong way: tick
+          <em>Reverse</em>. <em>Test</em> moves the character on the device's screen.</p>
+        <p id="move-inactive" class="muted" hidden>Show this character on the device first (<em>Use</em> above), then
+          come back here to test its movement.</p>
+        <div id="move-body">
+          <div id="move-list" class="moves"></div>
+          <details><summary>More: brows, eyes, blush, mouth, breathing</summary>
+            <div id="move-more" class="moves"></div></details>
+          <p id="move-gestures"></p>
+          <p><button id="btn-save-move">Save movement</button> <button id="btn-reset-move" class="danger">Back to
+            automatic</button> <span id="move-msg"></span></p>
+        </div>
+      </div>
       <h4>Clone a voice (ElevenLabs)</h4>
       <p>A clear WAV recording of 30 seconds to a few minutes. The voice is created in your own ElevenLabs account. Only use a voice you have the right to use.</p>
       <p><input type="file" id="voice-file" accept=".wav,audio/wav"> <button id="btn-clone">Clone</button></p>

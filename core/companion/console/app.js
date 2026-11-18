@@ -209,6 +209,7 @@ async function editCharacter(c) {
   if (!$("pf-name").value) $("pf-name").value = c.name;
   $("char-edit").hidden = false;
   loadFeelings(c.id);
+  loadMovement(c.id);
   $("char-edit").scrollIntoView();
 }
 
@@ -239,6 +240,118 @@ async function loadFeelings(cid) {
     list.append(label);
   }
 }
+
+// Which of the character's own parameters each kind of movement uses; tested live on the device's screen.
+let movement = null;
+
+async function loadMovement(cid) {
+  movement = await api("GET", "/api/characters/" + cid + "/movement");
+  $("move-inactive").hidden = movement.active && movement.ready;
+  $("move-body").hidden = !(movement.active && movement.ready);
+  text($("move-msg"), "");
+  const list = $("move-list"), more = $("move-more");
+  list.replaceChildren();
+  more.replaceChildren();
+  if (!movement.ready) return;
+  const MAIN = 14;           // head, body, eyes, arms, elbows, shoulders, smile; the face's details under "More"
+  const current = {};
+  for (const c of movement.current) current[c.control] = c;
+  movement.controls.forEach((c, index) => {
+    const row = document.createElement("div");
+    row.className = "move";
+    row.dataset.control = c.control;
+    const name = document.createElement("span");
+    text(name, c.label);
+    const select = document.createElement("select");
+    const auto = document.createElement("option");
+    auto.value = "";
+    const now = movement.saved[c.control] === undefined ? current[c.control] : null;
+    auto.textContent = "Automatic" + (now ? " (" + now.param + ")" : " (none found)");
+    const off = document.createElement("option");
+    off.value = "-";
+    off.textContent = "Not used";
+    select.append(auto, off);
+    for (const p of movement.params) {
+      const option = document.createElement("option");
+      option.value = p.name;
+      option.textContent = p.name;
+      select.append(option);
+    }
+    const saved = movement.saved[c.control];
+    select.value = saved === undefined ? "" : saved === null ? "-" : saved.param;
+    const reverse = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = !!(saved && saved.invert);
+    reverse.append(box, "Reverse");
+    const test = document.createElement("button");
+    test.className = "small";
+    text(test, "Test");
+    test.addEventListener("click", () => testMove(c.control, select.value, box.checked, current[c.control]));
+    row.append(name, select, reverse, test);
+    (index < MAIN ? list : more).append(row);
+  });
+  const gestures = $("move-gestures");
+  gestures.replaceChildren();
+  if (movement.gestures.length) gestures.append("Try a gesture: ");
+  for (const g of movement.gestures) {
+    const b = document.createElement("button");
+    b.className = "small";
+    text(b, g.replace(/_/g, " "));
+    b.addEventListener("click", () => api("POST", "/api/stage/preview", { gesture: g }).catch((err) => text($("move-msg"), err.message)));
+    gestures.append(b, " ");
+  }
+}
+
+// Move one parameter to each end of its range and back, so the owner sees what the movement does.
+async function testMove(control, chosen, reverse, current) {
+  let param, lo, hi;
+  if (chosen === "-") return;
+  if (chosen) {
+    const p = movement.params.find((x) => x.name === chosen);
+    if (!p) return;
+    param = p.name; lo = p.min[0]; hi = p.max[0];
+  } else if (current) {
+    param = current.param; lo = current.min; hi = current.max;
+  } else return;
+  if (reverse) [lo, hi] = [hi, lo];
+  const step = (values, ease) => api("POST", "/api/stage/preview", { set: values, ease });
+  try {
+    await step({ [param]: lo }, 0.35);
+    await new Promise((r) => setTimeout(r, 750));
+    await step({ [param]: hi }, 0.5);
+    await new Promise((r) => setTimeout(r, 900));
+    await step({ [param]: null }, 0.4);
+  } catch (err) { text($("move-msg"), err.message); }
+}
+
+$("btn-save-move").addEventListener("click", async () => {
+  const controls = {};
+  for (const row of $("edit-movement").querySelectorAll(".move")) {
+    const value = row.querySelector("select").value;
+    const invert = row.querySelector("input[type=checkbox]").checked;
+    if (value === "-") controls[row.dataset.control] = null;
+    else if (value) controls[row.dataset.control] = { param: value, invert };
+    else if (invert) {
+      const now = movement.current.find((c) => c.control === row.dataset.control);
+      if (now) controls[row.dataset.control] = { param: now.param, invert: true };
+    }
+  }
+  try {
+    await api("PUT", "/api/characters/" + state.editing + "/movement", { controls });
+    text($("move-msg"), "Saved. The character restarts on the screen with it.");
+    setTimeout(() => loadMovement(state.editing).catch(() => {}), 4000);
+  } catch (err) { text($("move-msg"), err.message); }
+});
+
+$("btn-reset-move").addEventListener("click", async () => {
+  if (!confirm("Let the device choose this character's movement settings again?")) return;
+  try {
+    await api("DELETE", "/api/characters/" + state.editing + "/movement");
+    text($("move-msg"), "Back to automatic.");
+    setTimeout(() => loadMovement(state.editing).catch(() => {}), 4000);
+  } catch (err) { text($("move-msg"), err.message); }
+});
 
 $("btn-save-feelings").addEventListener("click", async () => {
   const map = {};

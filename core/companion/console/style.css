@@ -42,3 +42,8 @@ fieldset { border: 1px solid var(--line); border-radius: 10px; margin: 14px 0; p
 details { margin: 14px 0; }
 summary { cursor: pointer; color: var(--muted); }
 [hidden] { display: none !important; }
+.moves { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.moves .move { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.moves .move > span { min-width: 150px; }
+.moves select { max-width: 100%; min-width: 0; flex: 1 1 180px; }
+.moves label { display: inline-flex; gap: 4px; align-items: center; margin: 0; }

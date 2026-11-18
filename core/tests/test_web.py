@@ -186,6 +186,52 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         r = await self.client.delete("/api/characters/aria", headers=H)
         self.assertEqual((await (await self.client.get("/api/characters")).json())["characters"], [])
 
+    async def test_movement_settings_are_checked_saved_and_given_to_the_stage(self):
+        await self.login()
+        self.device.characters.install(package.build(good_files(), manifest()))
+        self.device.activate("aria")
+        self.stage.param_info = [{"name": "ParamArmLA", "min": [-10, 0], "max": [10, 0], "default": [0, 0]},
+                                 {"name": "ParamArmL", "min": [0, 0], "max": [30, 0], "default": [0, 0]}]
+        self.stage.controls = [{"control": "arm_left", "param": "ParamArmLA", "min": -10, "max": 10, "rest": 0}]
+        self.stage.gestures = ["nod", "wave"]
+        m = await (await self.client.get("/api/characters/aria/movement")).json()
+        self.assertTrue(m["active"] and m["ready"])
+        self.assertIn({"control": "arm_left_b", "label": "Left elbow"}, m["controls"])
+        self.assertEqual(m["current"][0]["param"], "ParamArmLA")
+        for body, status in (({"controls": {"arm_left": {"param": "Nope"}}}, 400),
+                             ({"controls": {"tail": {"param": "ParamArmL"}}}, 400),
+                             ({"controls": {"arm_left": {}}}, 400), ({"controls": []}, 400)):
+            r = await self.client.put("/api/characters/aria/movement", json=body, headers=H)
+            self.assertEqual(r.status, status, body)
+        self.stage.commands.clear()
+        r = await self.client.put("/api/characters/aria/movement", headers=H,
+                                  json={"controls": {"arm_left": {"param": "ParamArmL", "invert": True}, "smile": None}})
+        self.assertEqual(r.status, 200, await r.text())
+        with open(self.device.movement_map) as f:
+            self.assertEqual(json.load(f), {"arm_left": {"param": "ParamArmL", "invert": True}, "smile": None})
+        self.assertIn({"quit": True}, self.stage.commands, "the stage starts again with the settings")
+        self.assertNotIn("ParamArmL", json.dumps(self.device.characters.export("aria").hex()),
+                         "settings stay on the device")
+        r = await self.client.delete("/api/characters/aria/movement", headers=H)
+        self.assertEqual(r.status, 200)
+        with open(self.device.movement_map) as f:
+            self.assertEqual(json.load(f), {})
+
+    async def test_the_movement_preview_moves_only_real_parameters_within_range(self):
+        await self.login()
+        self.stage.param_info = [{"name": "ParamArmLA", "min": [-10, 0], "max": [10, 0], "default": [0, 0]}]
+        self.stage.gestures = ["wave"]
+        self.stage.commands.clear()
+        r = await self.client.post("/api/stage/preview", json={"set": {"ParamArmLA": 25}, "ease": 0.3}, headers=H)
+        self.assertEqual(r.status, 200)
+        self.assertEqual(self.stage.commands[-1], {"set": {"ParamArmLA": 10.0}, "ease": 0.3}, "held within its range")
+        for body in ({"set": {"Nope": 1}}, {"set": {"ParamArmLA": "high"}}, {"gesture": "backflip"}, {"spin": True}):
+            r = await self.client.post("/api/stage/preview", json=body, headers=H)
+            self.assertEqual(r.status, 400, body)
+        await self.client.post("/api/stage/preview", json={"gesture": "wave"}, headers=H)
+        await self.client.post("/api/stage/preview", json={"clear": True}, headers=H)
+        self.assertEqual(self.stage.commands[-2:], [{"gesture": "wave"}, {"clear": True, "ease": 0.3}])
+
     async def test_summaries_of_earlier_conversations_can_be_read_changed_and_forgotten(self):
         await self.login()
         self.device.characters.install(package.build(good_files(), manifest()))

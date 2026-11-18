@@ -24,8 +24,10 @@ Environment=XDG_SESSION_TYPE=wayland
 # from /var/lib/companion/current.inp, which the core points at the active
 # character (its Live2D-format model or its Inochi2D puppet: the stage tells
 # them apart by content) or at a setup card. When the core switches character it asks
-# the stage to exit, and this service starts it again.
-ExecStart=/usr/bin/cage -s -d -- /opt/companion/bin/stage /var/lib/companion/current.inp --fullscreen --socket /run/companion/stage.sock --no-stdin
+# the stage to exit, and this service starts it again. current-map.json holds the
+# owner's movement settings for that character (which of its parameters each
+# control drives), written by the core; without it the stage chooses itself.
+ExecStart=/usr/bin/cage -s -d -- /opt/companion/bin/stage /var/lib/companion/current.inp --fullscreen --socket /run/companion/stage.sock --no-stdin --map /var/lib/companion/current-map.json
 Restart=always
 RestartSec=1
 SupplementaryGroups=video render input

@@ -36,6 +36,7 @@ class Device:
         self.stt_model_dir = os.path.join(data_dir, "models", "stt")
         self.tts_model_dir = os.path.join(data_dir, "models", "tts")
         self.current_puppet = os.path.join(data_dir, "current.inp")
+        self.movement_map = os.path.join(data_dir, "current-map.json")   # read by the stage at start
         self.speaker = speaker or Speaker()
         self.microphone = microphone
         self.stage = stage or StageLink(stage_socket or "/run/companion/stage.sock", self._stage_event)
@@ -227,8 +228,12 @@ class Device:
         for name in (inochi + live2d) if prefer_inochi else (live2d + inochi):
             target = self.characters.file(cid, name)
             if os.path.exists(target):
+                # The owner's movement settings name the drawing's parameters; both drawings of a character
+                # use the same names, and the stage keeps its own choice for any it lacks.
+                self.write_movement_map(cid)
                 self._point_stage_at(target)
                 return
+        self.write_movement_map()
         write_atomic(self.card, screen.card_puppet(screen.message_card(
             "Can't show this character",
             "Its package has no drawing this device can show. Try installing it again.")))
@@ -236,6 +241,7 @@ class Device:
 
     def show_card(self, png):
         """Show a message on the screen instead of the character."""
+        self.write_movement_map()
         write_atomic(self.card, screen.card_puppet(png))
         self._point_stage_at(self.card)
         self.stage.send({"quit": True})
@@ -246,6 +252,11 @@ class Device:
             self._link_puppet(cid)
             self.stage.send({"quit": True})
         return cid
+
+    def write_movement_map(self, cid=None):
+        """The movement settings of the character on the screen (none for a message card), for the stage."""
+        controls = self.characters.device_settings(cid).get("controls") if cid else None
+        write_atomic(self.movement_map, json.dumps(controls if isinstance(controls, dict) else {}, indent=1))
 
     def _point_stage_at(self, target):
         tmp = self.current_puppet + ".new"

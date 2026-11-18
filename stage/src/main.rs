@@ -49,6 +49,8 @@ Usage: stage CHARACTER [options]
   --fullscreen          take the whole screen
   --gl auto|es|desktop  which OpenGL to ask for (default auto: ES first)
   --map FILE            JSON file overriding which parameters the controls drive
+                        (a missing file, or one this character cannot use, means
+                        the automatic choice; the second is reported as a warning)
   --socket PATH         also accept commands and send events on this local socket
   --no-stdin            do not read commands from standard input
   --background RRGGBB   background colour (default 101014)
@@ -231,6 +233,8 @@ struct StageApp {
 	draw_time: f64,
 	next_capture: usize,
 	quit: bool,
+	/// Why the owner's movement settings were not used, told once the stage is ready.
+	map_warning: Option<String>,
 }
 
 impl StageApp {
@@ -334,7 +338,16 @@ impl App for StageApp {
 					.mapper
 					.targets()
 					.iter()
-					.map(|(c, t)| json!({"control": c.key(), "param": t.param, "axis": if t.axis == 0 { "x" } else { "y" }}))
+					.map(|(c, t)| {
+						json!({"control": c.key(), "param": t.param, "axis": if t.axis == 0 { "x" } else { "y" },
+							"min": t.lo, "max": t.hi, "rest": t.mid})
+					})
+					.collect();
+				let param_info: Vec<_> = self
+					.info
+					.params
+					.iter()
+					.map(|p| json!({"name": p.name, "vec2": p.is_vec2, "min": p.min, "max": p.max, "default": p.defaults}))
 					.collect();
 				self.events.emit(json!({
 					"event": "ready",
@@ -343,12 +356,16 @@ impl App for StageApp {
 					"parts": self.info.part_count,
 					"params": self.info.params.len(),
 					"param_names": self.info.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
+					"param_info": param_info,
 					"controls": controls,
 					"emotions": self.motion.emotions(),
 					"gestures": self.motion.gestures(),
 					"expressions": self.info.expressions,
 					"opengl": format!("{}{}.{}", if version.is_embedded { "ES " } else { "" }, version.major, version.minor),
 				}));
+				if let Some(warning) = self.map_warning.take() {
+					self.events.emit(json!({"event": "warning", "message": warning}));
+				}
 				if let Puppet::Live2d(puppet) = &self.puppet {
 					self.events.emit(json!({"event": "features", "live2d": puppet.features().to_json()}));
 					for warning in &puppet.warnings {
@@ -513,13 +530,24 @@ fn run(opts: Options) -> Result<(), String> {
 		model.puppet.init_physics();
 		(Puppet::Inox(model), info)
 	};
+	// The owner's movement settings for this character. They must never stop the character
+	// showing: without them, or if they do not fit it, the automatic choice is used.
+	let mut map_warning = None;
 	let mapper = match &opts.map {
-		Some(path) => {
-			let text = std::fs::read_to_string(path).map_err(|e| format!("cannot read {}: {e}", path.display()))?;
-			let spec = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-			Mapper::with_overrides(&info, &spec)?
+		Some(path) if path.exists() => {
+			let loaded = std::fs::read_to_string(path)
+				.map_err(|e| format!("cannot read {}: {e}", path.display()))
+				.and_then(|text| serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display())))
+				.and_then(|spec| Mapper::with_overrides(&info, &spec));
+			match loaded {
+				Ok(m) => m,
+				Err(e) => {
+					map_warning = Some(format!("the movement settings were not used: {e}"));
+					Mapper::auto(&info)
+				}
+			}
 		}
-		None => Mapper::auto(&info),
+		_ => Mapper::auto(&info),
 	};
 	let script = match &opts.script {
 		Some(path) => {
@@ -580,6 +608,7 @@ fn run(opts: Options) -> Result<(), String> {
 		draw_time: 0.0,
 		next_capture: 0,
 		quit: false,
+		map_warning,
 	};
 	frame.run(app).map_err(|e| format!("stage stopped: {e}"))
 }

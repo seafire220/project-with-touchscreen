@@ -60,6 +60,8 @@ class FakeStage:
         self.params = set()
         self.gestures = ["nod", "shake", "bow", "tilt", "wave"]
         self.emotion_map = {}
+        self.param_info = []        # as the stage reports when it is ready
+        self.controls = []
 
     def send(self, command):
         self.commands.append(command)

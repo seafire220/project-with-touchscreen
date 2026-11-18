@@ -21,6 +21,7 @@ from . import package, persona
 from .memory import when
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
+from .stage_link import CONTROL_NAMES, CONTROLS
 
 SESSION_COOKIE = "companion_session"
 SESSION_HOURS = 12
@@ -288,6 +289,95 @@ class Console:
             self.device.use_emotion_map(cid)
         return web.json_response({"map": self.device.characters.emotion_map(cid)})
 
+    # ----- movement settings: which of the character's own parameters each kind of movement uses
+    async def get_movement(self, request):
+        cid = self._cid(request)
+        link = self.device.stage
+        active = cid == self.device.active_id()
+        ready = active and bool(getattr(link, "param_info", None))
+        saved = self.device.characters.device_settings(cid).get("controls") or {}
+        return web.json_response({
+            "active": active, "ready": ready,
+            "controls": [{"control": key, "label": label} for key, label in CONTROLS],
+            "current": list(getattr(link, "controls", [])) if ready else [],
+            "params": list(getattr(link, "param_info", [])) if ready else [],
+            "gestures": list(getattr(link, "gestures", [])) if ready else [],
+            "saved": saved})
+
+    async def put_movement(self, request):
+        """Save the movement settings ({control: {"param", "invert"} or null to switch it off}) and show the
+        character with them. Controls left out keep the stage's own choice."""
+        cid = self._cid(request)
+        body = await request.json()
+        controls = body.get("controls") if isinstance(body, dict) else None
+        if not isinstance(controls, dict):
+            raise web.HTTPBadRequest(text="send the controls to set")
+        active = cid == self.device.active_id()
+        known = {p.get("name") for p in getattr(self.device.stage, "param_info", [])} if active else set()
+        clean = {}
+        for key, spec in controls.items():
+            if key not in CONTROL_NAMES:
+                raise web.HTTPBadRequest(text="unknown movement: %s" % key)
+            if spec is None:
+                clean[key] = None
+                continue
+            if not isinstance(spec, dict) or not isinstance(spec.get("param"), str) or not spec["param"].strip():
+                raise web.HTTPBadRequest(text="%s needs one of the character's parameters" % CONTROL_NAMES[key])
+            if known and spec["param"] not in known:
+                raise web.HTTPBadRequest(text="this character has no parameter called %s" % spec["param"])
+            entry = {"param": spec["param"][:100]}
+            if spec.get("invert"):
+                entry["invert"] = True
+            clean[key] = entry
+        self.device.characters.set_device_settings(cid, {"controls": clean})
+        if active:
+            self.device.show_character()          # writes the settings for the stage and starts it again
+        return web.json_response({"ok": True, "saved": clean})
+
+    async def reset_movement(self, request):
+        cid = self._cid(request)
+        self.device.characters.set_device_settings(cid, {"controls": {}})
+        if cid == self.device.active_id():
+            self.device.show_character()
+        return web.json_response({"ok": True})
+
+    async def stage_preview(self, request):
+        """Move the character on the screen while its movement is being set up: hold some parameters
+        for a moment ({"set": {name: value or null}}), play a gesture, or hand everything back."""
+        link = self.device.stage
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="send set, gesture or clear")
+        if "set" in body:
+            params = {p.get("name"): p for p in getattr(link, "param_info", [])}
+            values = body["set"]
+            if not isinstance(values, dict) or not values or len(values) > 8:
+                raise web.HTTPBadRequest(text="set names up to 8 parameters")
+            out = {}
+            for name, value in values.items():
+                p = params.get(name)
+                if p is None:
+                    raise web.HTTPBadRequest(text="the character has no parameter called %s" % name)
+                if value is None:
+                    out[name] = None
+                    continue
+                if not isinstance(value, (int, float)) or value != value:
+                    raise web.HTTPBadRequest(text="%s needs a number" % name)
+                lo, hi = sorted((float(p.get("min", [0])[0]), float(p.get("max", [1])[0])))
+                out[name] = min(max(float(value), lo), hi)
+            ease = body.get("ease", 0.3)
+            ease = min(max(float(ease), 0.0), 2.0) if isinstance(ease, (int, float)) else 0.3
+            link.send({"set": out, "ease": ease})
+        elif "gesture" in body:
+            if body["gesture"] not in getattr(link, "gestures", ()):
+                raise web.HTTPBadRequest(text="this character cannot make that gesture")
+            link.send({"gesture": body["gesture"]})
+        elif body.get("clear"):
+            link.send({"clear": True, "ease": 0.3})
+        else:
+            raise web.HTTPBadRequest(text="send set, gesture or clear")
+        return web.json_response({"ok": True})
+
     async def put_persona(self, request):
         cid = self._cid(request)
         body = await request.json()
@@ -457,6 +547,10 @@ def make_app(device):
     r.add_post("/api/characters/{cid}/voice", console.clone_voice)
     r.add_get("/api/characters/{cid}/emotions", console.get_emotions)
     r.add_put("/api/characters/{cid}/emotions", console.put_emotions)
+    r.add_get("/api/characters/{cid}/movement", console.get_movement)
+    r.add_put("/api/characters/{cid}/movement", console.put_movement)
+    r.add_delete("/api/characters/{cid}/movement", console.reset_movement)
+    r.add_post("/api/stage/preview", console.stage_preview)
     r.add_get("/api/memory/{cid}", console.get_memory)
     r.add_put("/api/memory/{cid}", console.put_memory)
     r.add_delete("/api/memory/{cid}", console.clear_memory)

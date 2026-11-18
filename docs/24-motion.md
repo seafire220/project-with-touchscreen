@@ -256,13 +256,22 @@ since the existing checks have passed motion that looked wrong.
   the arm's own place where background shows through, as it should.
   Gestures checked by playing them through the stage's motion system
   (wave, hands on hips, shrug) on four characters.
-- Not built yet: calibration files, motion clips recorded from people, the
-  calibration page for imported models (including mapping their own
-  expressions to our moods), and the debug view. Imported Live2D-format
-  models get the arm gestures at the same control values, which mean
-  whatever their own `ParamArm*` settings do; the calibration page will let
-  a buyer fix that. The fill behind the arms uses today's smooth colour
-  fill; See-through's completed layers would draw it properly.
+- Movement settings (2026-11-18), the calibration page for any character:
+  on the settings page, under the character, each kind of movement (head
+  turn, nod, tilt, body turn, lean, sway, eyes, arms, elbows, shoulders,
+  smile, and the face's details under "More") shows the parameter the
+  stage chose for it; the owner can pick another of the character's
+  parameters, switch it off, or reverse it, and *Test* moves that
+  parameter end to end on the device's screen; the gestures can be tried
+  there too. Saved per character (on the device only), written to
+  `/var/lib/companion/current-map.json` for the stage (`--map`), which
+  starts again with them. Settings that do not fit the character (a
+  parameter it lacks) are reported and the automatic choice is used, so
+  they can never stop it showing. Mapping a model's own expressions to our
+  moods is the "Feelings" section beside it.
+- Not built yet: motion clips recorded from people, and the debug view.
+  The fill behind the arms uses today's smooth colour fill; See-through's
+  completed layers would draw it properly.
 
 Our own characters have no gaze or brow parameters yet (the rigger does not
 make them), so on them these controls do nothing until the studio adds them;
