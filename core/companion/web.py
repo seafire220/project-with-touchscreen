@@ -264,6 +264,28 @@ class Console:
         return web.json_response({"persona": self.device.characters.persona(cid),
                                   "device": self.device.characters.device_settings(cid)})
 
+    async def get_emotions(self, request):
+        cid = self._cid(request)
+        from .speech_text import EMOTIONS
+        return web.json_response({"emotions": [e for e in EMOTIONS if e != "neutral"],
+                                  "expressions": self.device.characters.expressions(cid),
+                                  "map": self.device.characters.emotion_map(cid)})
+
+    async def put_emotions(self, request):
+        """Choose which of the character's own expressions shows each emotion ("" for none)."""
+        cid = self._cid(request)
+        from .speech_text import EMOTIONS
+        body = await request.json()
+        wanted = body.get("map") if isinstance(body, dict) else None
+        known = set(self.device.characters.expressions(cid))
+        if not isinstance(wanted, dict) or any(k not in EMOTIONS or not isinstance(v, str) or (v and v not in known)
+                                               for k, v in wanted.items()):
+            raise web.HTTPBadRequest(text="map must name our emotions and the character's own expressions")
+        self.device.characters.set_device_settings(cid, {"emotions": wanted})
+        if cid == self.device.active_id():
+            self.device.use_emotion_map(cid)
+        return web.json_response({"map": self.device.characters.emotion_map(cid)})
+
     async def put_persona(self, request):
         cid = self._cid(request)
         body = await request.json()
@@ -396,6 +418,8 @@ def make_app(device):
     r.add_get("/api/characters/{cid}/persona", console.get_persona)
     r.add_put("/api/characters/{cid}/persona", console.put_persona)
     r.add_post("/api/characters/{cid}/voice", console.clone_voice)
+    r.add_get("/api/characters/{cid}/emotions", console.get_emotions)
+    r.add_put("/api/characters/{cid}/emotions", console.put_emotions)
     r.add_get("/api/memory/{cid}", console.get_memory)
     r.add_put("/api/memory/{cid}", console.put_memory)
     r.add_delete("/api/memory/{cid}", console.clear_memory)

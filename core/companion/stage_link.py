@@ -27,6 +27,8 @@ class StageLink:
         # What the character can do, as the stage reports when it is ready.
         self.emotions = []
         self.gestures = list(DEFAULT_GESTURES)
+        # For a character with its own expressions: which one shows each emotion.
+        self.emotion_map = {}
         self._task = None
 
     def start(self):
@@ -51,6 +53,7 @@ class StageLink:
                     except ValueError:
                         continue
                     if event.get("event") == "ready":
+                        self.expression = "neutral"            # a new stage starts at rest
                         self.params = set(event.get("param_names") or [])
                         self.emotions = list(event.get("emotions") or [])
                         if "gestures" in event:
@@ -87,7 +90,10 @@ class StageLink:
         if emotion == self.expression:
             return
         self.expression = emotion
-        self.send({"emotion": emotion, "intensity": round(float(intensity), 2)})
+        command = {"emotion": emotion, "intensity": round(float(intensity), 2)}
+        if self.emotion_map:
+            command["expression"] = self.emotion_map.get(emotion)    # None hands the face back to the mood
+        self.send(command)
 
     def gesture(self, name, intensity=1.0):
         """Play one of the stage's gestures, if this character can make it."""

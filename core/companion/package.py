@@ -51,6 +51,7 @@ ALLOWED = [
     (re.compile(r"visual/live2d/motions/[A-Za-z0-9_.\-]{1,96}\.motion3\.json"), 4 * 1024 * 1024),
     (re.compile(r"visual/live2d/expressions/[A-Za-z0-9_.\-]{1,96}\.exp3\.json"), MAX_TEXT),
     (re.compile(r"visual/live2d/textures/[A-Za-z0-9_.\-]{1,96}\.png"), 32 * 1024 * 1024),
+    (re.compile(r"visual/emotions\.json"), MAX_TEXT),
     (re.compile(r"visual/clips/[A-Za-z0-9_\-]{1,64}\.(webm|mp4|webp|png)"), 32 * 1024 * 1024),
     (re.compile(r"visual/frames/[A-Za-z0-9_\-]{1,64}\.(webp|png)"), 4 * 1024 * 1024),
     (re.compile(r"ui/background\.(webp|png|jpg)"), 8 * 1024 * 1024),
@@ -309,6 +310,30 @@ def slug(name):
 # Importing a Live2D-format model folder (as made for VTube Studio and similar programs)
 # --------------------------------------------------------------------------------------------------
 
+# Words in a model's expression names that suggest which of our emotions each one shows.
+# Names such as "F01" say nothing; those are left for the buyer to choose on the settings page.
+EMOTION_WORDS = {
+    "happy": ("happy", "smile", "joy", "glad", "laugh", "grin", "fun", "cheer"),
+    "sad": ("sad", "cry", "tear", "sorrow", "upset", "gloom"),
+    "angry": ("angry", "anger", "mad", "rage", "annoy", "pout", "irritat"),
+    "surprised": ("surprise", "shock", "wow", "astonish", "startle"),
+    "embarrassed": ("blush", "shy", "embarrass", "fluster"),
+    "thinking": ("think", "ponder", "wonder", "curious", "hmm"),
+}
+
+
+def guess_emotions(names):
+    """A first mapping from our emotions to a model's own expressions, by their names."""
+    mapping, used = {}, set()
+    for emotion, words in EMOTION_WORDS.items():
+        for name in names:
+            if name not in used and any(w in name.lower() for w in words):
+                mapping[emotion] = name
+                used.add(name)
+                break
+    return mapping
+
+
 IMPORT_LICENCE = ("Imported Live2D-format model. The person who imported it is responsible for having the "
                   "right to use it on this device.")
 
@@ -462,6 +487,9 @@ def from_live2d_zip(source, name=None):
                                % posixpath.basename(index))
         if out_expressions:
             out_refs["Expressions"] = out_expressions
+            guessed = guess_emotions([e["Name"] for e in out_expressions])
+            if guessed:
+                files["visual/emotions.json"] = json.dumps(guessed, indent=1)
         if out_motions:
             out_refs["Motions"] = out_motions
         out_model = {"Version": 3, "FileReferences": out_refs}

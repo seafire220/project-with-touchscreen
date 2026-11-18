@@ -66,6 +66,13 @@
       <label>Voice ID for this character (from your voice service; blank uses the default)
         <input id="edit-voice"></label>
       <p><button id="btn-save-persona">Save</button></p>
+      <div id="edit-feelings" hidden>
+        <h4>Feelings</h4>
+        <p>This character has its own expressions. Choose which one shows each feeling; the
+          movement that goes with the feeling plays either way.</p>
+        <div id="feelings-list"></div>
+        <p><button id="btn-save-feelings">Save feelings</button> <span id="feelings-msg"></span></p>
+      </div>
       <h4>Clone a voice (ElevenLabs)</h4>
       <p>A clear WAV recording of 30 seconds to a few minutes. The voice is created in your own ElevenLabs account. Only use a voice you have the right to use.</p>
       <p><input type="file" id="voice-file" accept=".wav,audio/wav"> <button id="btn-clone">Clone</button></p>

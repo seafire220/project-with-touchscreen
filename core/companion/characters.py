@@ -93,6 +93,30 @@ class Characters:
             raise ValueError("the persona appears to contain an API key; it was not saved")
         write_atomic(self.file(cid, "persona.md"), text)
 
+    def expressions(self, cid):
+        """The names of a Live2D-format character's own expressions."""
+        try:
+            with open(self.file(cid, package.LIVE2D_MODEL), encoding="utf-8") as f:
+                refs = json.load(f).get("FileReferences", {})
+            return [e["Name"] for e in refs.get("Expressions") or [] if isinstance(e.get("Name"), str)]
+        except (OSError, ValueError, AttributeError, KeyError, TypeError):
+            return []
+
+    def emotion_map(self, cid):
+        """Which of the character's own expressions shows each emotion: the package's first
+        guess, with the owner's choices on this device over it ("" means none)."""
+        mapping = {}
+        try:
+            with open(self.file(cid, "visual/emotions.json"), encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                mapping.update({k: v for k, v in loaded.items() if isinstance(k, str) and isinstance(v, str)})
+        except (OSError, ValueError):
+            pass
+        mapping.update(self.device_settings(cid).get("emotions") or {})
+        known = set(self.expressions(cid))
+        return {k: v for k, v in mapping.items() if v in known}
+
     def device_settings(self, cid):
         try:
             with open(os.path.join(self._dir(cid), "device.json"), encoding="utf-8") as f:

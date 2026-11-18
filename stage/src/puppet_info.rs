@@ -20,6 +20,8 @@ pub struct PuppetInfo {
 	pub bounds: Option<[f32; 4]>,
 	pub part_count: usize,
 	pub node_types: Vec<String>,
+	/// The model's own expressions, by name (Live2D-format models only).
+	pub expressions: Vec<String>,
 }
 
 const MAGIC: &[u8; 8] = b"TRNSRTS\0";

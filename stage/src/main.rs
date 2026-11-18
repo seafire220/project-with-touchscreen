@@ -212,6 +212,9 @@ struct StageApp {
 	mapper: Mapper,
 	behaviour: Behaviour,
 	motion: Motion,
+	/// The model's own expressions and how much each shows (Live2D-format models).
+	expressions: Vec<live2d::Expression>,
+	expression_weights: Vec<(smooth::Spring, f32)>,
 	overrides: Overrides,
 	commands: Receiver<Command>,
 	script: Option<Script>,
@@ -284,6 +287,22 @@ impl StageApp {
 				Err(e) => self.events.emit(json!({"event": "error", "message": e})),
 			},
 			Command::RandomGestures(on) => self.motion.set_random(on),
+			Command::Expression(name) => {
+				let index = match &name {
+					None => None,
+					Some(n) => match self.expressions.iter().position(|e| &e.name == n) {
+						Some(i) => Some(i),
+						None => {
+							self.events.emit(json!({"event": "error", "message": format!("this model has no expression '{n}'")}));
+							return;
+						}
+					},
+				};
+				for (i, (_, target)) in self.expression_weights.iter_mut().enumerate() {
+					*target = if Some(i) == index { 1.0 } else { 0.0 };
+				}
+				self.motion.set_face(index.is_none());
+			}
 			Command::Quit => self.quit = true,
 		}
 	}
@@ -327,6 +346,7 @@ impl App for StageApp {
 					"controls": controls,
 					"emotions": self.motion.emotions(),
 					"gestures": self.motion.gestures(),
+					"expressions": self.info.expressions,
 					"opengl": format!("{}{}.{}", if version.is_embedded { "ES " } else { "" }, version.major, version.minor),
 				}));
 				if let Puppet::Live2d(puppet) = &self.puppet {
@@ -384,6 +404,12 @@ impl App for StageApp {
 		}
 		let mut values = self.mapper.resolve(&pose);
 		self.overrides.apply(dt, &mut values);
+		for (expression, (weight, target)) in self.expressions.iter().zip(self.expression_weights.iter_mut()) {
+			let w = weight.update(*target, dt);
+			let info = &self.info;
+			let default = |id: &str| info.params.iter().find(|p| p.name == id).map(|p| p.defaults[0]).unwrap_or(0.0);
+			live2d::apply_expression(&mut values, default, expression, w);
+		}
 
 		let Some((renderer, aux)) = &mut self.on_window else {
 			return !self.quit;
@@ -525,10 +551,17 @@ fn run(opts: Options) -> Result<(), String> {
 	let mut behaviour = Behaviour::new(opts.seed);
 	behaviour.set_idle_motion(!opts.still);
 	let motion = Motion::new(Library::builtin(), |key| mapper.drives(key), opts.seed);
+	let expressions = match &puppet {
+		Puppet::Live2d(p) => p.expressions.clone(),
+		Puppet::Inox(_) => Vec::new(),
+	};
+	let expression_weights = expressions.iter().map(|_| (smooth::Spring::new(0.0, 0.3), 0.0)).collect();
 	let app = StageApp {
 		overrides: Overrides::new(&info.params),
 		behaviour,
 		motion,
+		expressions,
+		expression_weights,
 		opts,
 		puppet,
 		info,

@@ -236,6 +236,13 @@ class Live2DImportTest(unittest.TestCase):
         self.assertEqual(pkg.json(package.LIVE2D_MODEL)["Groups"][0]["Name"], "EyeBlink")
         self.assertEqual(pkg.files["visual/live2d/model.cdi3.json"], b"{}", "a byte-order mark is removed")
 
+    def test_emotions_are_matched_to_expressions_by_their_names(self):
+        self.assertEqual(package.guess_emotions(["F01", "Smile", "Angry2", "blush_face", "Thinking"]),
+                         {"happy": "Smile", "angry": "Angry2", "embarrassed": "blush_face", "thinking": "Thinking"})
+        self.assertEqual(package.guess_emotions(["F01", "F02"]), {}, "names that say nothing are left to the owner")
+        pkg = package.open_package(io.BytesIO(package.from_live2d_zip(io.BytesIO(model_folder_zip()))))
+        self.assertEqual(pkg.json("visual/emotions.json"), {"happy": "Smile"})
+
     def test_the_name_defaults_to_the_model_file(self):
         pkg = package.open_package(io.BytesIO(package.from_live2d_zip(io.BytesIO(model_folder_zip()))))
         self.assertEqual(pkg.manifest["name"], "aria")

@@ -89,6 +89,62 @@ pub fn premultiply(pixels: &mut [u8]) {
 	}
 }
 
+/// How an expression's value combines with a parameter's own value.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Blend {
+	Add,
+	Multiply,
+	Overwrite,
+}
+
+/// One of the model's own expressions (`.exp3.json`): parameter settings the
+/// model's artist made for a feeling, which a mood can show.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Expression {
+	pub name: String,
+	pub params: Vec<(String, f32, Blend)>,
+}
+
+pub fn parse_expression(name: &str, bytes: &[u8]) -> Result<Expression, String> {
+	let v: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| format!("expression {name}: {e}"))?;
+	let mut params = Vec::new();
+	for p in v.get("Parameters").and_then(|p| p.as_array()).ok_or(format!("expression {name} has no parameters"))? {
+		let id = p.get("Id").and_then(|i| i.as_str()).ok_or(format!("expression {name}: a parameter has no Id"))?;
+		let value = p.get("Value").and_then(|x| x.as_f64()).ok_or(format!("expression {name}: {id} has no value"))? as f32;
+		let blend = match p.get("Blend").and_then(|b| b.as_str()).unwrap_or("Add") {
+			"Multiply" => Blend::Multiply,
+			"Overwrite" => Blend::Overwrite,
+			_ => Blend::Add,
+		};
+		params.push((id.to_string(), value, blend));
+	}
+	Ok(Expression { name: name.to_string(), params })
+}
+
+/// Blend an expression into this frame's parameter values at weight `w`
+/// (0 to 1), as Cubism does: add, multiply or overwrite. Parameters not yet
+/// in `values` start from `default`.
+pub fn apply_expression(values: &mut Vec<(String, Vec2)>, default: impl Fn(&str) -> f32, e: &Expression, w: f32) {
+	if w <= 0.0 {
+		return;
+	}
+	for (id, value, blend) in &e.params {
+		let i = match values.iter().position(|(n, _)| n == id) {
+			Some(i) => i,
+			None => {
+				values.push((id.clone(), Vec2::new(default(id), 0.0)));
+				values.len() - 1
+			}
+		};
+		let v = &mut values[i].1.x;
+		*v = match blend {
+			Blend::Add => *v + value * w,
+			Blend::Multiply => *v * (1.0 + (value - 1.0) * w),
+			Blend::Overwrite => *v + (value - *v) * w,
+		};
+	}
+}
+
 /// What does not change while a model plays: one entry per art mesh, in the
 /// model's own order (its uid).
 #[derive(Clone, Debug)]
@@ -133,6 +189,8 @@ pub struct Live2dPuppet {
 	pub info: PuppetInfo,
 	/// Problems that do not stop the character playing, for the log.
 	pub warnings: Vec<String>,
+	/// The model's own expressions.
+	pub expressions: Vec<Expression>,
 }
 
 /// Which drawing features a model uses, for the log and for tests.
@@ -211,8 +269,26 @@ impl Live2dPuppet {
 		.map_err(|_| "the model file is damaged or uses something the player cannot read".to_string())??;
 		let (model, driver, physics) = loaded;
 
+		// The model's own expressions, if it names any; one that cannot be read is skipped.
+		let mut expressions = Vec::new();
+		let index: serde_json::Value = serde_json::from_slice(&read_limited(&real)?).unwrap_or_default();
+		if let Some(list) = index.get("FileReferences").and_then(|r| r.get("Expressions")).and_then(|e| e.as_array()) {
+			for item in list {
+				let (Some(name), Some(file)) = (item.get("Name").and_then(|n| n.as_str()), item.get("File").and_then(|f| f.as_str()))
+				else {
+					continue;
+				};
+				match resolve(&base, file).and_then(|p| read_limited(&p)).and_then(|b| parse_expression(name, &b)) {
+					Ok(e) => expressions.push(e),
+					Err(e) => warnings.push(e),
+				}
+			}
+		}
+
 		let mut puppet = Self::describe(model, driver, physics, textures, path)?;
 		puppet.warnings.extend(warnings);
+		puppet.info.expressions = expressions.iter().map(|e| e.name.clone()).collect();
+		puppet.expressions = expressions;
 		puppet.pictures = Some(puppet.textures.iter().map(|p| decode_texture(p)).collect::<Result<_, _>>()?);
 		Ok(puppet)
 	}
@@ -311,7 +387,7 @@ impl Live2dPuppet {
 			DrawNode::OffscreenPart(uid) => parts[*uid as usize].blend.is_advanced(),
 		});
 		let name = path.file_name().and_then(|n| n.to_str()).map(|n| n.trim_end_matches(".model3.json").to_string());
-		let info = PuppetInfo { name, params, bounds, part_count: meshes.len(), node_types: Vec::new() };
+		let info = PuppetInfo { name, params, bounds, part_count: meshes.len(), node_types: Vec::new(), expressions: Vec::new() };
 		Ok(Self {
 			model,
 			driver,
@@ -329,6 +405,7 @@ impl Live2dPuppet {
 			needs_offscreen,
 			info,
 			warnings: Vec::new(),
+			expressions: Vec::new(),
 		})
 	}
 
@@ -1159,6 +1236,25 @@ mod tests {
 		let fitted = fit_texture(picture, 4);
 		assert_eq!((fitted.width, fitted.height), (4, 2));
 		assert_eq!(fitted.pixels.len(), 4 * 2 * 4);
+	}
+
+	#[test]
+	fn expressions_blend_as_cubism_does() {
+		let e = parse_expression(
+			"Smile",
+			br#"{"Type": "Live2D Expression", "Parameters": [
+				{"Id": "ParamMouthForm", "Value": 1.0, "Blend": "Add"},
+				{"Id": "ParamEyeLOpen", "Value": 0.5, "Blend": "Multiply"},
+				{"Id": "ParamCheek", "Value": 1.0, "Blend": "Overwrite"}]}"#,
+		)
+		.unwrap();
+		let mut values = vec![("ParamMouthForm".to_string(), Vec2::new(0.2, 0.0)), ("ParamEyeLOpen".to_string(), Vec2::new(1.0, 0.0))];
+		apply_expression(&mut values, |_| 0.0, &e, 0.5);
+		let get = |n: &str| values.iter().find(|(k, _)| k == n).unwrap().1.x;
+		assert!((get("ParamMouthForm") - 0.7).abs() < 1e-6);
+		assert!((get("ParamEyeLOpen") - 0.75).abs() < 1e-6);
+		assert!((get("ParamCheek") - 0.5).abs() < 1e-6, "added from its default and blended halfway");
+		assert!(parse_expression("Bad", b"{}").is_err());
 	}
 
 	#[test]

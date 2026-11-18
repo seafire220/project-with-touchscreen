@@ -94,6 +94,24 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn({"random_gestures": False}, self.stage.commands)
         self.assertFalse((await r.json())["conversation"]["random_gestures"])
 
+    async def test_feelings_can_be_matched_to_a_models_own_expressions(self):
+        from test_package import model_folder_zip
+        await self.login()
+        r = await self.client.post("/api/characters?name=Aria", data=model_folder_zip(), headers=H)
+        self.assertEqual(r.status, 200)
+        r = await self.client.get("/api/characters/aria/emotions")
+        data = await r.json()
+        self.assertEqual(data["expressions"], ["Smile"])
+        self.assertEqual(data["map"], {"happy": "Smile"}, "guessed from the expression's name")
+        self.assertEqual(self.device.stage.emotion_map, {"happy": "Smile"}, "the active character's map is in use")
+        r = await self.client.put("/api/characters/aria/emotions", json={"map": {"happy": "", "embarrassed": "Smile"}},
+                                  headers=H)
+        self.assertEqual((await r.json())["map"], {"embarrassed": "Smile"})
+        self.assertEqual(self.device.stage.emotion_map, {"embarrassed": "Smile"})
+        for bad in ({"map": {"bored": "Smile"}}, {"map": {"happy": "Nope"}}, {"map": "Smile"}):
+            r = await self.client.put("/api/characters/aria/emotions", json=bad, headers=H)
+            self.assertEqual(r.status, 400, bad)
+
     async def test_wrong_passwords_are_slowed_and_then_locked_out(self):
         await self.login()
         await self.client.post("/api/logout", headers=H)

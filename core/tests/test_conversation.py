@@ -240,6 +240,13 @@ class ConversationTest(unittest.TestCase):
         link.random_gestures(False)
         self.assertEqual(link.sent, [{"emotion": "happy", "intensity": 0.8}, {"gesture": "nod", "intensity": 1.0},
                                      {"random_gestures": False}])
+        # A character with its own expressions shows the mapped one with the emotion, and none otherwise.
+        link.sent.clear()
+        link.emotion_map = {"sad": "F03"}
+        link.express("sad")
+        link.express("angry")
+        self.assertEqual(link.sent, [{"emotion": "sad", "intensity": 1.0, "expression": "F03"},
+                                     {"emotion": "angry", "intensity": 1.0, "expression": None}])
 
     def test_the_model_is_told_only_the_gestures_its_character_can_make(self):
         from companion.conversation import system_prompt

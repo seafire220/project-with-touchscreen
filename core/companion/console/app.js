@@ -206,8 +206,46 @@ async function editCharacter(c) {
   $("edit-persona").value = data.persona;
   $("edit-voice").value = (data.device && data.device.voice) || "";
   $("char-edit").hidden = false;
+  loadFeelings(c.id);
   $("char-edit").scrollIntoView();
 }
+
+// Which of a character's own expressions shows each feeling (Live2D-format models that have some).
+async function loadFeelings(cid) {
+  const data = await api("GET", "/api/characters/" + cid + "/emotions");
+  const list = $("feelings-list");
+  list.replaceChildren();
+  $("edit-feelings").hidden = !data.expressions.length;
+  text($("feelings-msg"), "");
+  for (const emotion of data.emotions) {
+    const label = document.createElement("label");
+    label.append(emotion.charAt(0).toUpperCase() + emotion.slice(1) + " ");
+    const select = document.createElement("select");
+    select.dataset.emotion = emotion;
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "(movement only)";
+    select.append(none);
+    for (const name of data.expressions) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = name;
+      select.append(option);
+    }
+    select.value = data.map[emotion] || "";
+    label.append(select);
+    list.append(label);
+  }
+}
+
+$("btn-save-feelings").addEventListener("click", async () => {
+  const map = {};
+  for (const select of $("feelings-list").querySelectorAll("select")) map[select.dataset.emotion] = select.value;
+  try {
+    await api("PUT", "/api/characters/" + state.editing + "/emotions", { map });
+    text($("feelings-msg"), "Saved.");
+  } catch (err) { text($("feelings-msg"), err.message); }
+});
 
 $("btn-save-persona").addEventListener("click", async () => {
   try {

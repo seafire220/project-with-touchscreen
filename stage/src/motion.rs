@@ -200,7 +200,13 @@ pub struct Motion {
 	random: bool,
 	next_random: f32,
 	rng: u64,
+	/// False while the model's own expression shows the face: the mood then
+	/// moves only posture and liveliness.
+	face: bool,
 }
+
+/// Controls that belong to the face, which a model's own expression replaces.
+const FACE: [&str; 5] = ["smile", "eye_smile", "cheek", "brows", "brow_form"];
 
 impl Motion {
 	/// `has` says whether the character has a parameter for a control.
@@ -221,6 +227,7 @@ impl Motion {
 			random: true,
 			next_random: 0.0,
 			rng: seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).max(1),
+			face: true,
 		};
 		m.next_random = m.random_gap(1.0);
 		m
@@ -246,6 +253,11 @@ impl Motion {
 
 	pub fn set_random(&mut self, on: bool) {
 		self.random = on;
+	}
+
+	/// Whether the mood shows on the face (off while a model's own expression does).
+	pub fn set_face(&mut self, on: bool) {
+		self.face = on;
 	}
 
 	fn next_random_number(&mut self) -> f32 {
@@ -308,7 +320,9 @@ impl Motion {
 		let k = self.intensity;
 		let mut target = [0.0f32; KEYS.len()];
 		for (key, v) in &mood.offsets {
-			target[*key] = v * k;
+			if self.face || !FACE.contains(&KEYS[*key]) {
+				target[*key] = v * k;
+			}
 		}
 		let (energy, beats) = (1.0 + (mood.energy - 1.0) * k, 1.0 + (mood.beats - 1.0) * k);
 		self.energy.update(energy, dt);

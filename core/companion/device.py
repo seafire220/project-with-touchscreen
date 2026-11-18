@@ -70,8 +70,10 @@ class Device:
         self.stage_seen = time.time()
         if event.get("event") in ("error", "fatal"):
             self.emit("stage_error", {"message": event.get("message", "")})
-        elif event.get("event") == "ready" and hasattr(self.stage, "random_gestures"):
-            self.stage.random_gestures(self.store.settings()["conversation"].get("random_gestures", True))
+        elif event.get("event") == "ready":
+            if hasattr(self.stage, "random_gestures"):
+                self.stage.random_gestures(self.store.settings()["conversation"].get("random_gestures", True))
+            self.use_emotion_map()
 
     async def stage_watch(self, patience=25.0):
         """If the character cannot be shown (the stage keeps failing to start), show a card instead.
@@ -192,9 +194,16 @@ class Device:
         self.interrupt()
         self.store.update_settings({"active_character": cid})
         self._link_puppet(cid)
+        self.use_emotion_map(cid)
         self.conversation = None
         self.stage.send({"quit": True})      # the service manager restarts the stage with the new puppet
         self.emit("character", {"id": cid})
+
+    def use_emotion_map(self, cid=None):
+        """Tell the stage link which of the character's own expressions shows each emotion."""
+        cid = cid or self.active_id()
+        if cid and hasattr(self.stage, "emotion_map"):
+            self.stage.emotion_map = self.characters.emotion_map(cid)
 
     def _link_puppet(self, cid):
         """Point the stage at the character's drawing. The stage tells the formats apart by content."""

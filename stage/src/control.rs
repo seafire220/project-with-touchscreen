@@ -14,6 +14,7 @@
 //! {"emotion": "happy", "intensity": 0.8}
 //! {"gesture": "nod"}
 //! {"random_gestures": false}
+//! {"emotion": "happy", "expression": "Smile"}
 //! {"quit": true}
 //! ```
 //!
@@ -57,6 +58,8 @@ pub enum Command {
 	Gesture(String, f32),
 	/// Let the mood start gestures by itself, or not.
 	RandomGestures(bool),
+	/// Show one of the model's own expressions with the mood, or none.
+	Expression(Option<String>),
 	Quit,
 }
 
@@ -84,6 +87,11 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 			"ease" | "intensity" => {}
 			"emotion" => out.push(Command::Emotion(val.as_str().ok_or("\"emotion\" must be a name")?.to_string(), intensity)),
 			"gesture" => out.push(Command::Gesture(val.as_str().ok_or("\"gesture\" must be a name")?.to_string(), intensity)),
+			"expression" => out.push(Command::Expression(if val.is_null() {
+				None
+			} else {
+				Some(val.as_str().ok_or("\"expression\" must be a name or null")?.to_string())
+			})),
 			"random_gestures" => out.push(Command::RandomGestures(val.as_bool().ok_or("\"random_gestures\" must be true or false")?)),
 			"set" => {
 				let items = val.as_object().ok_or("\"set\" must be an object of parameter names and values")?;
