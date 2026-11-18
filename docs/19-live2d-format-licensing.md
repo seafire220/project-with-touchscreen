@@ -88,6 +88,42 @@ the session's network settings so they can be read and quoted directly.
   help pages say the logo and name may be used when its brand guidelines are
   followed; those guidelines mainly cover SDK users, who must show the logo.
 
+## Live2D's own pages (supplied by the owner, 2026-11-18)
+
+The owner saved two of Live2D's licensing pages as PDFs, since this session
+cannot open live2d.com. What they say, in short:
+
+- **SDK Release License (Publication License Agreement).** Required "for
+  business entities publishing a content using Live2D SDK", at release, not
+  during trial or development; individuals and small-scale enterprises are
+  exempt from the agreement and fee **except for Expandable Applications**
+  (programs that load users' models). The plans are chosen by usage type,
+  one of which is "AI / Chatbot".
+- **The Live2D Copyright Simple License Plan.** A reviewed, temporary,
+  promotion-only exemption for medium and large companies using "Live2D's
+  copyrighted works", which it lists as the Cubism SDK, Live2D's own
+  original characters (the sample models) and nizima LIVE. Its examples are
+  AI-companion demonstrations: Sharp's "AI Partner" TV and MediaTek's
+  generative-AI chatbot, both using the SDK. Its notice guideline has
+  separate wording for works that do not use the SDK.
+
+What follows for us:
+
+1. The fees and agreements attach to **using Live2D's software and
+   characters**, as the owner said; neither page claims the file format.
+   A build with only Ayagami includes neither.
+2. Had we used the official SDK, the device would be an Expandable
+   Application in the AI / Chatbot category: a paid licence even for a small
+   business. Playing with Ayagami avoids exactly that.
+3. Live2D licenses its technology to AI-companion devices, so our product is
+   in a market it sells into; staying clear of its software, characters and
+   branding matters, and the open questions below still need a lawyer.
+4. Our local tests with Live2D's sample models (never shipped or committed)
+   are internal use, which the sample models' Free Material License allows.
+5. Not covered by these pages: the Cubism Editor licence (buyers' own
+   Editor-made models, reportedly section 5.1.9), patents, and how to word
+   compatibility.
+
 ## The questions, and where they stand
 
 | Question | Current view | For a lawyer? |
@@ -95,6 +131,7 @@ the session's network settings so they can be read and quoted directly.
 | Does our code copy Live2D's? | No. Our code, image2live2d (Apache-2.0) and Ayagami (MIT/Apache-2.0) are independent; no Live2D code, library or data is included. | Confirm the provenance claims of the two open-source projects are enough for us to rely on. |
 | Can Live2D stop others from reading or writing the file format? | A file format as such is generally not protected by copyright; the usual risk is in how the knowledge was obtained, which concerns the people who reverse-engineered it, not us. In Australia, s 47D of the Copyright Act 1968 allows reproducing a program to make interoperable products, and s 47H makes contract terms that exclude it void. | **Yes.** Our position as a downstream user, in Australia and in the countries backers live in (US, Japan, EU). |
 | Patents | Not searched. Live2D Inc. may hold patents on its deformation methods or file handling. | **Yes.** A freedom-to-operate search (JP, US, EU, AU) before selling units that play these files. |
+| Does Live2D's per-sale SDK fee apply to us? | Live2D's own SDK licence page (above) ties the agreement and fee to releasing content made with the Cubism SDK; we do not use it. | Confirm, with the page attached. |
 | Can we say the device plays Live2D models? | Do not use "Live2D" or "Cubism" in the product name, logo or as a badge. A plain factual statement such as "plays .moc3 model files" may be acceptable descriptive use; Ayagami uses the names "only nominatively, to describe file-format compatibility". | **Yes.** What wording, if any, is safe on the Kickstarter page and the box. |
 | Buyers' own models | Models bought from artists, or made with Cubism Editor, come with their own licences; some allow only personal or streaming use, or use in named apps. The device plays what the buyer loads; the upload page says so. | Wording for the user guide and terms of sale: buyers must have the right to use a model on the device. |
 | Cubism Editor licence (reportedly section 5.1.9) | Reported to restrict Editor customers from using files exported by the Editor with software other than Live2D's. If so, a buyer who made a model in the Editor could be in breach by loading it on the device; the obligation is the buyer's, but advertising the import could be read as encouraging it. It also rules out bundling Editor-made models unless their makers grant the right. Our own characters are not made with the Editor. | **Yes.** Confirm the clause and its current text; whether advertising the import is safe and how to word it; and that models we write ourselves (studio) are outside it. |
@@ -115,7 +152,7 @@ first (D-044); what follows keeps that decision safe to reverse.
    in the product or the repository; no Live2D trademarks in branding; and a
    record of where every third-party component comes from and under which
    licence (`stage/vendor/PATCHES.md`).
-4. Before the Kickstarter page goes live, ask a lawyer the six questions in
+4. Before the Kickstarter page goes live, ask a lawyer the seven questions in
    the table, with this document and the Ayagami and image2live2d READMEs
    attached, and do not advertise importing Live2D models until the Cubism
    Editor question is answered.
