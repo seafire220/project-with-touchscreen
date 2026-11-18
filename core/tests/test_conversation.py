@@ -323,6 +323,11 @@ class ConversationTest(unittest.TestCase):
         link.random_gestures(False)
         self.assertEqual(link.sent, [{"emotion": "happy", "intensity": 0.8}, {"gesture": "nod", "intensity": 1.0},
                                      {"random_gestures": False}])
+        link.sent.clear()
+        link.clock(23.5)
+        link.poke()
+        link.heard(1.7)
+        self.assertEqual(link.sent, [{"clock": 23.5}, {"poke": True}, {"heard": 1.0}])
         # A character with its own expressions shows the mapped one with the emotion, and none otherwise.
         link.sent.clear()
         link.emotion_map = {"sad": "F03"}

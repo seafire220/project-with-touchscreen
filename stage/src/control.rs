@@ -17,8 +17,15 @@
 //! {"perform": {"syllables": "eaoe", "events": [[0, "nod", 0.7]]}}
 //! {"syllable": 2}
 //! {"emotion": "happy", "expression": "Smile"}
+//! {"clock": 21.5}
+//! {"poke": true}
+//! {"heard": 0.4}
 //! {"quit": true}
 //! ```
+//!
+//! `clock` is the local time of day in hours (the character is sleepy at night); `poke` says someone
+//! is there (the button was pressed); `heard` is the loudness of the person speaking, 0 to 1, sent
+//! while the character listens.
 //!
 //! `emotion` changes the mood (how the character moves, its face, and which
 //! gestures it makes by itself); `gesture` plays one of the library's
@@ -66,6 +73,12 @@ pub enum Command {
 	Perform(crate::speech::Performance),
 	/// Syllable k of the sentence is being heard.
 	Syllable(usize),
+	/// The local time of day, in hours.
+	Clock(f32),
+	/// Someone is there.
+	Poke,
+	/// How loud the person speaking is, 0 to 1.
+	Heard(f32),
 	Quit,
 }
 
@@ -140,6 +153,16 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 			"mouth" => out.push(Command::Mouth(val.as_f64().ok_or("\"mouth\" must be a number")? as f32)),
 			"syllable" => out.push(Command::Syllable(val.as_u64().ok_or("\"syllable\" must be a number")? as usize)),
 			"perform" => out.push(Command::Perform(parse_performance(val)?)),
+			"clock" => {
+				let hour = val.as_f64().filter(|h| (0.0..24.0).contains(h)).ok_or("\"clock\" must be the hour, 0 to 24")?;
+				out.push(Command::Clock(hour as f32));
+			}
+			"poke" => {
+				if val.as_bool() == Some(true) {
+					out.push(Command::Poke);
+				}
+			}
+			"heard" => out.push(Command::Heard(val.as_f64().ok_or("\"heard\" must be a number")?.clamp(0.0, 1.0) as f32)),
 			"state" => {
 				let s = val.as_str().ok_or("\"state\" must be a string")?;
 				out.push(Command::State(State::parse(s).ok_or(format!("unknown state '{s}'"))?));
@@ -301,6 +324,10 @@ mod tests {
 		let (at, commands) = parse_line(r#"{"at": 1.5, "mouth": 1, "state": "speaking"}"#).unwrap();
 		assert_eq!(at, Some(1.5));
 		assert_eq!(commands.len(), 2);
+		assert_eq!(parse_line(r#"{"clock": 21.5}"#).unwrap().1, vec![Command::Clock(21.5)]);
+		assert!(parse_line(r#"{"clock": 25}"#).is_err());
+		assert_eq!(parse_line(r#"{"poke": true}"#).unwrap().1, vec![Command::Poke]);
+		assert_eq!(parse_line(r#"{"heard": 1.7}"#).unwrap().1, vec![Command::Heard(1.0)]);
 	}
 
 	#[test]

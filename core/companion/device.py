@@ -79,6 +79,19 @@ class Device:
             if hasattr(self.stage, "random_gestures"):
                 self.stage.random_gestures(self.store.settings()["conversation"].get("random_gestures", True))
             self.use_emotion_map()
+            self.tell_the_time()
+
+    def tell_the_time(self):
+        """Tell the stage the local time of day (the character is sleepy at night)."""
+        if hasattr(self.stage, "clock"):
+            now = time.localtime()
+            self.stage.clock(now.tm_hour + now.tm_min / 60.0 + now.tm_sec / 3600.0)
+
+    async def clock_watch(self, every=600.0):
+        """Keep the stage's time of day right (the clock may change, or be set, while it runs)."""
+        while True:
+            await asyncio.sleep(every)
+            self.tell_the_time()
 
     async def stage_watch(self, patience=25.0):
         """If the character cannot be shown (the stage keeps failing to start), show a card instead.
@@ -387,6 +400,8 @@ class Device:
     def button(self):
         """One press. Interrupts speech; otherwise turns listening on or off (or ends a push-to-talk recording)."""
         mode = self.store.settings()["listening"].get("mode", "auto")
+        if hasattr(self.stage, "poke"):
+            self.stage.poke()                 # someone is there
         if self.conversation is not None and self.conversation.busy:
             self.interrupt()
             self.emit("button", {"did": "interrupt"})
@@ -526,6 +541,7 @@ class Device:
         if isinstance(self.stage, StageLink):
             asyncio.ensure_future(self.stage_watch())
         asyncio.ensure_future(self.memory_watch())
+        asyncio.ensure_future(self.clock_watch())
 
     # ----- Wi-Fi
     async def network_watch(self, wait=40.0, retry=180.0, busy=120.0):

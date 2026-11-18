@@ -314,8 +314,16 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         r = await self.client.post("/api/button", headers=H)
         self.assertTrue((await r.json())["listening"])
         self.assertEqual(self.stage.states()[-1], "listening")
+        self.assertIn({"poke": True}, self.stage.commands, "someone is there")
         r = await self.client.post("/api/button", headers=H)
         self.assertFalse((await r.json())["listening"])
+
+    async def test_the_stage_is_told_the_time_of_day_when_ready(self):
+        self.device._stage_event({"event": "ready", "gestures": []})
+        clocks = [c["clock"] for c in self.stage.commands if "clock" in c]
+        now = time.localtime()
+        self.assertEqual(len(clocks), 1)
+        self.assertAlmostEqual(clocks[0], now.tm_hour + now.tm_min / 60.0, delta=0.05)
 
     async def test_timers_are_set_and_rung(self):
         self.device.action({"kind": "timer", "seconds": 0.05, "label": "tea"})

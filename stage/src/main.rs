@@ -8,6 +8,7 @@
 mod behaviour;
 mod capture;
 mod control;
+mod director;
 mod live2d;
 mod mapping;
 mod motion;
@@ -217,6 +218,7 @@ struct StageApp {
 	motion: Motion,
 	/// The sentence being said: its mouth shapes and the movements tied to its words.
 	speech: speech::Speech,
+	director: director::Director,
 	/// The model's own expressions and how much each shows (Live2D-format models).
 	expressions: Vec<live2d::Expression>,
 	expression_weights: Vec<(smooth::Spring, f32)>,
@@ -262,6 +264,15 @@ impl StageApp {
 		}
 	}
 
+	/// Play the director's reactions (looking up, waking, greeting).
+	fn react(&mut self, reactions: &[&'static str]) {
+		for name in reactions {
+			if self.motion.react(name) {
+				self.events.emit(json!({"event": "gesture", "name": name, "cause": "reaction"}));
+			}
+		}
+	}
+
 	fn handle(&mut self, command: Command) {
 		match command {
 			Command::Mouth(level) => self.behaviour.set_mouth(level),
@@ -272,8 +283,16 @@ impl StageApp {
 				if state != self.behaviour.state() {
 					self.behaviour.set_state(state);
 					self.events.emit(json!({"event": "state", "state": state.name()}));
+					let reactions = self.director.on_state(state);
+					self.react(&reactions);
 				}
 			}
+			Command::Clock(hour) => self.director.set_clock(hour),
+			Command::Poke => {
+				let reactions = self.director.poke();
+				self.react(&reactions);
+			}
+			Command::Heard(level) => self.director.hear(level),
 			Command::Look(x, y) => self.behaviour.set_look(x, y),
 			Command::Blink => self.behaviour.blink_now(),
 			Command::Set(name, value, ease) => {
@@ -436,8 +455,16 @@ impl App for StageApp {
 			self.handle(command);
 		}
 
+		let direction = self.director.update(dt);
+		let smooth_eyelids = matches!(self.puppet, Puppet::Live2d(_));
+		self.behaviour.set_smooth_eyelids(smooth_eyelids);
+		self.motion.set_smooth_eyelids(smooth_eyelids);
+		self.motion.set_idle(&direction.idle, direction.mood_share);
+		self.motion.set_pace(direction.pace);
+		self.motion.set_resting(direction.resting);
 		let (energy, beats) = self.motion.style();
-		self.behaviour.set_style(energy, beats);
+		self.behaviour.set_style(energy * direction.liveliness, beats);
+		self.behaviour.set_drowsy(direction.drowsy);
 		let mut pose = self.behaviour.update(dt);
 		if let Some((g, cause)) = self.motion.apply(dt, &mut pose, self.behaviour.state(), !self.opts.still) {
 			self.events.emit(json!({"event": "gesture", "name": g, "cause": cause}));
@@ -508,6 +535,14 @@ impl App for StageApp {
 				"state": self.behaviour.state().name(),
 				"mood": self.motion.mood(),
 				"playing": self.motion.playing(),
+				"drives": {
+					"hour": (self.director.hour() * 100.0).round() / 100.0,
+					"energy": (self.director.energy * 100.0).round() / 100.0,
+					"attention": (self.director.attention * 100.0).round() / 100.0,
+					"boredom": (self.director.boredom * 100.0).round() / 100.0,
+					"sleepiness": (self.director.sleepiness * 100.0).round() / 100.0,
+					"dozing": self.director.dozing,
+				},
 				// Average milliseconds per frame on the processor: moving the character, and
 				// handing its drawing to the graphics chip (which then draws in parallel).
 				"update_ms": per_frame(self.update_time),
@@ -614,6 +649,7 @@ fn run(opts: Options) -> Result<(), String> {
 		behaviour,
 		motion,
 		speech: speech::Speech::new(),
+		director: director::Director::new(),
 		expressions,
 		expression_weights,
 		opts,

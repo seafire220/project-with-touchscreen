@@ -30,9 +30,10 @@ use crate::behaviour::{Pose, State};
 use crate::smooth::Spring;
 
 /// The controls moods and gestures may move, in `Pose` field names.
-pub const KEYS: [&str; 18] = [
+pub const KEYS: [&str; 20] = [
 	"head_yaw", "head_pitch", "head_roll", "body_yaw", "body_pitch", "body_roll", "gaze_x", "gaze_y", "brows",
 	"brow_form", "smile", "eye_smile", "cheek", "arm_left", "arm_right", "arm_left_b", "arm_right_b", "shoulders",
+	"mouth_open", "blink",
 ];
 
 fn slot<'a>(pose: &'a mut Pose, key: usize) -> &'a mut f32 {
@@ -54,12 +55,15 @@ fn slot<'a>(pose: &'a mut Pose, key: usize) -> &'a mut f32 {
 		"arm_right" => &mut pose.arm_right,
 		"arm_left_b" => &mut pose.arm_left_b,
 		"arm_right_b" => &mut pose.arm_right_b,
+		"mouth_open" => &mut pose.mouth_open,
+		"blink" => &mut pose.blink,
 		_ => &mut pose.shoulders,
 	}
 }
 
 /// Parts of the body a gesture can occupy.
-pub const CHANNELS: [&str; 7] = ["head", "torso", "eyes", "brows", "expression", "arm_left", "arm_right"];
+pub const CHANNELS: [&str; 9] =
+	["head", "torso", "eyes", "brows", "expression", "arm_left", "arm_right", "mouth", "eyelids"];
 
 /// The channel a control belongs to.
 fn channel_of(key: usize) -> usize {
@@ -70,6 +74,8 @@ fn channel_of(key: usize) -> usize {
 		"brows" | "brow_form" => 3,
 		"smile" | "eye_smile" | "cheek" => 4,
 		"arm_left" | "arm_left_b" => 5,
+		"mouth_open" => 7,
+		"blink" => 8,
 		_ => 6,
 	}
 }
@@ -80,11 +86,14 @@ const HOLD_LEVEL: f32 = 0.25;
 /// How much of the living motion (drifting, breathing, beats) gives way on a channel a gesture holds.
 const GIVE_WAY: f32 = 0.7;
 
-/// Who started a gesture, by precedence: one asked for (by the language model or the settings page)
-/// over one the words call for or a new mood brings, over one the mood starts by itself.
+/// Who started a gesture, by precedence: a reaction (looking up when spoken to, waking with a start);
+/// one asked for (by the language model or the settings page); one the words call for or a new mood
+/// brings; one the mood starts by itself; an idle action (a stretch, a look around).
+pub const REACTION: u8 = 4;
 pub const ASKED: u8 = 3;
 pub const SPEECH: u8 = 2;
 const MOOD: u8 = 1;
+const IDLE: u8 = 0;
 
 /// The budget for the gestures the character starts by itself (not asked for), per minute: all of
 /// them; big ones; and those the mood starts with nothing said to prompt them.
@@ -92,6 +101,8 @@ const MINUTE: f32 = 60.0;
 const OWN_PER_MINUTE: usize = 10;
 const BIG_PER_MINUTE: usize = 2;
 const MOOD_PER_MINUTE: usize = 6;
+/// Idle actions have their own budget: nobody is talking, so they never crowd the conversation.
+const IDLE_PER_MINUTE: usize = 4;
 /// A gesture the mood picks is less likely again until this many seconds have passed (big ones longer),
 /// and the one it picked last is much less likely next.
 const FRESH_SMALL: f32 = 20.0;
@@ -110,7 +121,18 @@ pub enum Start {
 
 /// Controls that run from 0 to 1; the rest run from -1 to 1.
 fn one_sided(key: usize) -> bool {
-	matches!(KEYS[key], "eye_smile" | "cheek")
+	matches!(KEYS[key], "eye_smile" | "cheek" | "mouth_open" | "blink")
+}
+
+/// What a clip is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+	/// Offered to the language model, started by the words or the mood.
+	Gesture,
+	/// Something the character does by itself when nobody is talking.
+	Idle,
+	/// A quick response to something that happens.
+	Reaction,
 }
 
 fn key_index(name: &str) -> Result<usize, String> {
@@ -125,8 +147,9 @@ pub struct Clip {
 	tracks: Vec<(usize, Vec<(f32, f32)>)>,
 	pub duration: f32,
 	/// Channels it holds while it plays, and all it moves (one bit per channel).
-	pub holds: u8,
-	pub touches: u8,
+	pub holds: u16,
+	pub touches: u16,
+	pub kind: Kind,
 	/// A big movement (a wave, a bow): rarer, and at most a couple a minute unless asked for.
 	pub big: bool,
 }
@@ -179,7 +202,17 @@ impl Library {
 	pub fn parse(text: &str) -> Result<Self, String> {
 		let root: Value = serde_json::from_str(text).map_err(|e| format!("motion library: {e}"))?;
 		let mut clips = Vec::new();
-		for (name, g) in root.get("gestures").and_then(Value::as_object).ok_or("motion library has no gestures")? {
+		let gestures = root.get("gestures").and_then(Value::as_object).ok_or("motion library has no gestures")?;
+		let empty = serde_json::Map::new();
+		let actions = root.get("actions").and_then(Value::as_object).unwrap_or(&empty);
+		let all = gestures.iter().map(|g| (g, Kind::Gesture)).chain(actions.iter().filter(|(n, _)| !n.starts_with('_')).map(|g| (g, Kind::Idle)));
+		for ((name, g), section) in all {
+			let kind = match (section, g.get("kind").and_then(Value::as_str)) {
+				(Kind::Gesture, _) => Kind::Gesture,
+				(_, Some("idle")) => Kind::Idle,
+				(_, Some("reaction")) => Kind::Reaction,
+				_ => return Err(format!("action {name}: 'kind' must be idle or reaction")),
+			};
 			let needs = g
 				.get("needs")
 				.and_then(Value::as_array)
@@ -210,10 +243,10 @@ impl Library {
 				let c = channel_of(*key);
 				peak[c] = pts.iter().fold(peak[c], |m, p| m.max(p.1.abs()));
 			}
-			let touches = (0..CHANNELS.len()).filter(|c| peak[*c] > 0.0).fold(0u8, |m, c| m | 1 << c);
+			let touches = (0..CHANNELS.len()).filter(|c| peak[*c] > 0.0).fold(0u16, |m, c| m | 1 << c);
 			let holds = match g.get("holds").and_then(Value::as_array) {
 				Some(list) => {
-					let mut m = 0u8;
+					let mut m = 0u16;
 					for c in list {
 						let c = c.as_str().and_then(|n| CHANNELS.iter().position(|x| *x == n));
 						m |= 1 << c.ok_or(format!("gesture {name}: 'holds' names channels: {}", CHANNELS.join(", ")))?;
@@ -221,14 +254,14 @@ impl Library {
 					m
 				}
 				None => {
-					let strong = (0..CHANNELS.len()).filter(|c| peak[*c] >= HOLD_LEVEL).fold(0u8, |m, c| m | 1 << c);
+					let strong = (0..CHANNELS.len()).filter(|c| peak[*c] >= HOLD_LEVEL).fold(0u16, |m, c| m | 1 << c);
 					// At least the channel it moves most.
 					let most = (0..CHANNELS.len()).max_by(|a, b| peak[*a].total_cmp(&peak[*b])).unwrap_or(0);
 					if strong == 0 && peak[most] > 0.0 { 1 << most } else { strong }
 				}
 			};
 			let big = g.get("big").and_then(Value::as_bool).unwrap_or(false);
-			clips.push(Clip { name: name.clone(), needs, tracks, duration, holds, touches, big });
+			clips.push(Clip { name: name.clone(), needs, tracks, duration, holds, touches, kind, big });
 		}
 		let mut moods = Vec::new();
 		for (name, m) in root.get("moods").and_then(Value::as_object).ok_or("motion library has no moods")? {
@@ -287,7 +320,7 @@ fn fade(since: Option<f32>, t: f32) -> f32 {
 
 impl Playing {
 	/// The channels it still holds.
-	fn holding(&self, clip: &Clip) -> u8 {
+	fn holding(&self, clip: &Clip) -> u16 {
 		if self.cut.is_some() {
 			return 0;
 		}
@@ -326,6 +359,16 @@ pub struct Motion {
 	/// When each gesture last started, and the mood's last pick, for its choice of fresh ones.
 	last_start: Vec<f32>,
 	last_pick: Option<usize>,
+	/// Idle actions to choose from while nobody is talking, with their weights (from the director).
+	idle_pool: Vec<(usize, f32)>,
+	/// How long the gaps between the character's own gestures are, against the mood's usual.
+	pace: f32,
+	/// Asleep: no gestures of its own.
+	resting: bool,
+	mood_share: f32,
+	/// Whether the eyes can rest half closed; if not, a gesture's eyelids are open or shut, passing
+	/// quickly between (see `Behaviour::set_smooth_eyelids`).
+	smooth_eyelids: bool,
 }
 
 /// Asked-for gestures waiting their turn, at most.
@@ -360,6 +403,11 @@ impl Motion {
 			recent: VecDeque::new(),
 			last_start: Vec::new(),
 			last_pick: None,
+			idle_pool: Vec::new(),
+			pace: 1.0,
+			resting: false,
+			mood_share: 0.5,
+			smooth_eyelids: true,
 		};
 		m.last_start = vec![f32::NEG_INFINITY; m.lib.clips.len()];
 		m.next_random = m.random_gap(1.0);
@@ -372,10 +420,16 @@ impl Motion {
 		names
 	}
 
-	/// Gestures this character can make.
+	/// Gestures this character can make (not its idle actions or reactions).
 	pub fn gestures(&self) -> Vec<String> {
-		let mut names: Vec<String> =
-			self.lib.clips.iter().zip(&self.available).filter(|(_, ok)| **ok).map(|(c, _)| c.name.clone()).collect();
+		let mut names: Vec<String> = self
+			.lib
+			.clips
+			.iter()
+			.zip(&self.available)
+			.filter(|(c, ok)| **ok && c.kind == Kind::Gesture)
+			.map(|(c, _)| c.name.clone())
+			.collect();
 		names.sort();
 		names
 	}
@@ -386,6 +440,41 @@ impl Motion {
 
 	pub fn set_random(&mut self, on: bool) {
 		self.random = on;
+	}
+
+	/// The idle actions to choose from while nobody is talking, by name and weight, and how much the
+	/// mood's own gestures count among them.
+	pub fn set_idle(&mut self, pool: &[(&str, f32)], mood_share: f32) {
+		self.mood_share = mood_share.clamp(0.0, 1.0);
+		self.idle_pool = pool
+			.iter()
+			.filter_map(|(name, w)| {
+				let i = self.lib.clips.iter().position(|c| c.name == *name && c.kind == Kind::Idle)?;
+				(self.available[i] && *w > 0.0).then_some((i, *w))
+			})
+			.collect();
+	}
+
+	/// Gaps between the character's own gestures, against the mood's usual (2 is half as often).
+	pub fn set_pace(&mut self, pace: f32) {
+		self.pace = pace.clamp(0.25, 4.0);
+	}
+
+	/// Asleep: the character starts no gestures of its own.
+	pub fn set_resting(&mut self, resting: bool) {
+		self.resting = resting;
+	}
+
+	pub fn set_smooth_eyelids(&mut self, smooth: bool) {
+		self.smooth_eyelids = smooth;
+	}
+
+	/// A reaction, now, over anything else. Returns whether it started.
+	pub fn react(&mut self, name: &str) -> bool {
+		match self.lib.clips.iter().position(|c| c.name == name) {
+			Some(i) if self.available[i] => self.begin(i, 1.0, REACTION) == Start::Now,
+			_ => false,
+		}
 	}
 
 	/// Whether the mood shows on the face (off while a model's own expression does).
@@ -402,7 +491,7 @@ impl Motion {
 
 	fn random_gap(&mut self, scale: f32) -> f32 {
 		let (lo, hi) = self.lib.moods[self.mood].random_every;
-		self.t + scale * (lo + self.next_random_number() * (hi - lo))
+		self.t + scale * self.pace * (lo + self.next_random_number() * (hi - lo))
 	}
 
 	/// Change mood; plays its entry gesture if it has one (and the body is free for it). Returns the
@@ -454,13 +543,21 @@ impl Motion {
 		if priority >= ASKED {
 			return Ok(());
 		}
-		let (mut own, mut big, mut mood) = (0, 0, 0);
+		let (mut own, mut big, mut mood, mut idle) = (0, 0, 0, 0);
 		for &(at, p, b) in &self.recent {
-			if self.t - at < MINUTE && p < ASKED {
-				own += 1;
-				big += b as usize;
-				mood += (p == MOOD) as usize;
+			if self.t - at >= MINUTE || p >= ASKED {
+				continue;
 			}
+			if p == IDLE {
+				idle += 1;
+				continue;
+			}
+			own += 1;
+			big += b as usize;
+			mood += (p == MOOD) as usize;
+		}
+		if priority == IDLE {
+			return if idle >= IDLE_PER_MINUTE { Err("enough idle actions this minute") } else { Ok(()) };
 		}
 		if own >= OWN_PER_MINUTE {
 			return Err("enough gestures this minute");
@@ -507,7 +604,7 @@ impl Motion {
 			}
 		}
 		// And it leaves alone the channels the others still hold.
-		let others = self.playing.iter().fold(0u8, |m, p| m | p.holding(&self.lib.clips[p.clip]));
+		let others = self.playing.iter().fold(0u16, |m, p| m | p.holding(&self.lib.clips[p.clip]));
 		let mut released = [None; CHANNELS.len()];
 		for (c, r) in released.iter_mut().enumerate() {
 			if others & self.lib.clips[i].touches & (1 << c) != 0 {
@@ -577,11 +674,22 @@ impl Motion {
 				}
 			}
 		}
-		if self.random && idle_motion && self.playing.is_empty() && self.t - self.last_end > RANDOM_REST && self.t >= self.next_random {
-			// Listening calls for small responses only; idling for fewer gestures.
+		if self.random
+			&& idle_motion
+			&& !self.resting
+			&& self.playing.is_empty()
+			&& self.t - self.last_end > RANDOM_REST
+			&& self.t >= self.next_random
+		{
+			// Listening calls for small responses only; idling for fewer gestures, mixed with idle actions.
 			let (pool, scale): (Vec<(String, f32)>, f32) = match state {
 				State::Listening => (vec![("nod".into(), 2.0), ("tilt".into(), 1.0)], 1.0),
-				State::Idle => (mood_gestures.clone(), 1.5),
+				State::Idle => {
+					let share = self.mood_share;
+					let mut pool: Vec<(String, f32)> = mood_gestures.iter().map(|(g, w)| (g.clone(), w * share)).collect();
+					pool.extend(self.idle_pool.iter().map(|(i, w)| (self.lib.clips[*i].name.clone(), *w)));
+					(pool, 1.5)
+				}
 				_ => (mood_gestures, 1.0),
 			};
 			// Gestures it can make, less likely if made lately.
@@ -600,9 +708,10 @@ impl Motion {
 				let mut pick = self.next_random_number() * total;
 				for &(i, w) in &pool {
 					if pick < w {
-						let strength = if state == State::Listening { 0.6 } else { k.max(0.5) };
-						if self.begin(i, strength, MOOD) == Start::Now {
-							started = Some((self.lib.clips[i].name.clone(), "mood"));
+						let idle = self.lib.clips[i].kind == Kind::Idle;
+						let strength = if state == State::Listening { 0.6 } else if idle { 1.0 } else { k.max(0.5) };
+						if self.begin(i, strength, if idle { IDLE } else { MOOD }) == Start::Now {
+							started = Some((self.lib.clips[i].name.clone(), if idle { "idle" } else { "mood" }));
 							self.last_pick = Some(i);
 						}
 						break;
@@ -628,6 +737,11 @@ impl Motion {
 				}
 			}
 			clip.sample(self.t - p.start, &mut add, &weights);
+		}
+		if !self.smooth_eyelids {
+			let lids = KEYS.iter().position(|k| *k == "blink").unwrap_or(0);
+			let u = ((add[lids] - 0.35) / 0.1).clamp(0.0, 1.0);
+			add[lids] = u * u * (3.0 - 2.0 * u);
 		}
 		let step = dt / CUT_FADE;
 		for (busy, target) in self.busy.iter_mut().zip(held) {
@@ -996,5 +1110,17 @@ mod tests {
 		let (after, _) = run(&mut m, 0.5, State::Speaking);
 		let jump = (after[0].head_roll - before.last().unwrap().head_roll).abs();
 		assert!(jump < 0.08, "{jump}");
+	}
+
+	#[test]
+	fn eyelids_that_swap_drawings_are_open_or_shut_in_gestures() {
+		let mut m = Motion::new(Library::builtin(), all, 1);
+		m.set_random(false);
+		m.set_smooth_eyelids(false);
+		m.play("yawn", 1.0).unwrap();
+		let (poses, _) = run(&mut m, 3.0, State::Idle);
+		let between = poses.iter().filter(|p| p.blink > 0.05 && p.blink < 0.95).count() as f32 / poses.len() as f32;
+		assert!(between < 0.12, "{between}");
+		assert!(poses.iter().any(|p| p.blink > 0.99), "shut while it yawns");
 	}
 }

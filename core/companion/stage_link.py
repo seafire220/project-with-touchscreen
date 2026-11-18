@@ -116,6 +116,18 @@ class StageLink:
         """Let the mood start gestures by itself, or not."""
         self.send({"random_gestures": bool(on)})
 
+    def clock(self, hour):
+        """The local time of day, in hours: the character is livelier in the morning and sleepy at night."""
+        self.send({"clock": round(float(hour) % 24.0, 3)})
+
+    def poke(self):
+        """Someone is there (the button was pressed): a dozing character wakes, a lonely one brightens."""
+        self.send({"poke": True})
+
+    def heard(self, level):
+        """How loud the person speaking is, 0 to 1, while the character listens."""
+        self.send({"heard": round(min(1.0, max(0.0, float(level))), 3)})
+
     def load(self, puppet_path):
         """Ask the stage to show another character (the stage is restarted with it by the service manager)."""
         self.send({"quit": True})

@@ -158,6 +158,14 @@ pub struct Behaviour {
 	/// From the mood: how lively idle motion is, and how strong the beats.
 	style_energy: f32,
 	style_beats: f32,
+	/// 0 awake to 1 asleep (from the director): heavy eyelids, slow breathing, the head dropping.
+	drowsy: f32,
+	/// Whether the eyes can rest half closed. Characters made from a picture swap an open eye for a
+	/// closed one, which half way shows both; theirs blink longer and more often when drowsy instead.
+	smooth_eyelids: bool,
+	breath_phase: f32,
+	/// Leaning in a little while listening.
+	lean: Spring,
 }
 
 impl Behaviour {
@@ -201,6 +209,10 @@ impl Behaviour {
 			last_beat: -1.0,
 			style_energy: 1.0,
 			style_beats: 1.0,
+			drowsy: 0.0,
+			smooth_eyelids: true,
+			breath_phase: 0.0,
+			lean: spring(0.8),
 		};
 		b.next_blink = b.random_gap();
 		b
@@ -242,6 +254,16 @@ impl Behaviour {
 		self.style_beats = beats.clamp(0.0, 2.0);
 	}
 
+	/// How drowsy the character is, 0 awake to 1 asleep.
+	pub fn set_drowsy(&mut self, drowsy: f32) {
+		self.drowsy = drowsy.clamp(0.0, 1.0);
+	}
+
+	/// Whether the eyes can rest half closed (see `smooth_eyelids`).
+	pub fn set_smooth_eyelids(&mut self, smooth: bool) {
+		self.smooth_eyelids = smooth;
+	}
+
 	/// Where the character should look, each axis -1 to 1.
 	pub fn set_look(&mut self, x: f32, y: f32) {
 		self.look_target = (x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0));
@@ -269,7 +291,9 @@ impl Behaviour {
 	}
 
 	fn random_gap(&mut self) -> f32 {
-		(BLINK_MEDIAN_GAP * (BLINK_SPREAD * self.normal()).exp()).clamp(BLINK_MIN_GAP, BLINK_MAX_GAP)
+		// Drowsy eyes blink more often.
+		let often = 1.0 - 0.5 * self.drowsy;
+		(BLINK_MEDIAN_GAP * often * (BLINK_SPREAD * self.normal()).exp()).clamp(BLINK_MIN_GAP * often, BLINK_MAX_GAP)
 	}
 
 	fn blink_value(&mut self) -> f32 {
@@ -279,13 +303,16 @@ impl Behaviour {
 		let Some(start) = self.blink_started else {
 			return 0.0;
 		};
+		// Sleepy eyes blink slowly, and stay shut a while.
+		let slow = 1.0 + self.drowsy;
+		let (close, hold, open) = (BLINK_CLOSE * slow, BLINK_HOLD * (1.0 + 6.0 * self.drowsy), BLINK_OPEN * slow);
 		let e = self.t - start;
-		if e < BLINK_CLOSE {
-			e / BLINK_CLOSE
-		} else if e < BLINK_CLOSE + BLINK_HOLD {
+		if e < close {
+			e / close
+		} else if e < close + hold {
 			1.0
-		} else if e < BLINK_CLOSE + BLINK_HOLD + BLINK_OPEN {
-			1.0 - (e - BLINK_CLOSE - BLINK_HOLD) / BLINK_OPEN
+		} else if e < close + hold + open {
+			1.0 - (e - close - hold) / open
 		} else {
 			self.blink_started = None;
 			self.next_blink = self.t + self.random_gap();
@@ -357,7 +384,7 @@ impl Behaviour {
 			State::Thinking => (0.8, -0.08, (0.28, -0.22), -0.1, 0.0),
 			State::Speaking => (1.25, 0.0, (0.0, 0.0), 0.0, 0.08),
 		};
-		energy *= self.style_energy;
+		energy *= self.style_energy * (1.0 - 0.85 * self.drowsy);
 		if !self.idle_motion {
 			energy = 0.0;
 			self.energy = 0.0;
@@ -378,7 +405,8 @@ impl Behaviour {
 		}
 
 		if self.idle_motion {
-			if t >= self.next_gaze {
+			// Eyes too heavy to wander.
+			if t >= self.next_gaze && self.drowsy < 0.6 {
 				self.shift_gaze();
 			}
 			if t >= self.next_posture {
@@ -392,7 +420,7 @@ impl Behaviour {
 
 		// Eyes jump; the head follows part of the way.
 		let gx = self.gaze.0.update((self.gaze_target.0 + 0.8 * self.look.0).clamp(-1.0, 1.0), dt);
-		let gy = self.gaze.1.update((self.gaze_target.1 + 0.8 * self.look.1).clamp(-1.0, 1.0), dt);
+		let gy = self.gaze.1.update((self.gaze_target.1 + 0.8 * self.look.1 - 0.2 * self.drowsy).clamp(-1.0, 1.0), dt);
 		let posture: Vec<f32> = (0..3).map(|i| self.posture[i].update(self.posture_target[i] * self.energy, dt)).collect();
 		let nod = self.nod.update(if t < self.nod_until { -self.nod_depth } else { 0.0 }, dt);
 
@@ -401,7 +429,9 @@ impl Behaviour {
 			+ (gx - 0.8 * self.look.0) * 0.25;
 		let pitch = e * (0.07 * (t * 0.43 + 0.6).sin() + 0.03 * (t * 1.07).sin()) + posture[1] + self.look.1 * 0.6
 			+ (gy - 0.8 * self.look.1) * 0.2;
-		let roll = e * 0.07 * (t * 0.37 + 2.1).sin() + posture[2] + self.tilt;
+		let roll = e * 0.07 * (t * 0.37 + 2.1).sin() + posture[2] + self.tilt + 0.08 * self.drowsy;
+		// A drowsy head drops.
+		let pitch = pitch - 0.3 * self.drowsy;
 		let head_yaw = self.head[0].update(yaw, dt);
 		// Nods are quick and deliberate: on top of the smoothed head, with their own short spring.
 		let head_pitch = self.head[1].update(pitch, dt) + nod;
@@ -409,9 +439,12 @@ impl Behaviour {
 
 		let brow_target = if self.idle_motion && t < self.brow_until { self.brow_lift } else { state_brows * e.min(1.0) };
 		let brows = self.brows.update(brow_target, dt);
-		let smile = self.smile.update(if self.idle_motion { state_smile } else { 0.0 }, dt);
+		let smile = self.smile.update(if self.idle_motion { state_smile * (1.0 - self.drowsy) } else { 0.0 }, dt);
 
-		let breath = if self.idle_motion { 0.5 - 0.5 * (TAU * t / BREATH_PERIOD).cos() } else { 0.0 };
+		// Breathing slows as it gets drowsy (a phase, so the change never jumps).
+		self.breath_phase += TAU * dt / (BREATH_PERIOD * (1.0 + 0.7 * self.drowsy));
+		let breath = if self.idle_motion { 0.5 - 0.5 * self.breath_phase.cos() } else { 0.0 };
+		let lean = self.lean.update(if self.idle_motion && self.state == State::Listening { 0.07 } else { 0.0 }, dt);
 		let fade = (-dt / ARM_ACCENT_FADE).exp();
 		for accent in &mut self.arm_accent {
 			*accent *= fade;
@@ -425,14 +458,24 @@ impl Behaviour {
 			dt,
 		);
 
+		// Heavy eyelids: as far closed as it is drowsy, at least; eyes that cannot rest half closed stay
+		// open until it is nearly asleep, then close.
+		let heavy = if !self.idle_motion {
+			0.0
+		} else if self.smooth_eyelids {
+			self.drowsy
+		} else {
+			((self.drowsy - 0.85) / 0.05).clamp(0.0, 1.0)
+		};
+		let blink = self.blink_value().max(heavy);
 		Pose {
 			mouth_open: self.mouth,
-			blink: self.blink_value(),
+			blink,
 			head_yaw: head_yaw.clamp(-1.0, 1.0),
 			head_pitch: head_pitch.clamp(-1.0, 1.0),
 			head_roll: head_roll.clamp(-1.0, 1.0),
 			body_yaw: e * 0.10 * (t * 0.31 + 0.9).sin() + 0.2 * posture[0],
-			body_pitch: e * 0.04 * (t * 0.47 + 1.3).sin(),
+			body_pitch: e * 0.04 * (t * 0.47 + 1.3).sin() + lean,
 			body_roll: e * 0.05 * (t * 0.29).sin(),
 			breath,
 			gaze_x: gx,
@@ -603,5 +646,29 @@ mod tests {
 		assert!((3.0..4.6).contains(&mean), "{mean}");
 		assert!(gaps.iter().any(|g| *g < 2.2) && gaps.iter().any(|g| *g > 5.5), "short and long gaps both occur");
 		assert!(gaps.iter().all(|g| (BLINK_MIN_GAP..=BLINK_MAX_GAP).contains(g)));
+	}
+
+	#[test]
+	fn drowsy_eyes_droop_or_blink_slowly_by_the_kind_of_eyelid() {
+		let mut smooth = Behaviour::new(5);
+		smooth.set_drowsy(0.4);
+		assert!(run(&mut smooth, 20.0).iter().all(|p| p.blink >= 0.4 - 1e-6), "a drawn eyelid rests half closed");
+		let mut swapped = Behaviour::new(5);
+		swapped.set_smooth_eyelids(false);
+		let awake = run(&mut swapped, 60.0).iter().filter(|p| p.blink > 0.5).count();
+		swapped.set_drowsy(0.4);
+		let drowsy = run(&mut swapped, 60.0);
+		// Half closed only in passing, as in any blink: never longer than a slow blink takes.
+		let mut longest = 0;
+		let mut run_length = 0;
+		for p in &drowsy {
+			run_length = if p.blink > 0.05 && p.blink < 0.95 { run_length + 1 } else { 0 };
+			longest = longest.max(run_length);
+		}
+		assert!((longest as f32) / 60.0 < 0.2, "an eye that swaps drawings never rests half closed: {longest} frames");
+		let closed = drowsy.iter().filter(|p| p.blink > 0.5).count();
+		assert!(closed > awake * 2, "it blinks longer and more often instead: {closed} against {awake}");
+		swapped.set_drowsy(0.97);
+		assert!(run(&mut swapped, 2.0).last().unwrap().blink > 0.99, "asleep, shut");
 	}
 }

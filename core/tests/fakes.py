@@ -90,5 +90,14 @@ class FakeStage:
     def gesture(self, name):
         self.commands.append({"gesture": name})
 
+    def clock(self, hour):
+        self.commands.append({"clock": round(hour, 3)})
+
+    def poke(self):
+        self.commands.append({"poke": True})
+
+    def heard(self, level):
+        self.commands.append({"heard": level})
+
     def states(self):
         return [c["state"] for c in self.commands if "state" in c]
