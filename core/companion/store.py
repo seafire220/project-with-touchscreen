@@ -19,7 +19,10 @@ DEFAULT_SETTINGS = {
     "stt": {"provider": "local", "model": "", "base_url": "", "language": "en"},
     "tts": {"provider": "", "model": "", "voice": "", "base_url": ""},
     "listening": {"mode": "auto", "end_silence": 0.8, "max_turn": 30.0, "voice_interrupt": False},
-    "conversation": {"history_turns": 12, "memory": True, "web_search": True},
+    # gestures: the character may choose gestures as it speaks; random_gestures: its mood starts
+    # gestures by itself now and then.
+    "conversation": {"history_turns": 12, "memory": True, "web_search": True, "gestures": True,
+                     "random_gestures": True},
     "active_character": "",
     # Which drawing to show when a character has both: "live2d" (the Live2D-format copy, played
     # with Ayagami) or "inochi2d" (the Inochi2D puppet). Either is used when it is the only one.

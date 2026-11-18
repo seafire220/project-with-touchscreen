@@ -29,10 +29,15 @@ pub enum Control {
 	ArmLeft,
 	ArmRight,
 	Shoulders,
+	EyeSmileLeft,
+	EyeSmileRight,
+	Cheek,
+	BrowFormLeft,
+	BrowFormRight,
 }
 
 impl Control {
-	pub const ALL: [Control; 18] = [
+	pub const ALL: [Control; 23] = [
 		Control::MouthOpen,
 		Control::BlinkLeft,
 		Control::BlinkRight,
@@ -51,6 +56,11 @@ impl Control {
 		Control::ArmLeft,
 		Control::ArmRight,
 		Control::Shoulders,
+		Control::EyeSmileLeft,
+		Control::EyeSmileRight,
+		Control::Cheek,
+		Control::BrowFormLeft,
+		Control::BrowFormRight,
 	];
 
 	pub fn key(self) -> &'static str {
@@ -73,13 +83,39 @@ impl Control {
 			Control::ArmLeft => "arm_left",
 			Control::ArmRight => "arm_right",
 			Control::Shoulders => "shoulders",
+			Control::EyeSmileLeft => "eye_smile_left",
+			Control::EyeSmileRight => "eye_smile_right",
+			Control::Cheek => "cheek",
+			Control::BrowFormLeft => "brow_form_left",
+			Control::BrowFormRight => "brow_form_right",
+		}
+	}
+
+	/// The pose field the control reads (motion clips are written in these).
+	pub fn pose_key(self) -> &'static str {
+		match self {
+			Control::MouthOpen => "mouth_open",
+			Control::BlinkLeft | Control::BlinkRight => "blink",
+			Control::BrowLeft | Control::BrowRight => "brows",
+			Control::EyeSmileLeft | Control::EyeSmileRight => "eye_smile",
+			Control::BrowFormLeft | Control::BrowFormRight => "brow_form",
+			other => other.key(),
 		}
 	}
 
 	/// Controls that run from -1 to 1, with 0 at the parameter's default; the
 	/// rest run from 0 to 1 across the parameter's range.
 	fn bipolar(self) -> bool {
-		!matches!(self, Control::MouthOpen | Control::BlinkLeft | Control::BlinkRight | Control::Breath)
+		!matches!(
+			self,
+			Control::MouthOpen
+				| Control::BlinkLeft
+				| Control::BlinkRight
+				| Control::Breath
+				| Control::EyeSmileLeft
+				| Control::EyeSmileRight
+				| Control::Cheek
+		)
 	}
 
 	fn value(self, pose: &Pose) -> f32 {
@@ -100,6 +136,9 @@ impl Control {
 			Control::ArmLeft => pose.arm_left,
 			Control::ArmRight => pose.arm_right,
 			Control::Shoulders => pose.shoulders,
+			Control::EyeSmileLeft | Control::EyeSmileRight => pose.eye_smile,
+			Control::Cheek => pose.cheek,
+			Control::BrowFormLeft | Control::BrowFormRight => pose.brow_form,
 		}
 	}
 
@@ -127,6 +166,11 @@ impl Control {
 			Control::ArmLeft => &[("ParamArmLA", 0, false)],
 			Control::ArmRight => &[("ParamArmRA", 0, false)],
 			Control::Shoulders => &[("ParamShoulderY", 0, false)],
+			Control::EyeSmileLeft => &[("ParamEyeLSmile", 0, false)],
+			Control::EyeSmileRight => &[("ParamEyeRSmile", 0, false)],
+			Control::Cheek => &[("ParamCheek", 0, false)],
+			Control::BrowFormLeft => &[("ParamBrowLForm", 0, false)],
+			Control::BrowFormRight => &[("ParamBrowRForm", 0, false)],
 		}
 	}
 }
@@ -240,6 +284,11 @@ impl Mapper {
 
 	pub fn targets(&self) -> &[(Control, Target)] {
 		&self.targets
+	}
+
+	/// Does a pose field reach one of the character's parameters?
+	pub fn drives(&self, pose_key: &str) -> bool {
+		self.targets.iter().any(|(c, _)| c.pose_key() == pose_key)
 	}
 
 	/// Compute parameter values for a pose. Returns (parameter name, value).

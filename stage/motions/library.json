@@ -1,0 +1,160 @@
+{
+ "about": "Moods and gestures on the stage's generic controls (docs/24-motion.md). Values are in control units: -1 to 1 (0 to 1 for eye_smile and cheek), turned into each character's own parameter values by its calibration. Gestures add to whatever the character is doing; keys are [seconds, value] and each track starts and ends at 0. A gesture is offered for a character only if every control in 'needs' maps to one of its parameters.",
+
+ "moods": {
+  "neutral": {
+   "offsets": {},
+   "energy": 1.0, "beats": 1.0,
+   "random_every": [7.0, 14.0],
+   "gestures": {"nod": 3, "tilt": 1, "sway": 1}
+  },
+  "happy": {
+   "offsets": {"smile": 0.8, "eye_smile": 0.5, "brows": 0.15, "head_roll": 0.08, "body_pitch": 0.05},
+   "energy": 1.3, "beats": 1.3,
+   "random_every": [4.0, 8.0],
+   "gestures": {"bounce": 3, "tilt": 2, "nod": 2, "sway": 2, "laugh": 1, "hands_on_hips": 1, "wave": 1},
+   "on_enter": "bounce"
+  },
+  "sad": {
+   "offsets": {"smile": -0.6, "brows": -0.35, "head_pitch": -0.25, "body_pitch": -0.1, "gaze_y": -0.2, "shoulders": -0.2},
+   "energy": 0.5, "beats": 0.6,
+   "random_every": [8.0, 15.0],
+   "gestures": {"sigh": 3, "look_down": 2}
+  },
+  "angry": {
+   "offsets": {"smile": -0.5, "brow_form": -0.9, "brows": -0.2, "head_pitch": -0.1, "body_pitch": 0.08},
+   "energy": 1.1, "beats": 1.5,
+   "random_every": [5.0, 10.0],
+   "gestures": {"shake": 2, "lean_in": 2, "hands_on_hips": 2, "emphatic_nod": 2}
+  },
+  "surprised": {
+   "offsets": {"brows": 0.9, "smile": 0.1, "head_pitch": 0.15, "body_pitch": -0.05},
+   "energy": 1.2, "beats": 1.1,
+   "random_every": [6.0, 12.0],
+   "gestures": {"lean_back": 2, "tilt": 1},
+   "on_enter": "surprise"
+  },
+  "embarrassed": {
+   "offsets": {"cheek": 1.0, "smile": 0.3, "eye_smile": 0.3, "head_pitch": -0.25, "head_yaw": 0.2, "gaze_x": 0.35, "gaze_y": -0.3},
+   "energy": 0.7, "beats": 0.8,
+   "random_every": [5.0, 10.0],
+   "gestures": {"look_away": 3, "tilt": 1, "sway": 1},
+   "on_enter": "look_away"
+  },
+  "thinking": {
+   "offsets": {"brows": 0.3, "head_roll": 0.15, "head_yaw": -0.12},
+   "energy": 0.8, "beats": 0.9,
+   "random_every": [5.0, 9.0],
+   "gestures": {"think": 3, "tilt": 2},
+   "on_enter": "think"
+  }
+ },
+
+ "gestures": {
+  "nod": {
+   "needs": ["head_pitch"],
+   "tracks": {"head_pitch": [[0, 0], [0.18, -0.4], [0.36, 0.1], [0.54, -0.25], [0.75, 0]]}
+  },
+  "emphatic_nod": {
+   "needs": ["head_pitch"],
+   "tracks": {"head_pitch": [[0, 0], [0.2, -0.5], [0.55, 0]], "brows": [[0, 0], [0.15, 0.3], [0.55, 0]]}
+  },
+  "shake": {
+   "needs": ["head_yaw"],
+   "tracks": {"head_yaw": [[0, 0], [0.18, -0.35], [0.38, 0.35], [0.58, -0.3], [0.76, 0.2], [0.92, 0]]}
+  },
+  "tilt": {
+   "needs": ["head_roll"],
+   "tracks": {"head_roll": [[0, 0], [0.4, 0.45], [1.2, 0.45], [1.6, 0]],
+              "head_yaw": [[0, 0], [0.4, -0.15], [1.2, -0.15], [1.6, 0]],
+              "brows": [[0, 0], [0.4, 0.2], [1.2, 0.2], [1.6, 0]]}
+  },
+  "bow": {
+   "needs": ["head_pitch", "body_pitch"],
+   "tracks": {"head_pitch": [[0, 0], [0.6, -0.7], [1.1, -0.7], [1.7, 0]],
+              "body_pitch": [[0, 0], [0.6, -0.6], [1.1, -0.6], [1.7, 0]]}
+  },
+  "bounce": {
+   "needs": ["body_pitch"],
+   "tracks": {"body_pitch": [[0, 0], [0.15, 0.25], [0.3, 0], [0.45, 0.2], [0.6, 0], [0.8, 0]],
+              "head_pitch": [[0, 0], [0.15, 0.1], [0.3, 0], [0.45, 0.08], [0.6, 0], [0.8, 0]],
+              "shoulders": [[0, 0], [0.15, 0.3], [0.3, 0], [0.45, 0.25], [0.6, 0], [0.8, 0]]}
+  },
+  "laugh": {
+   "needs": ["head_pitch"],
+   "tracks": {"head_pitch": [[0, 0], [0.2, 0.2], [0.35, 0.1], [0.5, 0.2], [0.65, 0.1], [0.8, 0.18], [1.2, 0]],
+              "shoulders": [[0, 0], [0.15, 0.4], [0.3, 0.1], [0.45, 0.4], [0.6, 0.1], [0.75, 0.35], [1.2, 0]],
+              "smile": [[0, 0], [0.15, 0.6], [1.0, 0.6], [1.2, 0]],
+              "eye_smile": [[0, 0], [0.15, 0.7], [1.0, 0.7], [1.2, 0]]}
+  },
+  "sigh": {
+   "needs": ["head_pitch"],
+   "tracks": {"shoulders": [[0, 0], [0.6, 0.4], [1.2, -0.3], [1.8, 0]],
+              "head_pitch": [[0, 0], [0.6, 0.05], [1.2, -0.3], [1.8, 0]],
+              "body_pitch": [[0, 0], [0.6, 0.05], [1.2, -0.12], [1.8, 0]]}
+  },
+  "sway": {
+   "needs": ["body_roll"],
+   "tracks": {"body_roll": [[0, 0], [0.8, 0.4], [1.8, -0.4], [2.8, 0.25], [3.4, 0]],
+              "head_roll": [[0, 0], [0.8, -0.15], [1.8, 0.15], [2.8, -0.1], [3.4, 0]]}
+  },
+  "look_away": {
+   "needs": ["head_yaw"],
+   "tracks": {"head_yaw": [[0, 0], [0.35, 0.45], [1.6, 0.45], [2.1, 0]],
+              "head_pitch": [[0, 0], [0.35, -0.2], [1.6, -0.2], [2.1, 0]],
+              "gaze_x": [[0, 0], [0.2, 0.6], [1.6, 0.6], [2.0, 0]]}
+  },
+  "look_down": {
+   "needs": ["head_pitch"],
+   "tracks": {"head_pitch": [[0, 0], [0.5, -0.4], [1.4, -0.4], [1.9, 0]],
+              "gaze_y": [[0, 0], [0.3, -0.5], [1.4, -0.5], [1.8, 0]]}
+  },
+  "lean_in": {
+   "needs": ["body_pitch"],
+   "tracks": {"body_pitch": [[0, 0], [0.45, 0.4], [1.0, 0.4], [1.5, 0]],
+              "head_pitch": [[0, 0], [0.45, 0.1], [1.0, 0.1], [1.5, 0]]}
+  },
+  "lean_back": {
+   "needs": ["body_pitch"],
+   "tracks": {"body_pitch": [[0, 0], [0.35, -0.35], [0.9, -0.35], [1.3, 0]],
+              "head_pitch": [[0, 0], [0.35, 0.25], [0.9, 0.25], [1.3, 0]],
+              "brows": [[0, 0], [0.3, 0.4], [0.9, 0.4], [1.3, 0]]}
+  },
+  "surprise": {
+   "needs": ["head_pitch"],
+   "tracks": {"head_pitch": [[0, 0], [0.12, 0.35], [0.5, 0.2], [0.9, 0]],
+              "body_pitch": [[0, 0], [0.12, -0.3], [0.5, -0.15], [0.9, 0]],
+              "brows": [[0, 0], [0.1, 0.6], [0.6, 0.3], [0.9, 0]],
+              "shoulders": [[0, 0], [0.1, 0.5], [0.5, 0.2], [0.9, 0]]}
+  },
+  "think": {
+   "needs": ["head_roll"],
+   "tracks": {"head_roll": [[0, 0], [0.5, 0.3], [1.8, 0.3], [2.3, 0]],
+              "head_yaw": [[0, 0], [0.5, -0.25], [1.8, -0.25], [2.3, 0]],
+              "gaze_x": [[0, 0], [0.3, -0.5], [1.8, -0.5], [2.2, 0]],
+              "gaze_y": [[0, 0], [0.3, 0.5], [1.8, 0.5], [2.2, 0]],
+              "brows": [[0, 0], [0.4, 0.25], [1.8, 0.25], [2.3, 0]]}
+  },
+  "hands_on_hips": {
+   "needs": ["arm_left", "arm_right"],
+   "tracks": {"arm_left": [[0, 0], [0.5, 0.35], [2.5, 0.35], [3.0, 0]],
+              "arm_right": [[0, 0], [0.5, 0.35], [2.5, 0.35], [3.0, 0]],
+              "shoulders": [[0, 0], [0.5, 0.2], [2.5, 0.2], [3.0, 0]],
+              "body_pitch": [[0, 0], [0.5, -0.05], [2.5, -0.05], [3.0, 0]]}
+  },
+  "wave": {
+   "needs": ["arm_right"],
+   "tracks": {"arm_right": [[0, 0], [0.35, 0.35], [0.6, 0.23], [0.85, 0.35], [1.1, 0.23], [1.35, 0.35], [1.8, 0]],
+              "head_roll": [[0, 0], [0.35, 0.15], [1.35, 0.15], [1.8, 0]],
+              "smile": [[0, 0], [0.3, 0.4], [1.4, 0.4], [1.8, 0]]}
+  },
+  "shrug": {
+   "needs": ["shoulders"],
+   "tracks": {"shoulders": [[0, 0], [0.3, 0.8], [0.8, 0.8], [1.1, 0]],
+              "arm_left": [[0, 0], [0.3, 0.2], [0.8, 0.2], [1.1, 0]],
+              "arm_right": [[0, 0], [0.3, 0.2], [0.8, 0.2], [1.1, 0]],
+              "brows": [[0, 0], [0.3, 0.4], [0.8, 0.4], [1.1, 0]],
+              "head_roll": [[0, 0], [0.3, 0.15], [0.8, 0.15], [1.1, 0]]}
+  }
+ }
+}

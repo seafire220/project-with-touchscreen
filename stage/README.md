@@ -49,6 +49,9 @@ One JSON object per line, on standard input or the local socket:
 | `{"blink": true}` | Blink now. |
 | `{"set": {"ParamCheek": 1}, "ease": 0.3}` | Drive named puppet parameters directly, blending in over `ease` seconds (default 0.25). Used for expressions and previews. A value can be a number, `[x, y]`, or `null` to hand the parameter back to the built-in behaviour. |
 | `{"clear": true}` | Hand every directly set parameter back to the built-in behaviour. |
+| `{"emotion": "happy", "intensity": 0.8}` | Change mood: how the character moves (liveliness, strength of its beats with speech), its resting posture and face, and the gestures it makes by itself. Blends in over about half a second. Moods: neutral, happy, sad, angry, surprised, embarrassed, thinking. |
+| `{"gesture": "wave"}` | Play a gesture from `motions/library.json` on top of whatever the character is doing (`intensity` optional). Only gestures the character has the parameters for are accepted; the `ready` event lists them. |
+| `{"random_gestures": false}` | Stop (or allow) gestures the mood starts by itself: now and then while speaking or idling, and small nods and tilts while listening. |
 | `{"quit": true}` | Exit. |
 
 Several fields can share one line.
@@ -59,9 +62,10 @@ One JSON object per line, on standard output and to socket clients:
 
 | Event | Meaning |
 |---|---|
-| `ready` | Character loaded. Gives its format (`inochi2d` or `live2d`), its parameters, which controls were connected to which parameters, and the OpenGL version in use. |
+| `ready` | Character loaded. Gives its format (`inochi2d` or `live2d`), its parameters, which controls were connected to which parameters, the moods and the gestures it can make, and the OpenGL version in use. |
 | `features` | Live2D-format models only, after `ready`: how many meshes use masks (and inverted masks), culling, additive, multiplicative and newer blend modes, parts drawn off screen, whether there is physics, and the canvas size. |
 | `warning` | Something that does not stop the character playing, such as a physics file that cannot be read. |
+| `emotion`, `gesture` | A mood took effect; a gesture started, with its cause (`command`, `emotion` for a mood's entry gesture, or `mood` for one it started by itself). |
 | `state` | The state changed. |
 | `heartbeat` | Once a second: frames per second, and the average milliseconds per frame spent moving the character (`update_ms`) and handing its drawing to the graphics chip (`draw_ms`). The supervisor restarts the stage if these stop. |
 | `error` | A command was not understood. |

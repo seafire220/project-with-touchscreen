@@ -70,6 +70,12 @@ pub struct Pose {
 	pub arm_right: f32,
 	/// -1 to 1: shoulders lowered or raised.
 	pub shoulders: f32,
+	/// 0 to 1: smiling eyes.
+	pub eye_smile: f32,
+	/// 0 to 1: blush.
+	pub cheek: f32,
+	/// -1 angry to 1 worried: the brows' shape.
+	pub brow_form: f32,
 }
 
 const BLINK_CLOSE: f32 = 0.07;
@@ -144,6 +150,9 @@ pub struct Behaviour {
 	next_arm: usize,
 	loudness: f32,
 	last_beat: f32,
+	/// From the mood: how lively idle motion is, and how strong the beats.
+	style_energy: f32,
+	style_beats: f32,
 }
 
 impl Behaviour {
@@ -185,6 +194,8 @@ impl Behaviour {
 			next_arm: 0,
 			loudness: 0.0,
 			last_beat: -1.0,
+			style_energy: 1.0,
+			style_beats: 1.0,
 		};
 		b.next_blink = b.random_gap();
 		b
@@ -218,6 +229,12 @@ impl Behaviour {
 	/// Turn idle movement on or off. Mouth, commanded blinks and looking still work.
 	pub fn set_idle_motion(&mut self, on: bool) {
 		self.idle_motion = on;
+	}
+
+	/// How the current mood moves: idle liveliness and beat strength, 1 for usual.
+	pub fn set_style(&mut self, energy: f32, beats: f32) {
+		self.style_energy = energy.clamp(0.0, 2.0);
+		self.style_beats = beats.clamp(0.0, 2.0);
 	}
 
 	/// Where the character should look, each axis -1 to 1.
@@ -308,7 +325,7 @@ impl Behaviour {
 		let level = self.mouth_target;
 		let speaking = self.idle_motion && self.state == State::Speaking;
 		if speaking && level - self.loudness > BEAT_RISE && self.t - self.last_beat > BEAT_MIN_GAP {
-			let strength = level.clamp(0.3, 1.0);
+			let strength = level.clamp(0.3, 1.0) * self.style_beats;
 			self.last_beat = self.t;
 			self.nod_depth = BEAT_NOD * strength;
 			self.nod_until = self.t + BEAT_HOLD;
@@ -335,6 +352,7 @@ impl Behaviour {
 			State::Thinking => (0.8, -0.08, (0.28, -0.22), -0.1, 0.0),
 			State::Speaking => (1.25, 0.0, (0.0, 0.0), 0.0, 0.08),
 		};
+		energy *= self.style_energy;
 		if !self.idle_motion {
 			energy = 0.0;
 			self.energy = 0.0;
@@ -419,6 +437,10 @@ impl Behaviour {
 			arm_left,
 			arm_right,
 			shoulders: if self.idle_motion { 0.15 * breath } else { 0.0 },
+			// Moods and gestures move these (motion.rs).
+			eye_smile: 0.0,
+			cheek: 0.0,
+			brow_form: 0.0,
 		}
 	}
 }

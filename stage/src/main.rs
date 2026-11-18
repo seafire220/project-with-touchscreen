@@ -10,6 +10,7 @@ mod capture;
 mod control;
 mod live2d;
 mod mapping;
+mod motion;
 mod overrides;
 mod puppet_info;
 mod smooth;
@@ -32,6 +33,7 @@ use winit::window::{Fullscreen, WindowBuilder};
 use behaviour::Behaviour;
 use control::{Command, Events, Script};
 use mapping::Mapper;
+use motion::{Library, Motion};
 use overrides::Overrides;
 use puppet_info::PuppetInfo;
 use window::{App, AppFrame, GlPreference};
@@ -209,6 +211,7 @@ struct StageApp {
 	info: PuppetInfo,
 	mapper: Mapper,
 	behaviour: Behaviour,
+	motion: Motion,
 	overrides: Overrides,
 	commands: Receiver<Command>,
 	script: Option<Script>,
@@ -267,6 +270,20 @@ impl StageApp {
 			}
 			Command::Unset(name, ease) => self.overrides.clear(&name, ease),
 			Command::ClearAll(ease) => self.overrides.clear_all(ease),
+			Command::Emotion(name, intensity) => match self.motion.set_emotion(&name, intensity) {
+				Ok(started) => {
+					self.events.emit(json!({"event": "emotion", "emotion": name, "intensity": intensity}));
+					if let Some(g) = started {
+						self.events.emit(json!({"event": "gesture", "name": g, "cause": "emotion"}));
+					}
+				}
+				Err(e) => self.events.emit(json!({"event": "error", "message": e})),
+			},
+			Command::Gesture(name, intensity) => match self.motion.play(&name, intensity) {
+				Ok(()) => self.events.emit(json!({"event": "gesture", "name": name, "cause": "command"})),
+				Err(e) => self.events.emit(json!({"event": "error", "message": e})),
+			},
+			Command::RandomGestures(on) => self.motion.set_random(on),
 			Command::Quit => self.quit = true,
 		}
 	}
@@ -308,6 +325,8 @@ impl App for StageApp {
 					"params": self.info.params.len(),
 					"param_names": self.info.params.iter().map(|p| p.name.clone()).collect::<Vec<_>>(),
 					"controls": controls,
+					"emotions": self.motion.emotions(),
+					"gestures": self.motion.gestures(),
 					"opengl": format!("{}{}.{}", if version.is_embedded { "ES " } else { "" }, version.major, version.minor),
 				}));
 				if let Puppet::Live2d(puppet) = &self.puppet {
@@ -357,7 +376,12 @@ impl App for StageApp {
 			self.handle(command);
 		}
 
-		let pose = self.behaviour.update(dt);
+		let (energy, beats) = self.motion.style();
+		self.behaviour.set_style(energy, beats);
+		let mut pose = self.behaviour.update(dt);
+		if let Some(g) = self.motion.apply(dt, &mut pose, self.behaviour.state(), !self.opts.still) {
+			self.events.emit(json!({"event": "gesture", "name": g, "cause": "mood"}));
+		}
 		let mut values = self.mapper.resolve(&pose);
 		self.overrides.apply(dt, &mut values);
 
@@ -415,6 +439,7 @@ impl App for StageApp {
 				"event": "heartbeat",
 				"fps": (self.frames_since_beat as f64 / since as f64 * 10.0).round() / 10.0,
 				"state": self.behaviour.state().name(),
+				"mood": self.motion.mood(),
 				// Average milliseconds per frame on the processor: moving the character, and
 				// handing its drawing to the graphics chip (which then draws in parallel).
 				"update_ms": per_frame(self.update_time),
@@ -499,9 +524,11 @@ fn run(opts: Options) -> Result<(), String> {
 	let frame = AppFrame::init(builder, opts.gl).map_err(|e| format!("cannot open a window: {e}"))?;
 	let mut behaviour = Behaviour::new(opts.seed);
 	behaviour.set_idle_motion(!opts.still);
+	let motion = Motion::new(Library::builtin(), |key| mapper.drives(key), opts.seed);
 	let app = StageApp {
 		overrides: Overrides::new(&info.params),
 		behaviour,
+		motion,
 		opts,
 		puppet,
 		info,

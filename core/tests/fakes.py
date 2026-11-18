@@ -58,6 +58,7 @@ class FakeStage:
     def __init__(self):
         self.commands = []
         self.params = set()
+        self.gestures = ["nod", "shake", "bow", "tilt", "wave"]
 
     def send(self, command):
         self.commands.append(command)
@@ -68,8 +69,11 @@ class FakeStage:
     def mouth(self, level):
         self.commands.append({"mouth": level})
 
-    def express(self, emotion, ease=0.35):
+    def express(self, emotion, intensity=1.0):
         self.commands.append({"express": emotion})
+
+    def random_gestures(self, on):
+        self.commands.append({"random_gestures": on})
 
     def blink(self):
         self.commands.append({"blink": True})

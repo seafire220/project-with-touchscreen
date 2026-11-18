@@ -11,8 +11,16 @@
 //! {"set": {"ParamCheek": 1.0, "ParamAngleX": 20}, "ease": 0.3}
 //! {"set": {"ParamCheek": null}}
 //! {"clear": true}
+//! {"emotion": "happy", "intensity": 0.8}
+//! {"gesture": "nod"}
+//! {"random_gestures": false}
 //! {"quit": true}
 //! ```
+//!
+//! `emotion` changes the mood (how the character moves, its face, and which
+//! gestures it makes by itself); `gesture` plays one of the library's
+//! gestures on top of whatever it is doing; `intensity` (0 to 1, default 1)
+//! applies to both.
 //!
 //! `set` drives named puppet parameters directly, for expressions and
 //! previews; `null` or `clear` hands them back to the built-in behaviour.
@@ -43,6 +51,12 @@ pub enum Command {
 	Unset(String, f32),
 	/// Hand every parameter back.
 	ClearAll(f32),
+	/// Change mood: name, intensity.
+	Emotion(String, f32),
+	/// Play a gesture: name, intensity.
+	Gesture(String, f32),
+	/// Let the mood start gestures by itself, or not.
+	RandomGestures(bool),
 	Quit,
 }
 
@@ -60,10 +74,17 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 		Some(v) => v.as_f64().filter(|e| *e >= 0.0).ok_or("\"ease\" must be a number of seconds, 0 or more")? as f32,
 		None => DEFAULT_EASE,
 	};
+	let intensity = match obj.get("intensity") {
+		Some(v) => v.as_f64().filter(|e| (0.0..=1.0).contains(e)).ok_or("\"intensity\" must be between 0 and 1")? as f32,
+		None => 1.0,
+	};
 	for (key, val) in obj {
 		match key.as_str() {
 			"at" => at = Some(val.as_f64().ok_or("\"at\" must be a number")? as f32),
-			"ease" => {}
+			"ease" | "intensity" => {}
+			"emotion" => out.push(Command::Emotion(val.as_str().ok_or("\"emotion\" must be a name")?.to_string(), intensity)),
+			"gesture" => out.push(Command::Gesture(val.as_str().ok_or("\"gesture\" must be a name")?.to_string(), intensity)),
+			"random_gestures" => out.push(Command::RandomGestures(val.as_bool().ok_or("\"random_gestures\" must be true or false")?)),
 			"set" => {
 				let items = val.as_object().ok_or("\"set\" must be an object of parameter names and values")?;
 				for (name, v) in items {

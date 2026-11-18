@@ -59,6 +59,23 @@ class SplitterTest(unittest.TestCase):
         self.assertLess(len(first), len(text))
         self.assertTrue(first.endswith(","))
 
+    def test_each_tag_goes_with_the_sentence_it_comes_before_however_the_text_arrives(self):
+        text = ("[happy] [wave] Hello! It is lovely to meet you today. [thinking] Let me think about that. "
+                "[surprised] Oh, I know! [happy] [nod] Tell me about your day. That is correct. [nod] I agree with you.")
+        expected = [("Hello! It is lovely to meet you today.", "happy", ["wave"]),
+                    ("Let me think about that.", "thinking", []),
+                    ("Oh, I know!", "surprised", []),
+                    ("Tell me about your day.", "happy", ["nod"]),
+                    ("That is correct.", None, []),
+                    ("I agree with you.", None, ["nod"])]
+        for size in (1, 3, 7, 40, len(text)):
+            got = [(t, e, [a["name"] for a in acts]) for t, e, acts in self.pieces(text, size)]
+            self.assertEqual(got, expected, "pieces of %d characters" % size)
+
+    def test_tags_at_the_very_end_are_kept(self):
+        out = self.pieces("All done now, thank you. [happy] [bow]", 6)
+        self.assertEqual(out[-1], ("", "happy", [{"kind": "gesture", "name": "bow"}]))
+
     def test_tags(self):
         self.assertEqual(speech_text.parse_tag("alarm 7:05 wake up"), ("action", {"kind": "alarm", "time": "07:05", "label": "wake up"}))
         self.assertEqual(speech_text.parse_tag("timer 1h30m bread"), ("action", {"kind": "timer", "seconds": 5400, "label": "bread"}))
@@ -202,34 +219,46 @@ class ConversationTest(unittest.TestCase):
         self.assertIn({"express": "embarrassed"}, cmds)
         self.assertEqual(self.actions, [], "gestures are not timers or alarms")
 
-    def test_a_gesture_skips_parameters_the_puppet_lacks(self):
+    def test_the_stage_link_names_moods_and_only_gestures_the_character_has(self):
         from companion.stage_link import StageLink
 
         class Capture(StageLink):
             def __init__(self):
                 super().__init__("/nonexistent")
                 self.sent = []
-                self.params = {"ParamAngleY"}
 
             def send(self, command):
                 self.sent.append(command)
+                return True
 
-        async def go():
-            link = Capture()
-            await link.gesture("bow")
-            return link.sent
-        sent = run(go())
-        self.assertTrue(sent)
-        for command in sent:
-            self.assertEqual(set(command["set"]), {"ParamAngleY"}, "no body parameter on a head-only puppet")
-        self.assertEqual(sent[-1]["set"], {"ParamAngleY": None}, "and control goes back to the idle movement")
+        link = Capture()
+        link.gestures = ["nod", "tilt"]          # as a head-only character's stage reports
+        link.express("happy", 0.8)
+        link.express("happy", 0.8)               # no change, nothing sent
+        self.assertTrue(link.gesture("nod"))
+        self.assertFalse(link.gesture("wave"), "a gesture this character cannot make is not sent")
+        link.random_gestures(False)
+        self.assertEqual(link.sent, [{"emotion": "happy", "intensity": 0.8}, {"gesture": "nod", "intensity": 1.0},
+                                     {"random_gestures": False}])
 
-        async def during_sadness():
-            link = Capture()
-            link.expression = "sad"
-            await link.gesture("nod")
-            return link.sent
-        self.assertEqual(run(during_sadness())[-1]["set"], {"ParamAngleY": -12.0}, "a nod ends in the sad pose")
+    def test_the_model_is_told_only_the_gestures_its_character_can_make(self):
+        from companion.conversation import system_prompt
+        prompt = system_prompt("You are Aria.", "", gestures=["nod", "wave"])
+        self.assertIn("[nod]", prompt)
+        self.assertIn("[wave] wave", prompt)
+        self.assertNotIn("[hands_on_hips]", prompt)
+        self.assertNotIn("move with these tags", system_prompt("You are Aria.", "", gestures=[]))
+
+    def test_every_library_gesture_can_be_asked_for(self):
+        import json
+        from companion.speech_text import GESTURES, parse_tag
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "stage", "motions", "library.json")
+        with open(path, encoding="utf-8") as f:
+            library = json.load(f)
+        self.assertEqual(sorted(GESTURES), sorted(library["gestures"]), "the core and the stage name the same gestures")
+        self.assertEqual(parse_tag("hands_on_hips"), ("action", {"kind": "gesture", "name": "hands_on_hips"}))
+        for emotion in ("happy", "sad", "angry", "surprised", "embarrassed", "thinking", "neutral"):
+            self.assertIn(emotion, library["moods"])
 
     def test_the_greeting_is_spoken(self):
         tts = FakeTTS()

@@ -17,7 +17,7 @@ from .audio import tone
 from .characters import split_persona
 from .providers import ProviderError
 from .search import results_for_model
-from .speech_text import SEARCH_RULE, SPEECH_RULES, Splitter
+from .speech_text import SEARCH_RULE, Splitter, speech_rules
 
 log = logging.getLogger("companion.conversation")
 
@@ -25,10 +25,10 @@ FIRST_WORDS_TIMEOUT = 20.0   # seconds to wait for the model's first sentence
 REPLY_TIMEOUT = 90.0         # longest a whole reply may take
 
 
-def system_prompt(persona, notes, now=None, search_tag=False):
+def system_prompt(persona, notes, now=None, search_tag=False, gestures=("nod", "shake", "bow", "tilt")):
     body, _ = split_persona(persona)
     now = now or datetime.datetime.now()
-    rules = SPEECH_RULES + ("\n" + SEARCH_RULE if search_tag else "")
+    rules = speech_rules(gestures) + ("\n" + SEARCH_RULE if search_tag else "")
     parts = [body, rules, "It is now %s." % now.strftime("%A %d %B %Y, %H:%M")]
     if notes.strip():
         parts.append("What you remember about the person you are talking with:\n" + notes.strip())
@@ -47,7 +47,7 @@ class Reply:
 
 class Conversation:
     def __init__(self, *, llm, tts, speaker, stage, memory, persona, history_turns=12,
-                 on_event=None, on_action=None, on_audio=None, search=None):
+                 on_event=None, on_action=None, on_audio=None, search=None, gestures=None):
         self.llm = llm
         self.tts = tts
         self.speaker = speaker
@@ -59,6 +59,8 @@ class Conversation:
         self.on_action = on_action or (lambda action: None)
         self.on_audio = on_audio
         self.search = search            # async query -> results, for models without their own search
+        # Gestures the character can make (told to the model); by default whatever the stage reports.
+        self.gestures = gestures
         self.current = None
         self._task = None
 
@@ -85,7 +87,8 @@ class Conversation:
         self.on_event("heard", {"text": heard})
         self.stage.state("thinking")
         messages = self.memory.recent(self.history_turns) + [{"role": "user", "content": heard}]
-        system = system_prompt(self.persona, self.memory.notes(), search_tag=self.search is not None)
+        gestures = self.gestures if self.gestures is not None else getattr(self.stage, "gestures", ("nod", "shake", "bow", "tilt"))
+        system = system_prompt(self.persona, self.memory.notes(), search_tag=self.search is not None, gestures=gestures)
         writer = None
         try:
             queries = []
@@ -163,6 +166,8 @@ class Conversation:
                 item = first_item
                 while item is not None:
                     text, emotion, actions = item
+                    if emotion:                  # the mood first, so a gesture asked for plays on top of it
+                        await audio_queue.put(("emotion", emotion))
                     for action in actions:
                         if action.get("kind") == "search":
                             if queries is not None:
@@ -171,8 +176,6 @@ class Conversation:
                             await audio_queue.put(("gesture", action["name"]))   # in step with the speech
                         else:
                             self.on_action(action)
-                    if emotion:
-                        await audio_queue.put(("emotion", emotion))
                     if text:
                         started = False
                         async for chunk in self.tts.stream(text):

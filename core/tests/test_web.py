@@ -87,6 +87,13 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         r = await self.client.post("/api/characters", data=b"PK\x05\x06" + b"\0" * 18, headers=H)
         self.assertEqual(r.status, 400)
 
+    async def test_turning_off_gestures_by_mood_tells_the_stage(self):
+        await self.login()
+        r = await self.client.put("/api/settings", json={"conversation": {"random_gestures": False}}, headers=H)
+        self.assertEqual(r.status, 200)
+        self.assertIn({"random_gestures": False}, self.stage.commands)
+        self.assertFalse((await r.json())["conversation"]["random_gestures"])
+
     async def test_wrong_passwords_are_slowed_and_then_locked_out(self):
         await self.login()
         await self.client.post("/api/logout", headers=H)

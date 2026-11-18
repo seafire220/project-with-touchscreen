@@ -70,6 +70,8 @@ class Device:
         self.stage_seen = time.time()
         if event.get("event") in ("error", "fatal"):
             self.emit("stage_error", {"message": event.get("message", "")})
+        elif event.get("event") == "ready" and hasattr(self.stage, "random_gestures"):
+            self.stage.random_gestures(self.store.settings()["conversation"].get("random_gestures", True))
 
     async def stage_watch(self, patience=25.0):
         """If the character cannot be shown (the stage keeps failing to start), show a card instead.
@@ -241,7 +243,8 @@ class Device:
             speaker=self.speaker, stage=self.stage, memory=self.memory(cid),
             persona=self.characters.persona(cid),
             history_turns=int(settings["conversation"].get("history_turns", 12)),
-            on_event=self._conversation_event, on_action=self.action, search=self._search_function(settings))
+            on_event=self._conversation_event, on_action=self.action, search=self._search_function(settings),
+            gestures=None if settings["conversation"].get("gestures", True) else [])
 
     def _search_function(self, settings):
         """Search for models without their own: only with a search key, and not for Claude (it has its own)."""

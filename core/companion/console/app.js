@@ -272,6 +272,8 @@ async function loadSettings() {
   $("dev-voice_interrupt").checked = !!s.listening.voice_interrupt;
   $("dev-memory").checked = !!s.conversation.memory;
   $("dev-search").checked = s.conversation.web_search !== false;
+  $("dev-gestures").checked = s.conversation.gestures !== false;
+  $("dev-random-gestures").checked = s.conversation.random_gestures !== false;
   $("dev-format").value = s.character_format || "live2d";
   renderKeys(await api("GET", "/api/keys"));
 }
@@ -387,7 +389,8 @@ $("btn-save-device").addEventListener("click", async () => {
       volume: Number($("dev-volume").value),
       listening: { mode: $("dev-mode").value, end_silence: Number($("dev-end_silence").value),
                    voice_interrupt: $("dev-voice_interrupt").checked },
-      conversation: { memory: $("dev-memory").checked, web_search: $("dev-search").checked },
+      conversation: { memory: $("dev-memory").checked, web_search: $("dev-search").checked,
+                      gestures: $("dev-gestures").checked, random_gestures: $("dev-random-gestures").checked },
       character_format: $("dev-format").value,
     });
     text($("device-msg"), "Saved.");

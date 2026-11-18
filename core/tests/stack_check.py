@@ -4,8 +4,10 @@
 
 Starts the stage on a virtual display with its command socket, connects the
 core to it, has the character answer a typed message (stand-in model and
-voice, real timing), and saves frames before, during and after the reply.
-Prints the stage states seen in its heartbeats. Needs Xvfb.
+voice, real timing), and saves frames before, during and after the reply,
+ten a second. Prints the stage states seen in its heartbeats and the moods
+and gestures the stage played, and fails if any mood or gesture tagged in
+the reply (and available to the character) did not play. Needs Xvfb.
 """
 import asyncio
 import json
@@ -23,8 +25,10 @@ from companion.memory import Memory  # noqa: E402
 from companion.stage_link import StageLink  # noqa: E402
 from fakes import FakeLLM, FakeTTS  # noqa: E402
 
-REPLY = ("[happy] [nod] Hello! It is lovely to meet you, and I am glad you came to talk with me today. "
-         "[embarrassed] Shall we chat for a while about anything you like?")
+REPLY = ("[happy] [wave] Hello! It is lovely to meet you, and I am glad you came to talk with me today. "
+         "[thinking] Let me think about what we could talk about first. "
+         "[surprised] Oh, I know! [happy] [nod] Tell me about your day. "
+         "[embarrassed] Sorry, I get a little excited when someone new visits.")
 
 
 async def main(stage, puppet, out):
@@ -34,9 +38,9 @@ async def main(stage, puppet, out):
     xvfb = subprocess.Popen(["Xvfb", "-displayfd", "1", "-screen", "0", "800x1000x24"],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
     env = dict(os.environ, DISPLAY=":" + xvfb.stdout.readline().strip(), LIBGL_ALWAYS_SOFTWARE="1")
-    captures = [1.5, 4.0, 4.6, 5.2, 5.8, 6.4, 12.0]
+    captures = [round(1.0 + 0.1 * i, 1) for i in range(150)]
     proc = subprocess.Popen([stage, puppet, "--size", "360x640", "--gl", "es", "--no-stdin", "--socket", sock,
-                             "--capture-dir", out, "--capture-at", ",".join(map(str, captures)), "--exit-after", "12.5"],
+                             "--capture-dir", out, "--capture-at", ",".join(map(str, captures)), "--exit-after", "16.5"],
                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     seen = []
     link = StageLink(sock, on_event=lambda e: seen.append(e))
@@ -52,7 +56,7 @@ async def main(stage, puppet, out):
                             memory=Memory(os.path.join(work, "memory")), persona="# Test\n\nYou are a test.")
         await asyncio.sleep(3.0)                 # the stage settles; frame 0 is at rest
         reply = await conv.respond("hello")
-        await asyncio.sleep(6.5)
+        await asyncio.sleep(2.0)
     finally:
         await asyncio.sleep(0.5)
         proc.wait(timeout=30)
@@ -61,11 +65,23 @@ async def main(stage, puppet, out):
     for e in seen:
         if e.get("event") == "heartbeat" and (not states or states[-1] != e["state"]):
             states.append(e["state"])
-    report = {"puppet": ready.get("puppet"), "params": len(ready.get("param_names", [])),
-              "states_seen": states, "spoken": reply.spoken, "error": reply.error,
+    from companion.speech_text import EMOTIONS, GESTURES
+    import re
+    tags = re.findall(r"\[(\w+)\]", REPLY)
+    wanted_moods = {t for t in tags if t in EMOTIONS}
+    wanted_gestures = {t for t in tags if t in GESTURES and t in ready.get("gestures", [])}
+    moods = [e["emotion"] for e in seen if e.get("event") == "emotion"]
+    gestures = [(e["name"], e["cause"]) for e in seen if e.get("event") == "gesture"]
+    report = {"puppet": ready.get("puppet"), "format": ready.get("format"), "params": len(ready.get("param_names", [])),
+              "gestures_available": ready.get("gestures"), "states_seen": states, "moods_played": moods,
+              "gestures_played": gestures, "spoken": reply.spoken, "error": reply.error,
               "errors_from_stage": [e for e in seen if e.get("event") in ("error", "fatal")]}
     print(json.dumps(report, indent=1))
-    return 0 if not reply.error and "speaking" in states and not report["errors_from_stage"] else 1
+    missing = (wanted_moods - set(moods)) | (wanted_gestures - {g for g, _ in gestures})
+    if missing:
+        print("not played:", sorted(missing))
+    ok = not reply.error and "speaking" in states and not report["errors_from_stage"] and not missing
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

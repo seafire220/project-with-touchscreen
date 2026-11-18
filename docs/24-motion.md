@@ -205,8 +205,35 @@ since the existing checks have passed motion that looked wrong.
   listening; shoulders rise with breath; blink gaps follow a log-normal
   spread, with a blink often on a long gaze shift; every movement goes
   through a spring. Holding still (`--still`) still stops all of it.
-- Not built yet: calibration files, layers with fades, motion clips, the
-  recording tool, the calibration page and the debug view.
+- Moods and gestures (2026-11-18, after the owner asked for prebuilt
+  animations that follow the character's emotions): `stage/motions/library.json`
+  holds seven moods (one per emotion the language model can tag) and
+  eighteen gestures (nod, firm nod, shake, tilt, bow, bounce, laugh, sigh,
+  sway, look away, look down, lean in, lean back, start in surprise, think,
+  hands on hips, wave, shrug), written in control units. `stage/src/motion.rs`
+  plays them: a mood blends in its face and posture and changes how lively
+  the idle motion is and how strong the beats with speech are, and may start
+  with an entry gesture (happy bounces, thinking looks up); gestures are
+  added on top of the current motion and fade out when cut short; the mood
+  starts its own gestures now and then (while listening, only small nods and
+  tilts); a gesture is offered only to characters with every control it
+  needs, and the stage lists them when it starts.
+- The core sends `emotion` and `gesture` commands in step with each
+  sentence, tells the language model only the gestures its character has,
+  and has two settings: whether the character may choose gestures, and
+  whether its mood starts gestures by itself. A splitter fix makes each tag
+  apply to the sentence it comes before however the reply streams in (it
+  used to give a sentence the last emotion in the buffer).
+- Checked end to end (`core/tests/stack_check.py`): the real core against
+  the real stage, with a reply tagged happy, thinking, surprised, happy and
+  embarrassed, a wave and a nod: every mood played in order, both asked-for
+  gestures played out, entry gestures played where nothing asked for was
+  playing.
+- Not built yet: calibration files, motion clips recorded from people, the
+  calibration page for imported models (including mapping their own
+  expressions to our moods), and the debug view. Big arm gestures (hands on
+  hips, wave) move the arms only as far as deformation looks right; drawn arm
+  poses come from the drawing workflow.
 
 Our own characters have no gaze or brow parameters yet (the rigger does not
 make them), so on them these controls do nothing until the studio adds them;

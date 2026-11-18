@@ -156,14 +156,17 @@ class Console:
         changes = await request.json()
         if not isinstance(changes, dict):
             raise web.HTTPBadRequest(text="settings must be an object")
-        before = self.device.store.settings().get("character_format")
+        old = self.device.store.settings()
         try:
             merged = self.device.store.update_settings(changes)
         except ValueError as error:
             raise web.HTTPBadRequest(text=str(error))
         self.device.conversation = None
-        if merged.get("character_format") != before:
+        if merged.get("character_format") != old.get("character_format"):
             self.device.show_character()          # the other drawing of the same character, if it has one
+        random_now = merged["conversation"].get("random_gestures", True)
+        if random_now != old["conversation"].get("random_gestures", True) and hasattr(self.device.stage, "random_gestures"):
+            self.device.stage.random_gestures(random_now)
         return web.json_response(merged)
 
     async def get_keys(self, request):
