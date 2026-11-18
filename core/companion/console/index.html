@@ -111,12 +111,14 @@
     <fieldset data-group="tts">
       <legend>2. Voice</legend>
       <label>Service <select id="tts-provider">
-        <option value="">choose…</option><option value="elevenlabs">ElevenLabs (includes cloned voices)</option><option value="openai">OpenAI</option>
+        <option value="">choose…</option><option value="local">On this device (free)</option>
+        <option value="elevenlabs">ElevenLabs (includes cloned voices)</option><option value="openai">OpenAI</option>
         <option value="custom">Other (OpenAI-compatible)</option></select></label>
       <div class="keybox" data-key-for="tts"></div>
       <label class="for-custom">Address <input id="tts-base_url"></label>
-      <label>Model <input id="tts-model"></label>
-      <label>Voice <input id="tts-voice" list="tts-voices"> <button type="button" id="btn-voices" class="for-elevenlabs">List my voices</button></label>
+      <label class="for-cloud">Model <input id="tts-model"></label>
+      <label>Voice <input id="tts-voice" list="tts-voices"> <button type="button" id="btn-voices" class="for-voicelist">List voices</button>
+        <span class="hint for-local">On the device: a speaker number (try a few with "Save and test").</span></label>
       <datalist id="tts-voices"></datalist>
       <button type="button" data-test="tts">Save and test</button> <span id="test-tts"></span>
     </fieldset>
@@ -152,6 +154,13 @@
       <option value="inochi2d">Inochi2D puppet when the character has one</option></select></label>
     <label><input type="checkbox" id="dev-search"> Allow web search (Claude searches by itself; other services need a free "Web search" key from tavily.com, under AI services → All saved keys)</label>
     <p><button id="btn-save-device">Save</button> <span id="device-msg"></span></p>
+    <details>
+      <summary>About this device</summary>
+      <p>The character is drawn with Inox2D (BSD-2-Clause) or Ayagami (MIT or Apache-2.0). Speech recognition on
+        the device uses Moonshine (MIT) through sherpa-onnx (Apache-2.0). The free on-device voice is a Piper voice
+        trained on LibriTTS-R (CC BY 4.0; Koizumi et al., 2023), with phonemes from espeak-ng (GPL-3.0).
+        The full list is in THIRD_PARTY.md in the device's software.</p>
+    </details>
     <h3>Wi-Fi</h3>
     <p id="wifi-status">Checking…</p>
     <form id="wifi-form">

@@ -42,6 +42,8 @@ check "settings page installed" test -f "$ROOT/opt/companion/core/companion/cons
 check "character program installed (64-bit ARM)" sh -c "file -b '$ROOT/opt/companion/bin/stage' | grep -q aarch64"
 check "Python environment with on-device speech recognition" sh -c "ls '$ROOT'/opt/companion/venv/lib/python3*/site-packages | grep -q sherpa_onnx"
 check "speech model shipped" test -f "$ROOT/var/lib/companion/models/stt/encode.int8.onnx"
+check "on-device voice shipped" test -f "$ROOT/var/lib/companion/models/tts/en_US-libritts_r-medium.onnx"
+check "espeak-ng installed for the voice" test -x "$ROOT/usr/bin/espeak-ng"
 check "data folder owned by the service user" sh -c "[ \"\$(stat -c %U '$ROOT/var/lib/companion')\" = companion ] || grep -q '^companion:' '$ROOT/etc/passwd'"
 check "core service starts at boot" enabled multi-user.target companion-core.service
 check "character starts at boot" enabled graphical.target companion-stage.service

@@ -1,0 +1,128 @@
+{
+ "about": "Clear voices from the on-device voice (Piper LibriTTS-R medium, 904 speakers), chosen by a survey: each speaker read two hard sentences, which the device's own speech recognition had to hear without a mistake; twelve higher and twelve lower voices, spread across pitch. Any speaker number from 0 to 903 also works.",
+ "model": "en_US-libritts_r-medium",
+ "credit": "Voice trained on LibriTTS-R (CC BY 4.0; Koizumi et al., 2023) by the Piper project.",
+ "default": 93,
+ "voices": [
+  {
+   "id": 185,
+   "label": "Higher voice A",
+   "pitch_hz": 175.7
+  },
+  {
+   "id": 63,
+   "label": "Higher voice B",
+   "pitch_hz": 181.0
+  },
+  {
+   "id": 886,
+   "label": "Higher voice C",
+   "pitch_hz": 186.3
+  },
+  {
+   "id": 764,
+   "label": "Higher voice D",
+   "pitch_hz": 189.4
+  },
+  {
+   "id": 373,
+   "label": "Higher voice E",
+   "pitch_hz": 192.3
+  },
+  {
+   "id": 247,
+   "label": "Higher voice F",
+   "pitch_hz": 196.2
+  },
+  {
+   "id": 310,
+   "label": "Higher voice G",
+   "pitch_hz": 199.6
+  },
+  {
+   "id": 93,
+   "label": "Higher voice H",
+   "pitch_hz": 204.3
+  },
+  {
+   "id": 832,
+   "label": "Higher voice I",
+   "pitch_hz": 208.3
+  },
+  {
+   "id": 581,
+   "label": "Higher voice J",
+   "pitch_hz": 215.2
+  },
+  {
+   "id": 408,
+   "label": "Higher voice K",
+   "pitch_hz": 225.2
+  },
+  {
+   "id": 315,
+   "label": "Higher voice L",
+   "pitch_hz": 244.0
+  },
+  {
+   "id": 631,
+   "label": "Lower voice A",
+   "pitch_hz": 95.8
+  },
+  {
+   "id": 669,
+   "label": "Lower voice B",
+   "pitch_hz": 102.3
+  },
+  {
+   "id": 496,
+   "label": "Lower voice C",
+   "pitch_hz": 104.9
+  },
+  {
+   "id": 156,
+   "label": "Lower voice D",
+   "pitch_hz": 109.9
+  },
+  {
+   "id": 326,
+   "label": "Lower voice E",
+   "pitch_hz": 113.7
+  },
+  {
+   "id": 784,
+   "label": "Lower voice F",
+   "pitch_hz": 117.3
+  },
+  {
+   "id": 843,
+   "label": "Lower voice G",
+   "pitch_hz": 119.7
+  },
+  {
+   "id": 602,
+   "label": "Lower voice H",
+   "pitch_hz": 121.8
+  },
+  {
+   "id": 257,
+   "label": "Lower voice I",
+   "pitch_hz": 124.8
+  },
+  {
+   "id": 725,
+   "label": "Lower voice J",
+   "pitch_hz": 129.4
+  },
+  {
+   "id": 608,
+   "label": "Lower voice K",
+   "pitch_hz": 134.3
+  },
+  {
+   "id": 364,
+   "label": "Lower voice L",
+   "pitch_hz": 138.9
+  }
+ ]
+}

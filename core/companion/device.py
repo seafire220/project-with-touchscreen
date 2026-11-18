@@ -33,6 +33,7 @@ class Device:
         self.characters = Characters(os.path.join(data_dir, "characters"))
         self.memory_dir = os.path.join(data_dir, "memory")
         self.stt_model_dir = os.path.join(data_dir, "models", "stt")
+        self.tts_model_dir = os.path.join(data_dir, "models", "tts")
         self.current_puppet = os.path.join(data_dir, "current.inp")
         self.speaker = speaker or Speaker()
         self.microphone = microphone
@@ -173,6 +174,16 @@ class Device:
                 self._stt_key = key
             return self._stt
         if which == "tts":
+            if settings["tts"].get("provider") == "local":
+                # The on-device voice is kept loaded too (about 110 MB, a second to load); only the
+                # speaker changes from character to character.
+                key = json.dumps(settings["tts"], sort_keys=True)
+                if getattr(self, "_tts_key", None) != key:
+                    self._tts = None
+                    self._tts = providers.build_tts(settings, self.store, model_dir=self.tts_model_dir)
+                    self._tts_key = key
+                self._tts.set_voice(extra.get("voice") or settings["tts"].get("voice", ""))
+                return self._tts
             return providers.build_tts(settings, self.store, **extra)
         raise ValueError(which)
 

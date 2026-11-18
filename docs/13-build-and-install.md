@@ -86,7 +86,8 @@ cd ~/repo && sudo ./device/install.sh
 
 It installs the system packages, creates the `companion` service user,
 installs the software in `/opt/companion`, downloads the on-device speech
-recognition model, installs the services and adds the button and display
+recognition model and the on-device voice (with espeak-ng from the
+operating system's packages), installs the services and adds the button and display
 lines to `/boot/firmware/config.txt`. It takes 10–20 minutes, mostly
 downloads. Then:
 
@@ -115,9 +116,10 @@ sudo reboot
 3. Under **Device → Wi-Fi**, choose your home network. The device joins it
    and shows its new address on screen. Reconnect your phone to your home
    Wi-Fi and open that address.
-4. Under **AI services**, choose a language model and a voice, paste your
-   keys and press **Test** on each. Speech recognition defaults to the free
-   on-device model.
+4. Under **AI services**, choose a language model, paste its key and press
+   **Test**. Speech recognition and the voice default to free on-device
+   models, so a language-model key is the only one needed (several services
+   have free tiers); a cloud voice can be chosen instead.
 5. Under **Characters**, add a `.char` file (see
    `14-making-characters.md`). The character appears on the screen.
 6. Press the listen button and speak. Press it again to stop listening;

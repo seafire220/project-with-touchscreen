@@ -291,7 +291,7 @@ const SERVICES = {
   anthropic: { key: "anthropic", hint: "Get a key at console.anthropic.com → API keys.", llm: "claude-opus-5-5 (or claude-haiku-5-5: faster, cheaper)" },
   groq: { key: "groq", hint: "Get a free key at console.groq.com → API keys.", llm: "press List models", stt: "whisper-large-v3-turbo" },
   openrouter: { key: "openrouter", hint: "Get a key at openrouter.ai → Keys.", llm: "press List models" },
-  gemini: { key: "openai_compatible", hint: "Get a key at aistudio.google.com → Get API key.", llm: "e.g. gemini-2.5-flash" },
+  gemini: { key: "openai_compatible", hint: "Get a key at aistudio.google.com → Get API key (has a free tier).", llm: "e.g. gemini-3.5-flash-lite" },
   custom: { key: "openai_compatible", hint: "The key for the service at the address below, if it needs one.", llm: "", stt: "", tts: "" },
   elevenlabs: { key: "elevenlabs", hint: "Get a key at elevenlabs.io → Developers → API keys.", tts: "eleven_flash_v2_5" },
   local: { key: "", hint: "Runs on the device: no key and no cost." },
@@ -325,6 +325,8 @@ function shapeGroup(group) {
   for (const el of box.querySelectorAll(".for-anthropic")) el.hidden = provider !== "anthropic";
   for (const el of box.querySelectorAll(".for-elevenlabs")) el.hidden = provider !== "elevenlabs";
   for (const el of box.querySelectorAll(".for-cloud")) el.hidden = provider === "local";
+  for (const el of box.querySelectorAll(".for-local")) el.hidden = provider !== "local";
+  for (const el of box.querySelectorAll(".for-voicelist")) el.hidden = provider !== "local" && provider !== "elevenlabs";
   const model = $(group + "-model");
   if (model && info[group] !== undefined) model.placeholder = info[group];
   const keybox = box.querySelector(".keybox");

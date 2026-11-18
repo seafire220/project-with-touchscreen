@@ -7,7 +7,9 @@ core to it, has the character answer a typed message (stand-in model and
 voice, real timing), and saves frames before, during and after the reply,
 ten a second. Prints the stage states seen in its heartbeats and the moods
 and gestures the stage played, and fails if any mood or gesture tagged in
-the reply (and available to the character) did not play. Needs Xvfb.
+the reply (and available to the character) did not play. Needs Xvfb. With
+COMPANION_TEST_VOICE set to an on-device voice folder, the reply is spoken
+by that voice instead of a stand-in, so the mouth follows real speech.
 """
 import asyncio
 import json
@@ -51,7 +53,13 @@ async def main(stage, puppet, out):
                 break
             await asyncio.sleep(0.1)
         ready = next(e for e in seen if e.get("event") == "ready")
-        conv = Conversation(llm=FakeLLM(REPLY, delay=0.02), tts=FakeTTS(seconds_per_char=0.03),
+        voice = os.environ.get("COMPANION_TEST_VOICE")
+        if voice:
+            from companion.providers import LocalTTS
+            tts = LocalTTS(voice)
+        else:
+            tts = FakeTTS(seconds_per_char=0.03)
+        conv = Conversation(llm=FakeLLM(REPLY, delay=0.02), tts=tts,
                             speaker=Speaker(command=None, realtime=True), stage=link,
                             memory=Memory(os.path.join(work, "memory")), persona="# Test\n\nYou are a test.")
         await asyncio.sleep(3.0)                 # the stage settles; frame 0 is at rest
@@ -72,7 +80,9 @@ async def main(stage, puppet, out):
     wanted_gestures = {t for t in tags if t in GESTURES and t in ready.get("gestures", [])}
     moods = [e["emotion"] for e in seen if e.get("event") == "emotion"]
     gestures = [(e["name"], e["cause"]) for e in seen if e.get("event") == "gesture"]
+    mouth = [e for e in seen if e.get("event") == "heartbeat"]
     report = {"puppet": ready.get("puppet"), "format": ready.get("format"), "params": len(ready.get("param_names", [])),
+              "voice": "on-device" if os.environ.get("COMPANION_TEST_VOICE") else "stand-in",
               "gestures_available": ready.get("gestures"), "states_seen": states, "moods_played": moods,
               "gestures_played": gestures, "spoken": reply.spoken, "error": reply.error,
               "errors_from_stage": [e for e in seen if e.get("event") in ("error", "fatal")]}

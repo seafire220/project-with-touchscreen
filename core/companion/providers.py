@@ -266,6 +266,95 @@ class OpenAICompatibleTTS:
         return "spoke %.1f seconds of audio" % (size / 2 / self.rate)
 
 
+class LocalTTS:
+    """A voice on the device: a Piper voice played by sherpa-onnx, with phonemes from espeak-ng.
+    Free; no network. `model_dir` holds the voice (`*.onnx`, its `.onnx.json`, `tokens.txt`);
+    `voice` picks a speaker by number in voices with several (LibriTTS-R has 904)."""
+
+    CHUNK = 0.2      # seconds of sound per piece handed to the speaker
+
+    def __init__(self, model_dir, voice="", speed=1.0, threads=2):
+        import glob
+        import os
+        from . import phonemes
+        try:
+            import sherpa_onnx
+        except ImportError:
+            raise ProviderError("the on-device voice is not installed (sherpa-onnx)")
+        if not phonemes.espeak_path():
+            raise ProviderError("the on-device voice needs espeak-ng, which is not installed")
+        models = sorted(glob.glob(os.path.join(model_dir, "*.onnx")))
+        if not models or not os.path.exists(os.path.join(model_dir, "tokens.txt")):
+            raise ProviderError("no on-device voice is installed at %s" % model_dir)
+        self.espeak_voice = "en-us"
+        try:
+            with open(models[0] + ".json", encoding="utf-8") as f:
+                self.espeak_voice = json.load(f).get("espeak", {}).get("voice") or "en-us"
+        except (OSError, ValueError):
+            pass
+        vits = sherpa_onnx.OfflineTtsVitsModelConfig(
+            model=models[0], tokens=os.path.join(model_dir, "tokens.txt"),
+            data_dir=os.path.join(model_dir, "espeak-ng-data") if os.path.isdir(os.path.join(model_dir, "espeak-ng-data")) else "")
+        self.tts = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(
+            model=sherpa_onnx.OfflineTtsModelConfig(vits=vits, num_threads=threads), max_num_sentences=1))
+        self.rate = self.tts.sample_rate
+        self.speakers = self.tts.num_speakers
+        self.speed = float(speed) if speed else 1.0
+        self.catalogue = {}
+        try:
+            with open(os.path.join(os.path.dirname(__file__), "voices.json"), encoding="utf-8") as f:
+                loaded = json.load(f)
+            if os.path.basename(models[0]).startswith(loaded.get("model", "?")):
+                self.catalogue = loaded
+        except (OSError, ValueError):
+            pass
+        self.sid = 0
+        self.set_voice(voice)
+        self._sherpa = sherpa_onnx
+        self._phonemize = phonemes.phonemize
+
+    def set_voice(self, voice):
+        """Choose a speaker by number; anything else takes the default (the surveyed clear voice, or the first)."""
+        text = str(voice or "").strip()
+        default = int(self.catalogue.get("default", 0)) if self.catalogue else 0
+        self.sid = int(text) if text.isdigit() and int(text) < max(self.speakers, 1) else default
+
+    async def voices(self):
+        """The surveyed clear voices, for the settings page's list."""
+        return [{"id": str(v["id"]), "name": "%s (%d Hz)" % (v["label"], round(v["pitch_hz"]))}
+                for v in self.catalogue.get("voices", [])]
+
+    def _speak(self, text):
+        import numpy as np
+        from .phonemes import PhonemeError
+        try:
+            phonemes = self._phonemize(text, self.espeak_voice)
+        except PhonemeError as error:
+            raise ProviderError("the on-device voice could not read the text (%s)" % error)
+        if not phonemes:
+            return b""
+        config = self._sherpa.GenerationConfig()
+        config.phoneme_codepoints = [[ord(c) for c in phonemes]]
+        config.sid = self.sid
+        config.speed = self.speed
+        audio = self.tts.generate(text, config)
+        samples = np.clip(np.asarray(audio.samples, dtype=np.float32), -1.0, 1.0)
+        return (samples * 32767).astype(np.int16).tobytes()
+
+    async def stream(self, text):
+        import asyncio
+        pcm = await asyncio.get_running_loop().run_in_executor(None, self._speak, text)
+        step = int(self.rate * self.CHUNK) * 2
+        for start in range(0, len(pcm), step):
+            yield pcm[start:start + step]
+
+    async def test(self):
+        size = 0
+        async for chunk in self.stream("Testing, one two three."):
+            size += len(chunk)
+        return "spoke %.1f seconds of audio on the device" % (size / 2 / self.rate)
+
+
 class ElevenLabsTTS:
     """ElevenLabs voices, including cloned ones, streamed as raw 24 kHz PCM."""
 
@@ -350,10 +439,12 @@ def build_stt(settings, store, model_dir):
     raise ProviderError("no speech recognition is chosen yet")
 
 
-def build_tts(settings, store, voice=None):
+def build_tts(settings, store, voice=None, model_dir=None):
     tts = settings["tts"]
     provider = tts.get("provider", "")
     chosen = voice or tts.get("voice", "")
+    if provider == "local":
+        return LocalTTS(model_dir or "", chosen, tts.get("speed", 1.0))
     if provider == "elevenlabs":
         return ElevenLabsTTS(store.secret("elevenlabs"), chosen, tts.get("model", ""))
     if provider in OPENAI_COMPATIBLE:

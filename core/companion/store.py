@@ -17,7 +17,8 @@ import threading
 DEFAULT_SETTINGS = {
     "llm": {"provider": "", "model": "", "base_url": "", "temperature": 0.8, "max_tokens": 400},
     "stt": {"provider": "local", "model": "", "base_url": "", "language": "en"},
-    "tts": {"provider": "", "model": "", "voice": "", "base_url": ""},
+    # The voice: "local" speaks on the device for free (a Piper voice; `voice` is a speaker number).
+    "tts": {"provider": "local", "model": "", "voice": "", "base_url": "", "speed": 1.0},
     "listening": {"mode": "auto", "end_silence": 0.8, "max_turn": 30.0, "voice_interrupt": False},
     # gestures: the character may choose gestures as it speaks; random_gestures: its mood starts
     # gestures by itself now and then.

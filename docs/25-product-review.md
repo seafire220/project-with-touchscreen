@@ -14,7 +14,7 @@ checked, and what is missing. Hardware comes last, once this list is done.
 | Get a character | From a picture: `studio/make_character.py` on a laptop (command line). From a Live2D-format model folder: upload its zip on the settings page | Picture pipeline on test pictures; import on eight model folders | **A one-click app** for pictures (roadmap item 6); **a default character** in the box (needs commissioned original art) |
 | Edit its personality | Free-text persona with a template and greeting; voice per character; feelings matched to a model's own expressions | Web tests | **A guided form** (name, personality, how it speaks, its relationship to the owner, likes and dislikes, greeting) for owners who do not want to write a prompt |
 | Memory | The last 400 turns; notes about the owner that the language model rewrites every 6 turns (up to 4,000 characters), shown and editable on the settings page | Unit tests | **Memory that lasts**: the notes fill up and older conversations are never recalled. Proposed: a dated summary of each conversation kept in an archive and searched by the owner's words (no extra model call), the matches given to the model with the notes |
-| Chat by voice | Press the button (or speak, with an echo-cancelling sound card); local speech recognition (free); language models from OpenAI, Anthropic, Groq, OpenRouter, Google Gemini or any compatible service, streamed; timers, alarms, web search | Unit tests; real core with real stage; a real model (below) | **A free voice**: speaking needs an OpenAI or ElevenLabs key today. Proposed: a local voice through sherpa-onnx (already used for recognition; Kokoro or Piper voices) as the default, cloud voices as upgrades, so the device works with only a language-model key, and several of those have free tiers |
+| Chat by voice | Press the button (or speak, with an echo-cancelling sound card); local speech recognition (free); language models from OpenAI, Anthropic, Groq, OpenRouter, Google Gemini or any compatible service, streamed; timers, alarms, web search | Unit tests; real core with real stage; a real model (below) | Done: a free on-device voice is the default (see below and `16-measurements.md`); cloud voices remain as upgrades |
 | Feelings and movement | Seven moods following the reply's emotion tags; eighteen gestures the character chooses or its mood starts; a model's own expressions mapped to feelings; feelings linger a few seconds after a reply | Stage and core tests; end-to-end check with the real core and stage (`core/tests/stack_check.py`) | Calibration per character, recorded human motion, drawn arm poses (roadmap items 4 and 6) |
 
 ## A real conversation
@@ -45,7 +45,10 @@ In software the product fits together: a character can be added, edited,
 talked to, and it reacts with feelings and movement in step with its
 speech. What stands between this and a product, in order:
 
-1. **A free local voice**, so a buyer needs only a language-model key.
+1. ~~**A free local voice**~~: done (2026-11-18): a Piper voice with 904
+   speakers runs on the device through sherpa-onnx, with phonemes from
+   espeak-ng, and is the default; 24 clear voices, chosen by a survey of all
+   904, are offered on the settings page.
 2. **A guided personality form** on the settings page.
 3. **Memory that lasts**: the conversation archive with recall.
 4. **Characters from pictures without the command line** (the one-click

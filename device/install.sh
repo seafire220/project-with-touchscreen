@@ -27,6 +27,11 @@ IMAGE=0
 # licence, Useful Sensors), packaged for sherpa-onnx. About 120 MB.
 MODEL_URL="https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main"
 MODEL_FILES="preprocess.onnx encode.int8.onnx uncached_decode.int8.onnx cached_decode.int8.onnx tokens.txt LICENSE"
+# On-device voice: Piper "LibriTTS-R" medium (904 speakers), trained on LibriTTS-R
+# (CC BY 4.0, Koizumi et al., Google), packaged for sherpa-onnx. About 80 MB.
+# Phonemes come from espeak-ng (an operating-system package, run as a program).
+VOICE_URL="https://huggingface.co/csukuangfj/vits-piper-en_US-libritts_r-medium/resolve/main"
+VOICE_FILES="en_US-libritts_r-medium.onnx en_US-libritts_r-medium.onnx.json tokens.txt MODEL_CARD"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -52,7 +57,7 @@ apt-get install -y -q --no-install-recommends \
     cage python3 python3-venv python3-numpy python3-aiohttp python3-pil \
     alsa-utils network-manager polkitd fonts-dejavu-core python3-qrcode avahi-daemon \
     libegl1 libgles2 libgl1-mesa-dri libwayland-client0 libwayland-egl1 libxkbcommon0 \
-    ca-certificates curl
+    espeak-ng-data espeak-ng ca-certificates curl
 
 say "Creating the service user"
 if ! id companion >/dev/null 2>&1; then
@@ -105,6 +110,23 @@ if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/stt" ]; then
         chown -R companion:companion "$DATA/models"
     else
         echo "warning: could not download the speech model; choose a cloud speech service in the settings page" >&2
+        rm -rf "$tmp"
+    fi
+fi
+
+if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/tts" ]; then
+    say "Downloading the on-device voice"
+    tmp="$(mktemp -d)"
+    ok=1
+    for f in $VOICE_FILES; do
+        curl -fsSL "$VOICE_URL/$f" -o "$tmp/$f" || { ok=0; break; }
+    done
+    if [ "$ok" = 1 ]; then
+        install -d -o companion -g companion "$DATA/models"
+        mv "$tmp" "$DATA/models/tts"
+        chown -R companion:companion "$DATA/models"
+    else
+        echo "warning: could not download the on-device voice; choose a voice service in the settings page" >&2
         rm -rf "$tmp"
     fi
 fi

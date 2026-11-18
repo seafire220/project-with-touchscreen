@@ -75,7 +75,7 @@ owner's things without removing the software.
    computers.
 4. **Getting started.** The settings page's home tab lists what is left:
    - choose a language model and paste its key;
-   - choose a voice and paste its key;
+   - keep the free on-device voice, or choose a voice service and paste its key;
    - add a character;
    - press the button and say hello.
 
