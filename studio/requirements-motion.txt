@@ -1,0 +1,5 @@
+# For studio/record_motion.py only (gestures from a video of a person).
+# MediaPipe's face and pose models (about 10 MB) are downloaded on first use.
+mediapipe
+opencv-python-headless
+numpy

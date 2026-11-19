@@ -27,6 +27,7 @@ device").
 | image2live2d (pinned commit) | Rigs the parts; writes `.moc3` | Apache-2.0 |
 | PyTorch, NumPy, SciPy, Pillow, OpenCV (headless), rembg and their models | Image work | Their own licences (BSD, MIT, Apache-2.0) |
 | aiohttp | Character Studio's local page (`studio/app.py`) | Apache-2.0 |
+| MediaPipe (Google), with its Face Landmarker and Pose Landmarker (lite) models | Turns a video of a person into gestures (`studio/record_motion.py`, optional) | Apache-2.0 (library); the models are downloaded from Google's MediaPipe model storage on first use, under the terms on their model cards |
 
 Character Studio downloads the See-through code (at the tested commit) and
 its body-part model weights from their authors' GitHub and Hugging Face
