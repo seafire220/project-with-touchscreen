@@ -116,6 +116,7 @@ class Conversation:
         self.stage.state("thinking")
         messages = self.memory.recent(self.history_turns) + [{"role": "user", "content": heard}]
         gestures = self.gestures if self.gestures is not None else getattr(self.stage, "gestures", ("nod", "shake", "bow", "tilt"))
+        gestures = [g for g in gestures if g not in getattr(self.stage, "disabled", ())]
         system = system_prompt(self.persona, self.memory.notes(), search_tag=self.search is not None, gestures=gestures,
                                recalled=self.memory.recall(heard))
         writer = None
@@ -271,6 +272,7 @@ class Conversation:
         """The sentence's performance, or None (the stage then moves the mouth with the loudness alone)."""
         try:
             available = self.gestures if self.gestures is not None else getattr(self.stage, "gestures", ())
+            available = [g for g in available or () if g not in getattr(self.stage, "disabled", ())]
             return self.planner.plan(text, available or (), asked=asked, first=first,
                                      strokes=getattr(self.stage, "strokes", None))
         except Exception:

@@ -482,6 +482,10 @@ pub struct Motion {
 	/// Whether the eyes can rest half closed; if not, a gesture's eyelids are open or shut, passing
 	/// quickly between (see `Behaviour::set_smooth_eyelids`).
 	smooth_eyelids: bool,
+	/// Gestures and idle actions it never starts by itself (the owner's choice for this character).
+	disabled: Vec<bool>,
+	/// How expressive the character is (1 usual): the size of its own gestures.
+	expressiveness: f32,
 }
 
 /// Asked-for gestures waiting their turn, at most.
@@ -528,7 +532,10 @@ impl Motion {
 			resting: false,
 			mood_share: 0.5,
 			smooth_eyelids: true,
+			disabled: Vec::new(),
+			expressiveness: 1.0,
 		};
+		m.disabled = vec![false; m.lib.clips.len()];
 		m.last_start = vec![f32::NEG_INFINITY; m.lib.clips.len()];
 		m.next_random = m.random_gap(1.0);
 		m
@@ -620,6 +627,26 @@ impl Motion {
 
 	pub fn set_smooth_eyelids(&mut self, smooth: bool) {
 		self.smooth_eyelids = smooth;
+	}
+
+	/// Gestures and idle actions the character never starts by itself (asked for, they still play).
+	pub fn set_disabled(&mut self, names: &[String]) {
+		self.disabled = self.lib.clips.iter().map(|c| names.contains(&c.name)).collect();
+	}
+
+	/// How expressive the character is, 1 usual: its own gestures are a little bigger or smaller.
+	pub fn set_expressiveness(&mut self, x: f32) {
+		self.expressiveness = x.clamp(0.4, 1.6);
+	}
+
+	/// Idle actions this character can make.
+	pub fn actions(&self) -> Vec<String> {
+		let mut names: Vec<String> = (0..self.lib.clips.len())
+			.filter(|i| self.lib.clips[*i].kind == Kind::Idle && self.playable(*i))
+			.map(|i| self.lib.clips[i].name.clone())
+			.collect();
+		names.sort();
+		names
 	}
 
 	/// A reaction, now, over anything else. Returns whether it started.
@@ -731,9 +758,14 @@ impl Motion {
 	}
 
 	fn begin(&mut self, i: usize, intensity: f32, priority: u8) -> Start {
+		if priority < ASKED && priority != REACTION && self.disabled.get(i).copied().unwrap_or(false) {
+			return Start::Skipped("switched off for this character");
+		}
 		if let Err(why) = self.within_budget(i, priority) {
 			return Start::Skipped(why);
 		}
+		// Its own gestures are a little bigger for an expressive character, smaller for a reserved one.
+		let intensity = if priority < ASKED { intensity * (0.7 + 0.3 * self.expressiveness) } else { intensity };
 		// Which side, which take, how fast and how big: a little different each time.
 		let clip = &self.lib.clips[i];
 		let (can_plain, can_mirror) = (self.available[i], self.available_mirrored[i]);
@@ -873,7 +905,7 @@ impl Motion {
 			let pool: Vec<(usize, f32)> = pool
 				.into_iter()
 				.filter_map(|(g, w)| {
-					let i = self.lib.clips.iter().position(|c| c.name == g).filter(|i| self.playable(*i))?;
+					let i = self.lib.clips.iter().position(|c| c.name == g).filter(|i| self.playable(*i) && !self.disabled[*i])?;
 					let wait = if self.lib.clips[i].big { FRESH_BIG } else { FRESH_SMALL };
 					let again = if self.last_pick == Some(i) { AGAIN } else { 1.0 };
 					Some((i, w * again * ((self.t - self.last_start[i]) / wait).clamp(0.0, 1.0)))
@@ -1371,5 +1403,16 @@ mod tests {
 		assert!((strokes["nod"] - 0.18).abs() < 0.01, "the nod's lowest point: {}", strokes["nod"]);
 		assert!(strokes["brow_flash"] < 0.15 && strokes["wave"] > 0.3 && strokes["bow"] > 0.5, "{strokes:?}");
 		assert!(!strokes.contains_key("yawn"), "only gestures");
+	}
+
+	#[test]
+	fn a_gesture_switched_off_is_never_started_by_the_character_itself() {
+		let mut m = Motion::new(Library::builtin(), all, 3);
+		m.set_disabled(&["nod".to_string(), "tilt".to_string()]);
+		let (_, started) = run(&mut m, 120.0, State::Speaking);
+		assert!(!started.is_empty() && started.iter().all(|g| g != "nod" && g != "tilt"), "{started:?}");
+		assert!(matches!(m.suggest("nod", 1.0).unwrap(), Start::Skipped(_)));
+		assert_eq!(m.play("nod", 1.0).unwrap(), Start::Now, "asked for, it still plays");
+		assert!(m.actions().contains(&"yawn".to_string()) && !m.actions().contains(&"nod".to_string()));
 	}
 }

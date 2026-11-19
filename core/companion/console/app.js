@@ -244,8 +244,26 @@ async function loadFeelings(cid) {
 // Which of the character's own parameters each kind of movement uses; tested live on the device's screen.
 let movement = null;
 
+function showTemperament(values) {
+  $("tp-liveliness").value = values.liveliness;
+  $("tp-expressiveness").value = values.expressiveness;
+}
+
 async function loadMovement(cid) {
   movement = await api("GET", "/api/characters/" + cid + "/movement");
+  showTemperament(movement.temperament || movement.suggested);
+  text($("temper-msg"), movement.temperament ? "" : "Suggested from the personality; not saved yet.");
+  const switches = $("switch-list");
+  switches.replaceChildren();
+  for (const name of movement.gestures.concat(movement.actions || [])) {
+    const label = document.createElement("label");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.value = name;
+    box.checked = !movement.gestures_off.includes(name);
+    label.append(box, " " + name.replace(/_/g, " "));
+    switches.append(label);
+  }
   $("move-inactive").hidden = movement.active && movement.ready;
   $("move-body").hidden = !(movement.active && movement.ready);
   text($("move-msg"), "");
@@ -342,6 +360,28 @@ $("btn-save-move").addEventListener("click", async () => {
     text($("move-msg"), "Saved. The character restarts on the screen with it.");
     setTimeout(() => loadMovement(state.editing).catch(() => {}), 4000);
   } catch (err) { text($("move-msg"), err.message); }
+});
+
+$("btn-save-temper").addEventListener("click", async () => {
+  try {
+    await api("PUT", "/api/characters/" + state.editing + "/temperament",
+      { liveliness: Number($("tp-liveliness").value), expressiveness: Number($("tp-expressiveness").value) });
+    text($("temper-msg"), "Saved. It moves this way from now on.");
+  } catch (err) { text($("temper-msg"), err.message); }
+});
+
+$("btn-suggest-temper").addEventListener("click", () => {
+  if (!movement) return;
+  showTemperament(movement.suggested);
+  text($("temper-msg"), "Suggested from the personality. Save to keep it.");
+});
+
+$("btn-save-switches").addEventListener("click", async () => {
+  const off = [...$("switch-list").querySelectorAll("input")].filter((b) => !b.checked).map((b) => b.value);
+  try {
+    await api("PUT", "/api/characters/" + state.editing + "/temperament", { gestures_off: off });
+    text($("switch-msg"), off.length ? "Saved: it never makes these by itself." : "Saved.");
+  } catch (err) { text($("switch-msg"), err.message); }
 });
 
 $("btn-reset-move").addEventListener("click", async () => {

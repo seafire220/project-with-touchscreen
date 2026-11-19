@@ -376,7 +376,7 @@ impl Director {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::behaviour::Behaviour;
+	use crate::behaviour::{Behaviour, Pose};
 	use crate::motion::{Library, Motion};
 
 	const DT: f32 = 0.1;
@@ -580,5 +580,52 @@ mod tests {
 		let mut deaf = Director::new();
 		deaf.on_state(State::Listening);
 		assert!(!pass(&mut deaf, 5.0).resting, "without a microphone, it still nods now and then by itself");
+	}
+
+	#[test]
+	fn a_lively_expressive_character_moves_more_than_a_calm_reserved_one() {
+		// Ten minutes of the same conversation (talking, listening, quiet), two temperaments.
+		let run_with = |energy: f32, expressiveness: f32| {
+			let mut director = Director::new();
+			director.set_clock(14.0);
+			director.set_temperament(energy, expressiveness);
+			let mut behaviour = Behaviour::new(9);
+			let mut motion = Motion::new(Library::builtin(), |_| true, 9);
+			motion.set_expressiveness(expressiveness);
+			let dt = 1.0 / 30.0;
+			let (mut gestures, mut motion_amount) = (0, 0.0f32);
+			let mut last = None;
+			for i in 0..(600.0 / dt) as usize {
+				let t = i as f32 * dt;
+				let state = match t % 40.0 {
+					x if x < 20.0 => State::Speaking,
+					x if x < 28.0 => State::Listening,
+					_ => State::Idle,
+				};
+				if behaviour.state() != state {
+					behaviour.set_state(state);
+					director.on_state(state);
+				}
+				let d = director.update(dt);
+				motion.set_idle(&d.idle, d.mood_share);
+				motion.set_pace(d.pace);
+				motion.set_resting(d.resting);
+				let (e, beats) = motion.style();
+				behaviour.set_style(e * d.liveliness, beats);
+				let mut pose = behaviour.update(dt);
+				gestures += motion.apply(dt, &mut pose, state, true).is_some() as usize;
+				if let Some(prev) = last {
+					let p: Pose = prev;
+					motion_amount += (pose.head_yaw - p.head_yaw).abs() + (pose.head_pitch - p.head_pitch).abs()
+						+ (pose.body_roll - p.body_roll).abs();
+				}
+				last = Some(pose);
+			}
+			(gestures, motion_amount)
+		};
+		let (shy_gestures, shy_motion) = run_with(0.6, 0.6);
+		let (bold_gestures, bold_motion) = run_with(1.4, 1.4);
+		assert!(bold_gestures as f32 >= 1.4 * shy_gestures as f32, "{bold_gestures} against {shy_gestures} gestures");
+		assert!(bold_motion >= 1.4 * shy_motion, "{bold_motion} against {shy_motion} of movement");
 	}
 }

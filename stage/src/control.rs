@@ -20,12 +20,15 @@
 //! {"clock": 21.5}
 //! {"poke": true}
 //! {"heard": 0.4}
+//! {"temperament": {"energy": 1.2, "expressiveness": 0.8}}
+//! {"gestures_off": ["wave", "stretch"]}
 //! {"quit": true}
 //! ```
 //!
 //! `clock` is the local time of day in hours (the character is sleepy at night); `poke` says someone
 //! is there (the button was pressed); `heard` is the loudness of the person speaking, 0 to 1, sent
-//! while the character listens.
+//! while the character listens. `temperament` is how lively and how expressive the character is (1 is
+//! usual, 0.4 to 1.6); `gestures_off` names gestures and idle actions it never starts by itself.
 //!
 //! `emotion` changes the mood (how the character moves, its face, and which
 //! gestures it makes by itself); `gesture` plays one of the library's
@@ -79,6 +82,10 @@ pub enum Command {
 	Poke,
 	/// How loud the person speaking is, 0 to 1.
 	Heard(f32),
+	/// How lively and how expressive the character is, 1 usual.
+	Temperament(f32, f32),
+	/// Gestures and idle actions it never starts by itself.
+	GesturesOff(Vec<String>),
 	Quit,
 }
 
@@ -163,6 +170,16 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 				}
 			}
 			"heard" => out.push(Command::Heard(val.as_f64().ok_or("\"heard\" must be a number")?.clamp(0.0, 1.0) as f32)),
+			"temperament" => {
+				let number = |key: &str| {
+					val.get(key).and_then(Value::as_f64).map(|v| v.clamp(0.4, 1.6) as f32).ok_or(format!("\"temperament\" needs \"{key}\""))
+				};
+				out.push(Command::Temperament(number("energy")?, number("expressiveness")?));
+			}
+			"gestures_off" => {
+				let names = val.as_array().ok_or("\"gestures_off\" must be a list of names")?;
+				out.push(Command::GesturesOff(names.iter().filter_map(Value::as_str).take(100).map(str::to_string).collect()));
+			}
 			"state" => {
 				let s = val.as_str().ok_or("\"state\" must be a string")?;
 				out.push(Command::State(State::parse(s).ok_or(format!("unknown state '{s}'"))?));
@@ -328,6 +345,12 @@ mod tests {
 		assert!(parse_line(r#"{"clock": 25}"#).is_err());
 		assert_eq!(parse_line(r#"{"poke": true}"#).unwrap().1, vec![Command::Poke]);
 		assert_eq!(parse_line(r#"{"heard": 1.7}"#).unwrap().1, vec![Command::Heard(1.0)]);
+		assert_eq!(
+			parse_line(r#"{"temperament": {"energy": 3, "expressiveness": 0.8}}"#).unwrap().1,
+			vec![Command::Temperament(1.6, 0.8)]
+		);
+		assert!(parse_line(r#"{"temperament": {"energy": 1}}"#).is_err());
+		assert_eq!(parse_line(r#"{"gestures_off": ["wave"]}"#).unwrap().1, vec![Command::GesturesOff(vec!["wave".into()])]);
 	}
 
 	#[test]

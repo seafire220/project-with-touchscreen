@@ -62,6 +62,8 @@ class FakeStage:
         self.emotion_map = {}
         self.param_info = []        # as the stage reports when it is ready
         self.controls = []
+        self.actions = ["look_around", "yawn", "stretch"]
+        self.disabled = set()
 
     def send(self, command):
         self.commands.append(command)
@@ -89,6 +91,13 @@ class FakeStage:
 
     def gesture(self, name):
         self.commands.append({"gesture": name})
+
+    def temperament(self, energy, expressiveness):
+        self.commands.append({"temperament": {"energy": energy, "expressiveness": expressiveness}})
+
+    def gestures_off(self, names):
+        self.disabled = set(names)
+        self.commands.append({"gestures_off": sorted(self.disabled)})
 
     def clock(self, hour):
         self.commands.append({"clock": round(hour, 3)})

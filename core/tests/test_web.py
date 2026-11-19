@@ -27,6 +27,14 @@ def fakes(which, device):
     return {"llm": FakeLLM("[happy] Nice to meet you. I'm Aria."), "tts": FakeTTS()}.get(which)
 
 
+def conversation_prompt(conversation):
+    """The system prompt a conversation would send now."""
+    from companion.conversation import system_prompt
+    gestures = conversation.gestures if conversation.gestures is not None else conversation.stage.gestures
+    gestures = [g for g in gestures if g not in getattr(conversation.stage, "disabled", ())]
+    return system_prompt(conversation.persona, "", gestures=gestures)
+
+
 class WebTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -233,6 +241,48 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         leaky = dict(CARD, data=dict(CARD["data"], description="My key is sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"))
         r = await self.client.post("/api/cards/read", data=png_card(leaky), headers=H)
         self.assertEqual(r.status, 400, "a card carrying a key is not used")
+
+    async def test_temperament_and_gestures_switched_off_are_saved_and_given_to_the_stage(self):
+        await self.login()
+        self.device.characters.install(package.build(good_files(), manifest()))
+        self.device.activate("aria")
+        m = await (await self.client.get("/api/characters/aria/movement")).json()
+        self.assertIsNone(m["temperament"], "nothing chosen yet")
+        self.assertEqual(set(m["suggested"]), {"liveliness", "expressiveness"})
+        self.stage.commands.clear()
+        r = await self.client.put("/api/characters/aria/temperament", headers=H,
+                                  json={"liveliness": 0.9, "expressiveness": 1.7, "gestures_off": ["wave", "yawn"]})
+        self.assertEqual(r.status, 200, await r.text())
+        saved = await r.json()
+        self.assertEqual(saved["temperament"], {"liveliness": 0.9, "expressiveness": 1.0})
+        self.assertIn({"temperament": {"energy": 1.32, "expressiveness": 1.4}}, self.stage.commands, "at once")
+        self.assertIn({"gestures_off": ["wave", "yawn"]}, self.stage.commands)
+        for bad in ({"gestures_off": "wave"}, {"gestures_off": ["Wave!"]}, ["no"]):
+            r = await self.client.put("/api/characters/aria/temperament", json=bad, headers=H)
+            self.assertEqual(r.status, 400, bad)
+        # The conversation is not offered a gesture switched off, and the stage gets the settings again when ready.
+        self.stage.gestures = ["nod", "wave"]
+        conversation = self.device.make_conversation()
+        self.assertAlmostEqual(conversation.planner.expressiveness, 1.4)
+        self.assertNotIn("[wave]", conversation_prompt(conversation))
+        self.stage.commands.clear()
+        self.device._stage_event({"event": "ready", "gestures": ["nod", "wave"]})
+        self.assertIn({"gestures_off": ["wave", "yawn"]}, self.stage.commands)
+        self.assertNotIn("temperament", json.dumps(self.device.characters.export("aria").hex()))
+
+    async def test_a_personality_suggests_the_first_temperament(self):
+        await self.login()
+        self.device.characters.install(package.build(good_files(), manifest()))
+        r = await self.client.put("/api/characters/aria/persona", headers=H,
+                                  json={"persona": "Shy and quiet, a little awkward; speaks softly and rarely smiles."})
+        self.assertEqual(r.status, 200)
+        t = self.device.characters.device_settings("aria")["temperament"]
+        self.assertLess(t["liveliness"], 0.5)
+        self.assertLess(t["expressiveness"], 0.5)
+        await self.client.put("/api/characters/aria/temperament", json={"liveliness": 0.8, "expressiveness": 0.8}, headers=H)
+        await self.client.put("/api/characters/aria/persona", json={"persona": "Bubbly and dramatic!"}, headers=H)
+        self.assertEqual(self.device.characters.device_settings("aria")["temperament"]["liveliness"], 0.8,
+                         "the owner's choice is kept")
 
     async def test_the_movement_preview_moves_only_real_parameters_within_range(self):
         await self.login()

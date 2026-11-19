@@ -47,3 +47,8 @@ summary { cursor: pointer; color: var(--muted); }
 .moves .move > span { min-width: 150px; }
 .moves select { max-width: 100%; min-width: 0; flex: 1 1 180px; }
 .moves label { display: inline-flex; gap: 4px; align-items: center; margin: 0; }
+
+.sliders label { display: flex; align-items: center; gap: 0.6em; max-width: 32em; }
+.sliders input[type=range] { flex: 1; }
+.switches { display: flex; flex-wrap: wrap; gap: 0.3em 1.2em; margin: 0.5em 0; }
+.switches label { white-space: nowrap; }

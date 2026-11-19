@@ -30,6 +30,8 @@ class StageLink:
         self.emotions = []
         self.gestures = list(DEFAULT_GESTURES)
         self.strokes = {}           # gesture: seconds in that it lands
+        self.actions = []           # idle actions it can make
+        self.disabled = set()       # gestures and idle actions the owner switched off for this character
         # For a character with its own expressions: which one shows each emotion.
         self.emotion_map = {}
         self._task = None
@@ -65,6 +67,7 @@ class StageLink:
                             self.gestures = list(event.get("gestures") or [])
                         # When each gesture lands, so the speech planner starts it in time for its word.
                         self.strokes = dict(event.get("strokes") or {})
+                        self.actions = list(event.get("actions") or [])
                     if self.on_event:
                         self.on_event(event)
             except (OSError, asyncio.IncompleteReadError):
@@ -118,6 +121,15 @@ class StageLink:
     def random_gestures(self, on):
         """Let the mood start gestures by itself, or not."""
         self.send({"random_gestures": bool(on)})
+
+    def temperament(self, energy, expressiveness):
+        """How lively and how expressive the character is (1 usual, 0.6 to 1.4)."""
+        self.send({"temperament": {"energy": round(float(energy), 2), "expressiveness": round(float(expressiveness), 2)}})
+
+    def gestures_off(self, names):
+        """Gestures and idle actions the character never starts by itself."""
+        self.disabled = set(names)
+        self.send({"gestures_off": sorted(self.disabled)})
 
     def clock(self, hour):
         """The local time of day, in hours: the character is livelier in the morning and sleepy at night."""

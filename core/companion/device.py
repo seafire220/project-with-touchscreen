@@ -14,7 +14,7 @@ from .audio import Detector, Microphone, Speaker, tone
 from .characters import Characters, split_persona
 from .conversation import Conversation
 from .memory import Memory
-from . import screen
+from . import screen, temperament
 from .network import NetworkError, WiFi
 from .providers import ProviderError
 from .stage_link import StageLink
@@ -79,6 +79,7 @@ class Device:
             if hasattr(self.stage, "random_gestures"):
                 self.stage.random_gestures(self.store.settings()["conversation"].get("random_gestures", True))
             self.use_emotion_map()
+            self.use_character_motion()
             self.tell_the_time()
 
     def tell_the_time(self):
@@ -233,6 +234,19 @@ class Device:
         if cid and hasattr(self.stage, "emotion_map"):
             self.stage.emotion_map = self.characters.emotion_map(cid)
 
+    def use_character_motion(self, cid=None):
+        """Tell the stage the character's temperament, and the gestures it never makes by itself."""
+        cid = cid or self.active_id()
+        saved = self.characters.device_settings(cid) if cid else {}
+        energy, expressiveness = temperament.for_stage(saved.get("temperament"))
+        off = [str(g)[:60] for g in saved.get("gestures_off") or []][:100]
+        if hasattr(self.stage, "temperament"):
+            self.stage.temperament(energy, expressiveness)
+        if hasattr(self.stage, "gestures_off"):
+            self.stage.gestures_off(off)
+        if self.conversation is not None:
+            self.conversation.planner.expressiveness = expressiveness
+
     def _link_puppet(self, cid):
         """Point the stage at the character's drawing. The stage tells the formats apart by content."""
         inochi = ("visual/puppet.inp", "visual/puppet.inx")
@@ -285,13 +299,17 @@ class Device:
         voice = self.characters.device_settings(cid).get("voice") or None
         settings = self.store.settings()
         self.speaker.volume = float(settings.get("volume", 0.8))
-        return Conversation(
+        conversation = Conversation(
             llm=self.build("llm"), tts=self.build("tts", voice=voice),
             speaker=self.speaker, stage=self.stage, memory=self.memory(cid),
             persona=self.characters.persona(cid),
             history_turns=int(settings["conversation"].get("history_turns", 12)),
             on_event=self._conversation_event, on_action=self.action, search=self._search_function(settings),
             gestures=None if settings["conversation"].get("gestures", True) else [])
+        # A reserved character's words call for fewer gestures; an expressive one's for more.
+        conversation.planner.expressiveness = temperament.for_stage(
+            self.characters.device_settings(cid).get("temperament"))[1]
+        return conversation
 
     def _search_function(self, settings):
         """Search for models without their own: only with a search key, and not for Claude (it has its own)."""

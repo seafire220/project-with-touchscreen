@@ -293,6 +293,11 @@ impl StageApp {
 				self.react(&reactions);
 			}
 			Command::Heard(level) => self.director.hear(level),
+			Command::Temperament(energy, expressiveness) => {
+				self.director.set_temperament(energy, expressiveness);
+				self.motion.set_expressiveness(expressiveness);
+			}
+			Command::GesturesOff(names) => self.motion.set_disabled(&names),
 			Command::Look(x, y) => self.behaviour.set_look(x, y),
 			Command::Blink => self.behaviour.blink_now(),
 			Command::Set(name, value, ease) => {
@@ -409,6 +414,7 @@ impl App for StageApp {
 					"controls": controls,
 					"emotions": self.motion.emotions(),
 					"gestures": self.motion.gestures(),
+					"actions": self.motion.actions(),
 					// When each gesture lands, seconds in: the core starts it that long before its word.
 					"strokes": self
 						.motion

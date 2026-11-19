@@ -139,6 +139,8 @@ class CardTest(unittest.TestCase):
                                       "--exit-after", "0.6"], env=env, capture_output=True, text=True, timeout=60)
             finally:
                 xvfb.terminate()
+                xvfb.wait(timeout=10)
+                xvfb.stdout.close()
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
             frame = Image.open(os.path.join(d, "frame_000.png")).convert("RGB")
             colours = frame.getcolors(1 << 20)

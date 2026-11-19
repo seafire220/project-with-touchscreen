@@ -12,12 +12,13 @@ import io
 import ipaddress
 import json
 import os
+import re
 import secrets
 import time
 
 from aiohttp import web
 
-from . import cards, package, persona
+from . import cards, package, persona, temperament
 from .memory import when
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
@@ -315,7 +316,35 @@ class Console:
             "current": list(getattr(link, "controls", [])) if ready else [],
             "params": list(getattr(link, "param_info", [])) if ready else [],
             "gestures": list(getattr(link, "gestures", [])) if ready else [],
-            "saved": saved})
+            "actions": list(getattr(link, "actions", [])) if ready else [],
+            "saved": saved,
+            **self._temperament(cid)})
+
+    def _temperament(self, cid):
+        settings = self.device.characters.device_settings(cid)
+        saved = settings.get("temperament")
+        return {"temperament": temperament.clean(saved) if saved else None,
+                "suggested": temperament.suggest(self.device.characters.persona(cid)),
+                "gestures_off": list(settings.get("gestures_off") or [])}
+
+    async def put_temperament(self, request):
+        """Save how lively and expressive the character is, and the gestures it never makes by itself."""
+        cid = self._cid(request)
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="send liveliness, expressiveness and gestures_off")
+        changes = {}
+        if "liveliness" in body or "expressiveness" in body:
+            changes["temperament"] = temperament.clean(body)
+        if "gestures_off" in body:
+            off = body["gestures_off"]
+            if not isinstance(off, list) or not all(isinstance(g, str) and re.fullmatch(r"[a-z_]{1,40}", g) for g in off):
+                raise web.HTTPBadRequest(text="gestures_off is a list of gesture names")
+            changes["gestures_off"] = sorted(set(off))[:100]
+        self.device.characters.set_device_settings(cid, changes)
+        if cid == self.device.active_id():
+            self.device.use_character_motion(cid)
+        return web.json_response({"ok": True, **self._temperament(cid)})
 
     async def put_movement(self, request):
         """Save the movement settings ({control: {"param", "invert"} or null to switch it off}) and show the
@@ -404,6 +433,12 @@ class Console:
                 self.device.characters.set_device_settings(cid, {"persona_form": form})
             elif "persona" in body:
                 self.device.characters.set_persona(cid, str(body["persona"]))
+            if ("form" in body or "persona" in body) and not self.device.characters.device_settings(cid).get("temperament"):
+                # A first temperament from the personality (a shy character moves less); the sliders change it.
+                suggested = temperament.suggest(self.device.characters.persona(cid))
+                self.device.characters.set_device_settings(cid, {"temperament": suggested})
+                if cid == self.device.active_id():
+                    self.device.use_character_motion(cid)
             if "voice" in body:
                 self.device.characters.set_device_settings(cid, {"voice": str(body["voice"])[:200]})
         except ValueError as error:
@@ -563,6 +598,7 @@ def make_app(device):
     r.add_get("/api/characters/{cid}/movement", console.get_movement)
     r.add_put("/api/characters/{cid}/movement", console.put_movement)
     r.add_delete("/api/characters/{cid}/movement", console.reset_movement)
+    r.add_put("/api/characters/{cid}/temperament", console.put_temperament)
     r.add_post("/api/stage/preview", console.stage_preview)
     r.add_post("/api/cards/read", console.read_card)
     r.add_get("/api/memory/{cid}", console.get_memory)
