@@ -40,6 +40,7 @@ absent_or_disabled() { ! ls "$ROOT"/etc/systemd/system/*.wants/"$1" >/dev/null 2
 check "core service installed" test -f "$ROOT/opt/companion/core/companion/__main__.py"
 check "settings page installed" test -f "$ROOT/opt/companion/core/companion/console/index.html"
 check "character program installed (64-bit ARM)" sh -c "file -b '$ROOT/opt/companion/bin/stage' | grep -q aarch64"
+check "full-body animations for 3D avatars installed" sh -c "ls '$ROOT/opt/companion/share/vrma/idle.vrma'"
 check "Python environment with on-device speech recognition" sh -c "ls '$ROOT'/opt/companion/venv/lib/python3*/site-packages | grep -q sherpa_onnx"
 check "speech model shipped" test -f "$ROOT/var/lib/companion/models/stt/encode.int8.onnx"
 check "on-device voice shipped" test -f "$ROOT/var/lib/companion/models/tts/en_US-libritts_r-medium.onnx"

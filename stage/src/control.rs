@@ -25,6 +25,7 @@
 //! {"define": {"name": "wiggle", "kind": "gesture", "needs": ["head_roll"], "tracks": {"head_roll": [[0, 0], [0.3, 0.4], [0.6, 0]]}}}
 //! {"undefine": "wiggle"}
 //! {"describe": true}
+//! {"try_animation": "/var/lib/companion/characters/ada/animations/wave.vrma"}
 //! {"quit": true}
 //! ```
 //!
@@ -98,6 +99,8 @@ pub enum Command {
 	Undefine(String),
 	/// Send the whole library.
 	Describe,
+	/// Play a VRM Animation clip once from this file (a VRM avatar trying one before it is kept).
+	TryAnimation(std::path::PathBuf),
 	Quit,
 }
 
@@ -218,6 +221,13 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 				if val.as_bool() == Some(true) {
 					out.push(Command::Blink);
 				}
+			}
+			"try_animation" => {
+				let path = val.as_str().filter(|p| p.len() < 4096).ok_or("\"try_animation\" names a .vrma file")?;
+				if !path.to_ascii_lowercase().ends_with(".vrma") {
+					return Err("\"try_animation\" names a .vrma file".into());
+				}
+				out.push(Command::TryAnimation(path.into()));
 			}
 			"quit" => {
 				if val.as_bool() == Some(true) {
@@ -360,6 +370,11 @@ mod tests {
 		);
 		assert_eq!(parse_line(r#"{"look": [0.5, -1]}"#).unwrap(), (None, vec![Command::Look(0.5, -1.0)]));
 		assert_eq!(parse_line(r#"{"quit": true}"#).unwrap(), (None, vec![Command::Quit]));
+		assert_eq!(
+			parse_line(r#"{"try_animation": "/x/wave.vrma"}"#).unwrap().1,
+			vec![Command::TryAnimation("/x/wave.vrma".into())]
+		);
+		assert!(parse_line(r#"{"try_animation": "/etc/passwd"}"#).is_err());
 		assert_eq!(parse_line(r#"{"quit": false}"#).unwrap(), (None, vec![]));
 		assert_eq!(parse_line(r#"{"blink": true}"#).unwrap(), (None, vec![Command::Blink]));
 		let (at, commands) = parse_line(r#"{"at": 1.5, "mouth": 1, "state": "speaking"}"#).unwrap();

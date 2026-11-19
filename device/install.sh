@@ -88,6 +88,9 @@ if [ ! -x "$STAGE_BINARY" ]; then
 fi
 install -m 0755 "$STAGE_BINARY" "$APP/bin/stage.new"
 mv "$APP/bin/stage.new" "$APP/bin/stage"
+# The built-in full-body animations for 3D (VRM) avatars, read by the stage when one is set to them.
+install -d "$APP/share/vrma"
+install -m 0644 "$REPO"/stage/motions/vrma/*.vrma "$APP/share/vrma/"
 
 say "Setting up Python"
 if [ ! -x "$APP/venv/bin/python" ]; then

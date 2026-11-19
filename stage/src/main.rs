@@ -39,6 +39,7 @@ use mapping::Mapper;
 use motion::{Library, Motion, Start};
 use overrides::Overrides;
 use puppet_info::PuppetInfo;
+use vrm::anim::{self, Scene};
 use vrm::render::{Shot, VrmRenderer};
 use vrm::{Profile, VrmPuppet};
 use window::{App, AppFrame, GlPreference};
@@ -67,6 +68,20 @@ Usage: stage CHARACTER [options]
   --profile auto|l1|l2  memory profile for VRM avatars: textures up to 1024 (l1)
                         or 2048 (l2) pixels a side (default auto: l2 with 1.5 GB
                         of memory or more)
+  --vrm-animation light|full
+                        how a VRM avatar moves: light (the same controls as the 2D
+                        characters, the default) or full (animation clips on the
+                        whole skeleton, with the controls on top)
+  --clips DIR           a folder of VRM Animation clips (.vrma) for the full style;
+                        give it again for more (a later folder's clip replaces an
+                        earlier one of the same name). Default: the built-in clips
+  --quality auto|normal|lite
+                        how much a VRM avatar's drawing may cost: lite leaves out
+                        outlines and keeps textures small; auto (the default)
+                        steps down by itself if frames come too slowly
+  --settings FILE       JSON file with any of: vrm_animation, clip_folders,
+                        quality, shot (written by the core for the character on
+                        the screen; the options above win; a missing file is fine)
 
 Testing:
   --script FILE         timed commands, one JSON object per line with \"at\"
@@ -92,7 +107,12 @@ struct Options {
 	physics: bool,
 	view: Option<[f32; 4]>,
 	shot: Shot,
+	shot_given: bool,
 	profile: Option<Profile>,
+	vrm_animation: Option<VrmStyle>,
+	clip_folders: Vec<PathBuf>,
+	quality: Option<Quality>,
+	settings: Option<PathBuf>,
 	script: Option<PathBuf>,
 	fixed_dt: Option<f32>,
 	capture_dir: Option<PathBuf>,
@@ -116,7 +136,12 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 		physics: true,
 		view: None,
 		shot: Shot::Upper,
+		shot_given: false,
 		profile: None,
+		vrm_animation: None,
+		clip_folders: Vec::new(),
+		quality: None,
+		settings: None,
 		script: None,
 		fixed_dt: None,
 		capture_dir: None,
@@ -171,7 +196,18 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 			"--shot" => {
 				let v = value("--shot")?;
 				o.shot = Shot::parse(&v).ok_or(format!("--shot must be bust, upper or full, not '{v}'"))?;
+				o.shot_given = true;
 			}
+			"--vrm-animation" => {
+				let v = value("--vrm-animation")?;
+				o.vrm_animation = Some(VrmStyle::parse(&v).ok_or(format!("--vrm-animation must be light or full, not '{v}'"))?);
+			}
+			"--clips" => o.clip_folders.push(value("--clips")?.into()),
+			"--quality" => {
+				let v = value("--quality")?;
+				o.quality = Some(Quality::parse(&v).ok_or(format!("--quality must be auto, normal or lite, not '{v}'"))?);
+			}
+			"--settings" => o.settings = Some(value("--settings")?.into()),
 			"--profile" => {
 				o.profile = match value("--profile")?.as_str() {
 					"auto" => None,
@@ -210,6 +246,126 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 		return Err("--capture-at needs --capture-dir".into());
 	}
 	Ok(o)
+}
+
+/// How a VRM avatar moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VrmStyle {
+	/// The controls the 2D characters use, turned into bone turns (light on memory).
+	Light,
+	/// Animation clips on the whole skeleton, with the controls on top.
+	Full,
+}
+
+impl VrmStyle {
+	fn parse(s: &str) -> Option<VrmStyle> {
+		match s {
+			"light" => Some(VrmStyle::Light),
+			"full" => Some(VrmStyle::Full),
+			_ => None,
+		}
+	}
+}
+
+/// How much a VRM avatar's drawing may cost.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Quality {
+	/// Normal, stepping down by itself if frames come too slowly.
+	Auto,
+	Normal,
+	/// No outlines, small textures, springs at half rate.
+	Lite,
+}
+
+impl Quality {
+	fn parse(s: &str) -> Option<Quality> {
+		match s {
+			"auto" => Some(Quality::Auto),
+			"normal" => Some(Quality::Normal),
+			"lite" => Some(Quality::Lite),
+			_ => None,
+		}
+	}
+}
+
+/// The settings file the core writes for the character on the screen. Options given on the command
+/// line win; anything missing or unreadable is left at its default (with a warning), never stopping
+/// the character from showing.
+fn read_settings(o: &mut Options) -> Option<String> {
+	let path = o.settings.clone()?;
+	if !path.exists() {
+		return None;
+	}
+	let text = match std::fs::read_to_string(&path) {
+		Ok(t) => t,
+		Err(e) => return Some(format!("the stage settings were not read: {e}")),
+	};
+	let v: serde_json::Value = match serde_json::from_str(&text) {
+		Ok(v) => v,
+		Err(e) => return Some(format!("the stage settings were not used: {e}")),
+	};
+	let mut problems = Vec::new();
+	let text_of = |key: &str| v.get(key).and_then(serde_json::Value::as_str);
+	if o.vrm_animation.is_none() {
+		if let Some(s) = text_of("vrm_animation") {
+			o.vrm_animation = VrmStyle::parse(s);
+			if o.vrm_animation.is_none() {
+				problems.push(format!("vrm_animation '{s}'"));
+			}
+		}
+	}
+	if o.clip_folders.is_empty() {
+		if let Some(list) = v.get("clip_folders").and_then(serde_json::Value::as_array) {
+			o.clip_folders = list.iter().filter_map(|f| f.as_str()).take(8).map(PathBuf::from).collect();
+		}
+	}
+	if o.quality.is_none() {
+		if let Some(s) = text_of("quality") {
+			o.quality = Quality::parse(s);
+			if o.quality.is_none() {
+				problems.push(format!("quality '{s}'"));
+			}
+		}
+	}
+	if !o.shot_given {
+		if let Some(s) = text_of("shot") {
+			match Shot::parse(s) {
+				Some(shot) => o.shot = shot,
+				None => problems.push(format!("shot '{s}'")),
+			}
+		}
+	}
+	(!problems.is_empty()).then(|| format!("the stage settings had values it does not know: {}", problems.join(", ")))
+}
+
+/// Where the built-in clips are: installed on the device, or beside the source when testing.
+fn builtin_clip_folder() -> Option<PathBuf> {
+	let mut candidates = vec![PathBuf::from("/opt/companion/share/vrma")];
+	if let Ok(exe) = std::env::current_exe() {
+		// stage/target/release/stage -> stage/motions/vrma
+		if let Some(stage_dir) = exe.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
+			candidates.push(stage_dir.join("motions/vrma"));
+		}
+	}
+	candidates.push(PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/motions/vrma")));
+	candidates.into_iter().find(|p| p.is_dir())
+}
+
+/// The gestures an avatar plays from its own clips, for the motion system.
+fn clip_gestures(puppet: &VrmPuppet) -> Vec<(String, motion::External)> {
+	let Some(a) = puppet.animator() else { return Vec::new() };
+	a.one_offs()
+		.map(|c| {
+			let e = motion::External {
+				duration: c.duration.max(0.5),
+				touches: c.touches,
+				holds: c.holds,
+				stroke: c.stroke,
+				replaces: c.touches & anim::BODY,
+			};
+			(c.name.clone(), e)
+		})
+		.collect()
 }
 
 /// The character, in whichever format it came.
@@ -266,6 +422,8 @@ struct StageApp {
 	quit: bool,
 	/// Why the owner's movement settings were not used, told once the stage is ready.
 	map_warning: Option<String>,
+	/// Other problems to tell once the stage is ready (settings, animation clips).
+	warnings: Vec<String>,
 }
 
 impl StageApp {
@@ -418,7 +576,29 @@ impl StageApp {
 				}
 				self.motion.set_face(index.is_none());
 			}
+			Command::TryAnimation(path) => self.try_animation(&path),
 			Command::Quit => self.quit = true,
+		}
+	}
+
+	/// Play an animation clip once, on a VRM avatar, as it is in the file (to try one before keeping it).
+	fn try_animation(&mut self, path: &std::path::Path) {
+		let Puppet::Vrm(puppet) = &mut self.puppet else {
+			self.events.emit(json!({"event": "error", "message": "only 3D (VRM) avatars play animation clips"}));
+			return;
+		};
+		match anim::Clip::load(path) {
+			Ok(mut clip) => {
+				clip.name = "_try".into();
+				clip.looped = false;
+				puppet.add_clip(clip);
+				self.motion.set_external(&clip_gestures(puppet));
+				match self.motion.play("_try", 1.0) {
+					Ok(_) => self.events.emit(json!({"event": "gesture", "name": "_try", "cause": "command"})),
+					Err(e) => self.events.emit(json!({"event": "error", "message": e})),
+				}
+			}
+			Err(e) => self.events.emit(json!({"event": "error", "message": format!("that animation cannot be played: {e}")})),
 		}
 	}
 }
@@ -491,6 +671,9 @@ impl App for StageApp {
 				if let Some(warning) = self.map_warning.take() {
 					self.events.emit(json!({"event": "warning", "message": warning}));
 				}
+				for warning in std::mem::take(&mut self.warnings) {
+					self.events.emit(json!({"event": "warning", "message": warning}));
+				}
 				if let Puppet::Live2d(puppet) = &self.puppet {
 					self.events.emit(json!({"event": "features", "live2d": puppet.features().to_json()}));
 					for warning in &puppet.warnings {
@@ -501,6 +684,15 @@ impl App for StageApp {
 					let mut features = puppet.features();
 					features["texture_bytes"] = json!(r.texture_bytes);
 					features["depth_bits"] = json!(r.depth_bits);
+					features["animation"] = match puppet.animator() {
+						Some(a) => json!({
+							"style": "full",
+							"loops": a.clips().iter().filter(|c| c.looped).map(|c| c.name.clone()).collect::<Vec<_>>(),
+							"gestures": a.one_offs().map(|c| c.name.clone()).collect::<Vec<_>>(),
+							"clip_bytes": a.bytes(),
+						}),
+						None => json!({"style": "light"}),
+					};
 					self.events.emit(json!({"event": "features", "vrm": features}));
 					for warning in &puppet.warnings {
 						self.events.emit(json!({"event": "warning", "message": warning}));
@@ -571,9 +763,28 @@ impl App for StageApp {
 		let (energy, beats) = self.motion.style();
 		self.behaviour.set_style(energy * direction.liveliness, beats);
 		self.behaviour.set_drowsy(direction.drowsy);
+		// An avatar's own idle loop for the mood shows its posture; the mood still shows on the face.
+		if let Puppet::Vrm(p) = &self.puppet {
+			if let Some(a) = p.animator() {
+				let mood = format!("idle_{}", self.motion.mood());
+				self.motion.set_mood_posture(!a.has_loop(&mood));
+			}
+		}
 		let mut pose = self.behaviour.update(dt);
 		if let Some((g, cause)) = self.motion.apply(dt, &mut pose, self.behaviour.state(), !self.opts.still) {
 			self.events.emit(json!({"event": "gesture", "name": g, "cause": cause}));
+		}
+		if let Puppet::Vrm(p) = &mut self.puppet {
+			if p.animator().is_some() {
+				let hold = self.motion.procedural_hold();
+				p.set_scene(Scene {
+					state: self.behaviour.state(),
+					mood: self.motion.mood().to_string(),
+					resting: direction.resting,
+					layers: self.motion.external_layers(),
+					arm_hold: [hold[5], hold[6]],
+				});
+			}
 		}
 		self.speech.apply(dt, self.behaviour.state() == State::Speaking, &mut pose);
 		let mut values = self.mapper.resolve(&pose);
@@ -689,8 +900,9 @@ impl App for StageApp {
 	}
 }
 
-fn run(opts: Options) -> Result<(), String> {
+fn run(mut opts: Options) -> Result<(), String> {
 	let events = Events::default();
+	let mut warnings: Vec<String> = read_settings(&mut opts).into_iter().collect();
 	let bytes = std::fs::read(&opts.puppet).map_err(|e| format!("cannot read {}: {e}", opts.puppet.display()))?;
 	let (puppet, info) = if vrm::looks_like_vrm(&bytes) {
 		if bytes.len() as u64 > vrm::MAX_FILE_BYTES {
@@ -700,6 +912,17 @@ fn run(opts: Options) -> Result<(), String> {
 		let mut puppet = VrmPuppet::from_bytes(bytes, profile)?;
 		if !opts.physics {
 			puppet.drop_physics();
+		}
+		// The full-body style: its clips are read only for an avatar set to it.
+		if opts.vrm_animation == Some(VrmStyle::Full) {
+			let folders = if opts.clip_folders.is_empty() { builtin_clip_folder().into_iter().collect() } else { opts.clip_folders.clone() };
+			let (clips, problems) = anim::load_folders(&folders);
+			warnings.extend(problems);
+			if clips.is_empty() {
+				warnings.push("no animation clips were found for the full-body style; the avatar moves in the light style".into());
+			} else {
+				puppet.animate(clips);
+			}
 		}
 		let info = puppet.info.clone();
 		(Puppet::Vrm(Box::new(puppet)), info)
@@ -780,6 +1003,9 @@ fn run(opts: Options) -> Result<(), String> {
 	let mut motion = Motion::new(Library::builtin(), |key| mapper.drives(key), opts.seed);
 	// Each gesture a little different every time (unless holding still, for comparisons).
 	motion.set_variation(!opts.still);
+	if let Puppet::Vrm(p) = &puppet {
+		motion.set_external(&clip_gestures(p));
+	}
 	let expressions = match &puppet {
 		Puppet::Live2d(p) => p.expressions.clone(),
 		Puppet::Vrm(p) => p.expressions.clone(),
@@ -813,6 +1039,7 @@ fn run(opts: Options) -> Result<(), String> {
 		next_capture: 0,
 		quit: false,
 		map_warning,
+		warnings,
 	};
 	frame.run(app).map_err(|e| format!("stage stopped: {e}"))
 }

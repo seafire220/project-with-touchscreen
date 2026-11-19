@@ -700,15 +700,7 @@ pub fn clip_name(stem: &str) -> String {
 }
 
 /// What the motion system is playing from clips this frame (motion.rs `external_layers`).
-#[derive(Clone, Debug, Default)]
-pub struct Layer {
-	pub name: String,
-	/// Seconds into the clip.
-	pub at: f32,
-	pub mirrored: bool,
-	/// How much it shows on each motion channel (faded where it was cut short or let a channel go).
-	pub weights: [f32; CHANNELS.len()],
-}
+pub use crate::motion::ExternalLayer as Layer;
 
 /// What the character is doing, for choosing its idle loop and playing its gestures.
 #[derive(Clone, Debug)]
