@@ -78,7 +78,10 @@ she so some such than that that's the their them then there these they this thos
 were what when where which while who why will with would yeah yes you you're your yours
 remember remembered tell told talk talks talked talking think thought thing things something anything want wanted
 going gonna got get make made let well sure maybe mean right good great nice much many lot little bit kind sort way
-day time last first back still even ever never always sometimes person character conversation""".split())
+day time last first back still even ever never always sometimes person character conversation
+hello hi hey hiya bye goodbye thanks thank please sorry guess morning mornings afternoon evening night tonight
+today tomorrow yesterday weekend week love loves loved loving hate hates hated enjoy enjoys enjoyed favourite
+favorite prefer prefers preferred""".split())     # greetings, times and feelings: how, not what about
 
 WORD = re.compile(r"[^\W\d_](?:[^\W\d_]|')*")
 
@@ -151,12 +154,25 @@ def said_when(t, now=None):
     if days < 7:
         return "on %s %s (%d days ago)" % (stamp.strftime("%A"), part, days)
     if days < 60:
-        ago = "%d weeks ago" % round(days / 7)
+        weeks = round(days / 7)
+        ago = "%d week%s ago" % (weeks, "" if weeks == 1 else "s")
     elif days < 365:
         ago = "%d months ago" % round(days / 30.4)
     else:
         ago = "over a year ago" if days < 730 else "%d years ago" % (days // 365)
     return "on %d %s (%s)" % (stamp.day, stamp.strftime("%B %Y"), ago)
+
+
+def date_words(iso, now=None):
+    """A memory's date for the model: "Saturday 21 November 2026, yesterday", "..., in 3 days"."""
+    try:
+        day = datetime.date.fromisoformat(iso)
+    except (TypeError, ValueError):
+        return ""
+    days = (day - datetime.date.fromtimestamp(now or time.time())).days
+    near = {0: "today", 1: "tomorrow", -1: "yesterday"}.get(days) or (
+        "in %d days" % days if 0 < days < 14 else "%d days ago" % -days if -14 < days < 0 else "")
+    return "%s %d %s%s" % (day.strftime("%A"), day.day, day.strftime("%B %Y"), ", " + near if near else "")
 
 
 def talk_day(t):
@@ -530,7 +546,7 @@ class Memory:
             self._save_memories(items)
             return entry
 
-    def edit_memory(self, mid, **changes):
+    def edit_memory(self, mid, now=None, **changes):
         """Change a memory (text, category, importance, when, pinned, follow_up); None to retire it.
         False if not found."""
         with self._lock:
@@ -560,7 +576,7 @@ class Memory:
                         m.pop("when", None)
                 if changes.get("status") in ("active", "retired", "done"):
                     m["status"] = changes["status"]
-                m["updated"] = int(time.time())
+                m["updated"] = int(now or time.time())
                 self._save_memories(items)
                 return True
             return False
@@ -575,19 +591,28 @@ class Memory:
             return True
 
     def follow_ups(self, now=None):
-        """Plans whose day has come, to ask how they went (each at most twice, within a fortnight)."""
+        """Plans whose day has come, to ask how they went: a dated plan or event once its day has
+        passed, unless it was changed since (they said how it went); and what the model asked to
+        follow up, from its date. Each at most twice, within a fortnight."""
         now = now or time.time()
         today = datetime.date.fromtimestamp(now)
         out = []
         for m in self.memories():
-            if not m.get("follow_up") or m.get("asked", 0) >= 2:
+            if m.get("asked", 0) >= 2:
                 continue
             try:
-                due = datetime.date.fromisoformat(m.get("when", ""))
+                due = datetime.date.fromisoformat(m.get("when") or "")
             except ValueError:
                 continue
-            if due <= today <= due + datetime.timedelta(days=14):
-                out.append(m)
+            if today > due + datetime.timedelta(days=14):
+                continue
+            if m.get("follow_up"):
+                if due <= today:
+                    out.append(m)
+            elif m.get("category") == "plans and events" and due < today:
+                after = datetime.datetime.combine(due + datetime.timedelta(days=1), datetime.time()).timestamp()
+                if m.get("updated", 0) < after:
+                    out.append(m)
         return out
 
     def _mark_asked(self, ids):
@@ -644,8 +669,11 @@ class Memory:
         if notes:
             parts.append(("notes", "What they asked you always to remember:\n" + notes[:3000]))
 
-        # Memories: the pinned, the most important, and those that match what was just said.
-        memories = self.memories()
+        # Memories: the pinned, the most important, and those that match what was just said (plans to
+        # ask about come below, when their day has come).
+        due = self.follow_ups(now)[:3] if not session else []
+        due_ids = {m["id"] for m in due}
+        memories = [m for m in self.memories() if not m.get("follow_up") and m["id"] not in due_ids]
         if memories:
             question = heard + " " + " ".join(t.get("user", "") for t in history[-2:] if t.get("s") == (session or {}).get("id"))
             index = Index([m["text"] + " " + m.get("category", "") for m in memories])
@@ -657,19 +685,17 @@ class Memory:
             lines = []
             for i in sorted(chosen, key=lambda i: memories[i].get("created", 0)):
                 m = memories[i]
-                dated = " (%s)" % m["when"] if m.get("when") else ""
-                lines.append("- (%s%s) %s" % (m.get("category", "other"), dated, m["text"]))
+                dated = date_words(m.get("when"), now)
+                lines.append("- [%s] %s%s" % (m.get("category", "other"), m["text"], (" (%s)" % dated) if dated else ""))
             if lines:
                 parts.append(("memories", "What you remember about them (bring things up only when they fit):\n" + "\n".join(lines)))
 
         # Plans to ask about, on a conversation's first reply.
-        asked = []
-        if not session:
-            due = self.follow_ups(now)
-            if due:
-                parts.append(("follow", "Things you could ask how they went, if it fits (once):\n" + "\n".join(
-                    "- %s (%s)" % (m["text"], when(datetime.datetime.fromisoformat(m["when"]).timestamp(), now)) for m in due[:3])))
-                asked = [m["id"] for m in due[:3]]
+        asked = [m["id"] for m in due]
+        if due:
+            parts.append(("follow", "Plans whose day has come; ask how they went if it fits (just once):\n" + "\n".join(
+                ("- " + m["text"]) if m.get("follow_up") else ("- %s \u2014 %s" % (m["text"], date_words(m.get("when"), now)))
+                for m in due)))
 
         # How long since they last talked, and about what; the day's first conversation.
         carried = []
@@ -710,8 +736,8 @@ class Memory:
                 lines = []
                 for _, i in sorted(best, key=lambda x: x[1]):
                     s = older[i]
-                    title = ("“%s”: " % s["title"]) if s.get("title") else ""
-                    lines.append("- %s: %s%s" % (when(s.get("start", 0), now), title, s.get("summary", "")))
+                    title = (", “%s”" % s["title"]) if s.get("title") else ""
+                    lines.append("- %s%s: %s" % (said_when(s.get("end") or s.get("start", 0), now), title, s.get("summary", "")))
                 parts.append(("older", "Earlier conversations that may matter now:\n" + "\n".join(lines)))
 
         # The latest last, nearest what is said now; within the room, older conversations go first,
@@ -837,25 +863,38 @@ class Memory:
         related = sorted(index.scores(text), reverse=True)[:40]
         shown = [memories[i] for _, i in related]
         shown += [m for m in memories if m.get("importance", 3) >= 4 and m not in shown][:15]
-        known = "\n".join("#%d %s: %s" % (m["id"], m.get("category", "other"), m["text"]) for m in shown) or "(none yet)"
+        known = "\n".join("#%d [%s] %s%s" % (m["id"], m.get("category", "other"), m["text"],
+                                             " (%s)" % m["when"] if m.get("when") else "") for m in shown) or "(none yet)"
         start = datetime.datetime.fromtimestamp(session.get("start", now))
+        passed = ["#%d" % m["id"] for m in shown if m.get("category") == "plans and events" and m.get("when")
+                  and m["when"] <= start.date().isoformat()]
+        passed = ("\nPlans above whose day has come: %s. If the conversation says how one went, UPDATE it to say "
+                  "what happened.\n" % ", ".join(passed)) if passed else ""
         end = datetime.datetime.fromtimestamp(session.get("end", now))
         conversation = _lines(turns[-80:])
         if session.get("rolling") and len(turns) > 80:
             conversation = "(Earlier: %s)\n%s" % (session["rolling"], conversation)
-        prompt = SUM_UP_PROMPT.format(name=name or "the character", known=known, date=start.strftime("%A %d %B %Y"),
+        prompt = SUM_UP_PROMPT.format(name=name or "the character", known=known, passed=passed, date=start.strftime("%A %d %B %Y"),
                                       start=start.strftime("%H:%M"), end=end.strftime("%H:%M"),
                                       conversation=conversation or "(nothing was said)",
                                       categories=", ".join(CATEGORIES), today=datetime.date.fromtimestamp(now).isoformat())
         answer = await self._ask(llm, prompt)
         result = parse_sum_up(answer)
+        if not (result["title"] or result["summary"] or result["ops"]):
+            # A small model may answer with a plain paragraph instead of the form: that is its summary.
+            result["summary"] = _strip_label(answer)
+        summary = result["summary"] or session.get("rolling", "")
+        if not summary.strip():
+            # Nothing from the model: their own first words, so the conversation can still be found.
+            said = [t.get("user", "") for t in turns if t.get("user")][:3]
+            summary = ("They said: " + " / ".join(said)) if said else ""
         with self._lock:
             sessions = self.sessions()
             target = next((s for s in sessions if s.get("id") == session["id"]), None)
             if target is None:
                 return None
             target["title"] = _clean(result["title"], TITLE_LIMIT)
-            target["summary"] = _clean(result["summary"] or session.get("rolling", ""), SUMMARY_LIMIT)
+            target["summary"] = _clean(summary, SUMMARY_LIMIT)
             target["mood"] = _clean(result["mood"], 40)
             target["done"] = True
             target.pop("rolling", None)
@@ -872,10 +911,10 @@ class Memory:
                                    source=session["id"], now=now):
                     changed += 1
             elif op["op"] == "update" and op["id"] in visible:
-                if self.edit_memory(op["id"], text=op["text"]):
+                if self.edit_memory(op["id"], now=now, text=op["text"], **({"when": op["when"]} if op.get("when") else {})):
                     changed += 1
             elif op["op"] == "forget" and op["id"] in visible:
-                if self.edit_memory(op["id"], status="retired"):
+                if self.edit_memory(op["id"], now=now, status="retired"):
                     changed += 1
         return changed
 
@@ -998,9 +1037,9 @@ facts, plans and how the person felt. Reply with the summary only."""
 
 SUM_UP_PROMPT = """You keep the long-term memory of {name}, a character, about the person they talk with.
 
-Memories so far that may matter here (number, category: memory):
+What {name} remembers about them so far (those that may matter here):
 {known}
-
+{passed}
 The conversation ({date}, {start} to {end}; today is {today}):
 {conversation}
 
@@ -1008,24 +1047,31 @@ Reply in exactly this form and nothing else:
 TITLE: a few words naming what it was about
 SUMMARY: one to three sentences, as the character would remember it: what was talked about, anything that happened or was planned, how the person felt
 MOOD: one or two words for how the person seemed
-Then changes to the memories, one per line, only if there are any:
-ADD category | importance 1-5 | the memory, one short sentence | the date it happens (YYYY-MM-DD) or -
+Then the changes to the memories, one per line. Look carefully: most conversations teach something new
+or show that something remembered has changed.
+ADD category | importance 1-5 | the memory | the date of the plan or event (YYYY-MM-DD), or - if it is not one
 UPDATE #number | the memory as it is now
 FORGET #number | why (no longer true, or they asked you to forget)
 FOLLOW UP YYYY-MM-DD | what to ask them about after that date
 
-Categories: {categories}. "about me" is for what {name} said about themself, to stay consistent.
+Each memory is one short sentence: about them, starting with They or Their; about {name} (category
+"about me", what {name} said about themself, to stay consistent), starting with I. Give dates, not
+words like today or last week, which go out of date.
+Categories: {categories}.
 Importance: 5 who they are (name, family), 4 what matters a lot to them, 3 useful, 2 minor, 1 trivial.
 Keep only lasting things (names, relationships, likes, plans and events with their dates, how they want
-to be treated, promises made). Not small talk. Never invent anything. If a memory above is now wrong,
-UPDATE or FORGET it rather than adding another."""
+to be treated, promises made). Not small talk. Never invent anything. Check each memory above against
+what was said: if this conversation shows it is out of date (someone moved, a plan happened or was
+called off), UPDATE or FORGET it rather than adding another."""
 
 DIARY_PROMPT = """{persona}
 
 You are {name}. Write your diary entry for {day}, in your own voice (first person, as yourself, in
-your own way of speaking), about your day with the person you talk with: what happened, what it meant
+your own way of speaking), about your day with the person you talk with (about them, not to them:
+they never read it): what happened, what it meant
 to you, how you feel about it, anything you look forward to. 80 to 160 words. Plain text, no heading,
-no date.
+no date. Only what was said in these conversations: you hear them but cannot see them, so say nothing
+about how they looked, and invent nothing.
 
 {gap}Today's conversations:
 {conversations}
@@ -1035,10 +1081,13 @@ New things you learnt about them today:
 
 {previous}"""
 
-ADD_LINE = re.compile(r"(?i)^add\b[\s:]*([^|]+)\|\s*([1-5])\s*\|\s*([^|]+?)\s*(?:\|\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|-|none)?\s*)?$")
-UPDATE_LINE = re.compile(r"(?i)^update\b[\s:]*#?\s*(\d+)\s*\|\s*(.+)$")
+ADD_LINE = re.compile(r"(?i)^add\b[\s:]*([^|]+)\|\s*(?:([1-5])\s*\|\s*)?([^|]+?)\s*"
+                      r"(?:\|\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|-|none|n/?a)?\s*)?$")
+UPDATE_LINE = re.compile(r"(?i)^update\b[\s:]*#?\s*(\d+)\b\s*(.*)$")
 FORGET_LINE = re.compile(r"(?i)^(?:forget|remove|retire)\b[\s:]*#?\s*(\d+)\b")
-FOLLOW_LINE = re.compile(r"(?i)^follow[\s-]*up\b[\s:|]*([0-9]{4}-[0-9]{2}-[0-9]{2})?\s*\|?\s*(.+)$")
+FOLLOW_LINE = re.compile(r"(?i)^follow[\s-]*up\b(.*)$")
+PLACEHOLDER = re.compile(r"\b[Yy]{4}-[Mm]{2}-[Dd]{2}\b")
+SEPARATORS = " |:-\u2013\u2014"
 FIELD_LINE = re.compile(r"(?i)^(title|summary|mood)\s*:\s*(.*)$")
 
 
@@ -1046,7 +1095,7 @@ def parse_sum_up(text):
     """The title, summary, mood and memory changes in the model's answer (allowing for markdown it adds)."""
     out = {"title": "", "summary": "", "mood": "", "ops": []}
     for raw in (text or "").splitlines():
-        line = re.sub(r"^[\s>*#_\-•]+", "", raw).replace("**", "").replace("__", "").strip()
+        line = PLACEHOLDER.sub("", re.sub(r"^[\s>*#_\-•]+", "", raw).replace("**", "").replace("__", "")).strip()
         if not line:
             continue
         m = FIELD_LINE.match(line)
@@ -1057,26 +1106,58 @@ def parse_sum_up(text):
         if m:
             category = m.group(1).strip().strip("[]()").strip().lower()
             category = next((c for c in CATEGORIES if c == category), next((c for c in CATEGORIES if category in c or c in category), "other"))
-            op = {"op": "add", "category": category, "importance": int(m.group(2)), "text": m.group(3).strip()}
+            op = {"op": "add", "category": category, "importance": int(m.group(2) or 3), "text": _tail(m.group(3))[0]}
             if m.group(4) and m.group(4)[0].isdigit() and _valid_date(m.group(4)):
                 op["when"] = m.group(4)
             out["ops"].append(op)
             continue
         m = UPDATE_LINE.match(line)
         if m:
-            out["ops"].append({"op": "update", "id": int(m.group(1)), "text": m.group(2).strip()})
+            text, day = _tail(_drop_category(m.group(2).strip(SEPARATORS)))
+            if text:
+                op = {"op": "update", "id": int(m.group(1)), "text": text}
+                if day:
+                    op["when"] = day
+                out["ops"].append(op)
             continue
         m = FORGET_LINE.match(line)
         if m:
             out["ops"].append({"op": "forget", "id": int(m.group(1))})
             continue
         m = FOLLOW_LINE.match(line)
-        if m and m.group(2).strip():
-            op = {"op": "follow", "text": m.group(2).strip().lstrip("|").strip()}
-            if m.group(1) and _valid_date(m.group(1)):
-                op["when"] = m.group(1)
-            out["ops"].append(op)
+        if m:
+            rest = m.group(1)
+            found = re.search(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", rest)
+            text = (rest[:found.start()] + " | " + rest[found.end():]) if found else rest
+            text = " ".join(part.strip(SEPARATORS) for part in text.split("|") if part.strip(SEPARATORS))
+            if text:                          # a date alone: its plan comes up by itself
+                op = {"op": "follow", "text": text}
+                if found and _valid_date(found.group(0)):
+                    op["when"] = found.group(0)
+                out["ops"].append(op)
     return out
+
+
+def _drop_category(text):
+    """A memory's text without the category a model may repeat before it ("plans and events: ...")."""
+    low = text.lower()
+    for c in sorted(CATEGORIES, key=len, reverse=True):
+        if low.startswith("[" + c + "]"):
+            return text[len(c) + 2:].strip(SEPARATORS)
+        if low.startswith(c) and low[len(c):len(c) + 1] in ("|", ":", "]"):
+            return text[len(c) + 1:].strip(SEPARATORS)
+    return text
+
+
+def _tail(text):
+    """A memory's text without a date or dash a model put after it, and that date (or None)."""
+    text = text.strip()
+    m = (re.search(r"\s*\|\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|-|none|n/?a)\s*$", text, re.I)
+         or re.search(r"\s*\(([0-9]{4}-[0-9]{2}-[0-9]{2})\)\s*$", text) or re.search(r"\s+-$", text))
+    if not m:
+        return text, None
+    day = m.group(1) if m.lastindex and _valid_date(m.group(1)) else None
+    return text[:m.start()].strip(), day
 
 
 def _valid_date(text):

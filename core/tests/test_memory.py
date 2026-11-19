@@ -155,13 +155,27 @@ class ContextTest(Base):
         m = self.m
         m.add_memory("how the driving test went", "plans and events", 3, "2026-11-20", follow_up=True)
         text, _ = m.context("hello", now=at(19, 10))
-        self.assertNotIn("Things you could ask", text, "not before its day")
+        self.assertNotIn("Plans whose day has come", text, "not before its day")
         for day in (21, 22):
             text, _ = m.context("hello", now=at(day, 10))
-            self.assertIn("Things you could ask how they went", text)
-            self.assertIn("how the driving test went", text)
+            self.assertIn("Plans whose day has come; ask how they went if it fits (just once):\n- how the driving test went", text)
+            self.assertEqual(text.count("how the driving test went"), 1, "a question to ask, not a memory")
         text, _ = m.context("hello", now=at(23, 10))
-        self.assertNotIn("Things you could ask", text, "asked about twice: enough")
+        self.assertNotIn("Plans whose day has come", text, "asked about twice: enough")
+
+    def test_a_dated_plan_comes_up_by_itself_until_they_say_how_it_went(self):
+        m = self.m
+        plan = m.add_memory("They have a job interview at the library", "plans and events", 4, "2026-11-20", now=at(16, 10))
+        text, _ = m.context("hello", now=at(20, 9))
+        self.assertNotIn("Plans whose day has come", text, "not on the day itself: it may not have happened yet")
+        self.assertIn("- [plans and events] They have a job interview at the library (Friday 20 November 2026, today)", text)
+        text, _ = m.context("hello", now=at(21, 9))
+        self.assertIn("Plans whose day has come; ask how they went if it fits (just once):\n"
+                      "- They have a job interview at the library \u2014 Friday 20 November 2026, yesterday", text)
+        self.assertEqual(text.count("job interview"), 1, "asked about, not listed twice")
+        m.edit_memory(plan["id"], text="They got the job at the library", now=at(21, 18))
+        text, _ = m.context("hello", now=at(22, 9))
+        self.assertNotIn("Plans whose day has come", text, "they said how it went")
 
     def test_a_small_model_gets_less_but_never_loses_the_latest_words(self):
         m = self.m
@@ -223,6 +237,19 @@ class ProcessTest(Base):
         self.assertTrue(any(x["id"] == job["id"] and x["status"] == "retired" for x in m.memories(everything=True)))
         self.assertEqual(untouched["text"], "They live in Brisbane")
 
+    def test_the_model_is_asked_to_update_plans_whose_day_has_come(self):
+        m = self.m
+        plan = m.add_memory("They have a driving test", "plans and events", 4, "2026-11-13", now=at(9, 19))
+        self.talk(at(14, 10), ("I passed my driving test!", "Congratulations!"))
+        llm = FakeLLM("TITLE: Passed\nSUMMARY: They passed.\nMOOD: proud\n"
+                      "UPDATE #%d plans and events: They passed their driving test | 2026-11-13" % plan["id"])
+        run(m.process(llm, now=at(14, 11)))
+        prompt = llm.calls[0][1][0]["content"]
+        self.assertIn("#%d [plans and events] They have a driving test (2026-11-13)" % plan["id"], prompt)
+        self.assertIn("Plans above whose day has come: #%d." % plan["id"], prompt)
+        self.assertEqual([(x["text"], x["when"]) for x in m.memories()], [("They passed their driving test", "2026-11-13")])
+        self.assertEqual(m.follow_ups(now=at(15, 9)), [], "nothing left to ask")
+
     def test_the_early_part_of_a_long_conversation_is_summed_up_as_it_goes(self):
         m = self.m
         self.talk(at(18, 19), *[("question %d" % i, "answer %d" % i) for i in range(30)])
@@ -267,6 +294,16 @@ class ProcessTest(Base):
         self.assertEqual(len(m.diary()), 1, "once a day")
         text, _ = m.context("good morning", now=at(19, 9, 30))
         self.assertIn("From your diary (2026-11-18)", text)
+
+    def test_a_model_that_ignores_the_form_still_leaves_a_summary(self):
+        m = self.m
+        self.talk(at(18, 10), ("I planted tomatoes and basil today", "Lovely! A summer garden."))
+        self.talk(at(18, 12), ("the basil is already sprouting", "Fast!"))
+        run(m.process(FakeLLM(["They told me about planting tomatoes and basil in their garden.", ""]), now=at(18, 13)))
+        self.assertEqual([s["summary"] for s in m.sessions()],
+                         ["They told me about planting tomatoes and basil in their garden.",
+                          "They said: the basil is already sprouting"], "a plain answer, or their own words")
+        self.assertTrue(all(s["done"] for s in m.sessions()))
 
     def test_forgetting_meanwhile_is_not_undone(self):
         m = self.m
@@ -338,6 +375,11 @@ class RecallTest(Base):
         self.assertEqual([s["id"] for s in self.m.recall("Birthdays and parties!", limit=3)], [1, 9])
         self.assertEqual(len(self.m.recall("work weekend plans", limit=3)), 4)
 
+    def test_greetings_and_feelings_do_not_bring_up_old_conversations(self):
+        self.sessions("A quick good morning before work.", "They love their new bike.", "We planned a picnic.")
+        self.assertEqual([s["id"] for s in self.m.recall("Good morning! I love today", limit=3)], [3])
+        self.assertEqual([s["id"] for s in self.m.recall("my bike got a flat tyre", limit=3)], [2, 3])
+
     def test_an_edited_summary_is_found_by_its_new_words(self):
         self.sessions("We talked about the weather.", "We planned a picnic.")
         self.assertEqual([s["id"] for s in self.m.recall("Is the storm still coming?", limit=1)], [2])
@@ -386,6 +428,20 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(ops[3], {"op": "forget", "id": 7})
         self.assertEqual(ops[4], {"op": "follow", "text": "how their first day went", "when": "2026-11-24"})
         self.assertEqual(len(ops), 5)
+        loose = parse_sum_up("ADD likes | They like oolong tea\nUPDATE #3: Works at the library now\nUPDATE 4 — Lives in Darwin")["ops"]
+        self.assertEqual(loose, [{"op": "add", "category": "likes and dislikes", "importance": 3, "text": "They like oolong tea"},
+                                 {"op": "update", "id": 3, "text": "Works at the library now"},
+                                 {"op": "update", "id": 4, "text": "Lives in Darwin"}], "small models' looser forms")
+        real = parse_sum_up("FOLLOW UP YYYY-MM-DD 2026-11-13\n"
+                            "UPDATE #3 | Their sister Kim lives in Darwin now. -\n"
+                            "UPDATE #2 plans and events: They passed their driving test. | 2026-11-13\n"
+                            "ADD about them | 5 | Their name is Sam. | YYYY-MM-DD\n"
+                            "UPDATE #2 [plans and events] They passed their driving test. (2026-11-13)")["ops"]
+        self.assertEqual(real, [{"op": "update", "id": 3, "text": "Their sister Kim lives in Darwin now."},
+                                {"op": "update", "id": 2, "text": "They passed their driving test.", "when": "2026-11-13"},
+                                {"op": "add", "category": "about them", "importance": 5, "text": "Their name is Sam."},
+                                {"op": "update", "id": 2, "text": "They passed their driving test.", "when": "2026-11-13"}],
+                         "lines a real small model wrote")
 
     def test_dates_in_words(self):
         now = datetime.datetime(2026, 11, 18, 15, 0).timestamp()
@@ -402,6 +458,11 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(mem.said_when(at(18, 1), now), "last night", "until 4 am it is still the night before")
         self.assertEqual(mem.said_when(at(16, 19), now), "on Monday evening (2 days ago)")
         self.assertEqual(mem.said_when(datetime.datetime(2026, 10, 2, 12).timestamp(), now), "on 2 October 2026 (7 weeks ago)")
+        self.assertEqual(mem.said_when(at(10, 12), now), "on 10 November 2026 (1 week ago)")
+        self.assertEqual(mem.date_words("2026-11-21", now), "Saturday 21 November 2026, in 3 days")
+        self.assertEqual(mem.date_words("2026-11-17", now), "Tuesday 17 November 2026, yesterday")
+        self.assertEqual(mem.date_words("2027-02-01", now), "Monday 1 February 2027")
+        self.assertEqual(mem.date_words("soon", now), "")
 
 
 if __name__ == "__main__":
