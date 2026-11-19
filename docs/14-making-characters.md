@@ -164,6 +164,41 @@ arm, legs) and the settings page shows what it cannot do. Blinking and the
 open mouth are drawn from the character's own colours and stay hidden until
 used, so a character at rest looks exactly like its picture.
 
+## Gestures of your own, from a video
+
+Every character gets the device's gestures and idle actions. To add one
+of your own, or to make one look more like a real person, film it:
+
+1. Film yourself (or someone who agreed to it) facing the camera, in good
+   light, head and shoulders or the upper body in view, doing the gesture
+   once and starting and ending still. A phone video is fine.
+2. Install what the tool needs once, in the studio's Python (set up by
+   `studio/start.sh`):
+
+```bash
+~/.character-studio/venv/bin/pip install -r studio/requirements-motion.txt
+```
+
+3. Make the gesture, and save it on the device (it asks for the
+   settings-page password):
+
+```bash
+~/.character-studio/venv/bin/python studio/record_motion.py my-video.mp4 --name little_dance --words "do a little dance" --send companion.local
+```
+
+The first run downloads MediaPipe's face and body landmark models (about
+10 MB). Use `--start` and `--end` (seconds) to take part of a longer
+video, and `--kind idle` for something the character does by itself when
+nobody is talking. `--out little_dance.json` writes the gesture to a file
+instead.
+
+On the device's settings page, the Animation tab plays it on the screen
+(*Try it on the device*). Change its tracks there if needed, then save
+it. A new gesture with `--words` can be asked for by the conversation. The
+character moves as the video shows: a head turned towards the right of the
+picture turns the character towards the right of its screen. The lean
+towards or away from the camera is not read.
+
 ## Use of pictures and voices
 
 Only use pictures and voices you have the right to use. The device ships with

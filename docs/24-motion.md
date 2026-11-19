@@ -287,7 +287,16 @@ since the existing checks have passed motion that looked wrong.
   with a short fade. Where a gesture holds a part, the living motion there
   gives way. The character's own gestures are kept to a budget (10 a
   minute, 2 of them big), and the mood prefers ones it has not made lately.
-- Not built yet: motion clips recorded from people, and the debug view.
+- The rest of the director (2026-11-19, `26-animation-director.md` steps
+  4 to 7): drives (energy, attention, boredom, sleepiness) and the time of
+  day; idle actions (looking around, gazing out of the window, stretching,
+  yawning, nodding off) and dozing at night; listening to the person's
+  voice (looking up as they start, nodding in their pauses); reactions;
+  clips with takes, variation, mirroring and stand-ins; each gesture's
+  stroke timing the speech planner; temperament per character and
+  gestures switched off; a live view and a gesture editor on the settings
+  page (Animation tab); and gestures recorded from video
+  (`studio/record_motion.py`, MediaPipe).
   The fill behind the arms uses today's smooth colour fill; See-through's
   completed layers would draw it properly.
 

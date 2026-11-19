@@ -54,6 +54,14 @@ One JSON object per line, on standard input or the local socket:
 | `{"perform": {"syllables": "eaoe", "events": [[0, "nod", 0.7]]}}` | A sentence starts: the vowel of each syllable (`a`, `e`, `i`, `o`, `u`), which shapes the mouth, and the gestures its words call for, each with the syllable it starts on and a strength. |
 | `{"syllable": 2}` | Syllable 2 of the sentence is being heard: the mouth takes its shape, and the gestures due by then start, if the parts of the body they need are free of gestures asked for and the budget allows (see below). |
 | `{"random_gestures": false}` | Stop (or allow) gestures the mood starts by itself: now and then while speaking or idling, and small nods and tilts while listening. |
+| `{"clock": 21.5}` | The local time of day, in hours: livelier in the morning, sleepy at night (dozing after a long quiet spell). Without it the stage assumes early afternoon. |
+| `{"poke": true}` | Someone is there (the button was pressed): a dozing character wakes, one alone a long while greets them. |
+| `{"heard": 0.4}` | How loud the person speaking is (0 to 1, against the room's noise), sent every 20 ms while the character listens: it looks up as they start and nods in their pauses. |
+| `{"temperament": {"energy": 1.2, "expressiveness": 0.8}}` | How lively and how expressive the character is (1 usual, 0.4 to 1.6). |
+| `{"gestures_off": ["wave", "yawn"]}` | Gestures and idle actions the character never starts by itself (asked for, they still play). |
+| `{"define": {"name": "little_dance", "kind": "gesture", "needs": ["head_roll"], "tracks": {...}}}` | Add a gesture, idle action or reaction to the library, or change one, as the library writes it. |
+| `{"undefine": "little_dance"}` | Put a changed clip back as built, or take an added one away. |
+| `{"describe": true}` | Send the whole library (a `library` event with `clips`). |
 | `{"quit": true}` | Exit. |
 
 Several fields can share one line.
@@ -64,25 +72,28 @@ One JSON object per line, on standard output and to socket clients:
 
 | Event | Meaning |
 |---|---|
-| `ready` | Character loaded. Gives its format (`inochi2d` or `live2d`), its parameters, which controls were connected to which parameters, the moods and the gestures it can make, and the OpenGL version in use. |
+| `ready` | Character loaded. Gives its format (`inochi2d` or `live2d`), its parameters, which controls were connected to which parameters, the moods, the gestures it can make (with a stand-in where needed) and when each lands (`strokes`), its idle actions, and the OpenGL version in use. |
 | `features` | Live2D-format models only, after `ready`: how many meshes use masks (and inverted masks), culling, additive, multiplicative and newer blend modes, parts drawn off screen, whether there is physics, and the canvas size. |
 | `warning` | Something that does not stop the character playing, such as a physics file that cannot be read. |
 | `emotion`, `gesture` | A mood took effect; a gesture started, with its cause (`command`; `queued` for one asked for that waited its turn; `speech` for one the words called for; `emotion` for a mood's entry gesture; or `mood` for one it started by itself). |
+| `library` | After `define`, `undefine` or `describe`: the gestures and idle actions it can make and their strokes; with `describe`, every clip as the library writes it, marked built in, changed or added, whether this character can make it and with which stand-in. |
 | `gesture_waiting`, `gesture_skipped` | A gesture asked for waits for another asked for on the same part of the body; a gesture was not played, with its cause and why (the body part was busy with something that matters more, or the budget for the minute was used). |
 | `state` | The state changed. |
-| `heartbeat` | Once a second: frames per second, the state, the mood, the gestures playing, and the average milliseconds per frame spent moving the character (`update_ms`) and handing its drawing to the graphics chip (`draw_ms`). The supervisor restarts the stage if these stop. |
+| `heartbeat` | Once a second: frames per second, the state, the mood, the gestures playing, which clip holds each channel, this minute's budget used, the drives (hour, energy, attention, boredom, sleepiness, dozing), and the average milliseconds per frame spent moving the character (`update_ms`) and handing its drawing to the graphics chip (`draw_ms`). The supervisor restarts the stage if these stop. |
 | `error` | A command was not understood. |
 | `fatal` | The stage cannot run; it exits with a non-zero status. |
 
 ## Gestures at the same time
 
 The body is split into channels: head, torso, eyes, brows, expression
-(smile, smiling eyes, blush), left arm and right arm. A gesture holds the
+(smile, smiling eyes, blush), left arm, right arm, mouth and eyelids. A gesture holds the
 channels it moves strongly (0.25 or more on any of their controls, or as
 listed under `"holds"` in the library), so others can play on the rest at
 the same time: a nod plays through a wave. Who started a gesture decides
-who gets a busy channel: one asked for (a `gesture` command) over one the
-words call for or a new mood brings, over one the mood starts by itself.
+who gets a busy channel: a reaction (looking up, waking, greeting) over one
+asked for (a `gesture` command) over one the words call for, a new mood
+brings or listening calls for, over one the mood starts by itself, over an
+idle action.
 A gesture that takes a channel over gets it with a quarter-second fade;
 the other carries on with the channels it still holds, or ends if it has
 none left. Where a gesture holds a channel, the living motion there
@@ -94,7 +105,14 @@ ones (marked `"big": true` in the library: wave, laugh, shrug, bow, lean
 in, hands on hips) to 2, and those the mood starts with nothing said to 6.
 The mood also prefers gestures it has not made lately (small ones for 20
 seconds, big ones for a minute), and rarely repeats its last one. Gestures
-asked for always play.
+asked for always play. Idle actions have their own budget, 4 a minute.
+
+Each clip varies a little every time (speed, size unless its poses are
+`"exact"`, and which of its `"takes"`), may play `"mirror"`ed (and does
+when only that side can move), and names a stand-in (`"instead"`) for
+characters that cannot make it. `docs/26-animation-director.md` describes
+the whole system: the director's drives and idle life (`src/director.rs`),
+listening, speech, and temperament.
 
 ## Characters it accepts
 
@@ -130,7 +148,7 @@ parameter names, either Inochi2D style (`Mouth:: Shape`, `Eye:: Left:: Blink`,
 ## Tests
 
 ```
-cargo test --release                       # logic: 61 tests
+cargo test --release                       # logic: 79 tests
 python3 tools/visual_test.py target/release/stage PUPPET.inp out/ --gl es
 python3 tools/compare_formats.py target/release/stage UNPACKED_CHARACTER/ out.png
 ```

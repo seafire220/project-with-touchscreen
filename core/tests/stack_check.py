@@ -3,11 +3,15 @@
     python tests/stack_check.py STAGE_BINARY PUPPET.inp OUT_DIR
 
 Starts the stage on a virtual display with its command socket, connects the
-core to it, has the character answer a typed message (stand-in model and
-voice, real timing), and saves frames before, during and after the reply,
-ten a second. Prints the stage states seen in its heartbeats and the moods
-and gestures the stage played, and fails if any mood or gesture tagged in
-the reply (and available to the character) did not play. Needs Xvfb. With
+core to it, tells it the time of day, has it listen to a person speaking (a
+stand-in voice level, in stretches with pauses), then answer a typed message
+(stand-in model and voice, real timing), then stay alone for a while, and
+saves frames from the start, ten a second. Prints the stage states seen in
+its heartbeats, the moods and gestures the stage played (with what started
+each: the words, a command, listening, a reaction, idle), and its drives,
+and fails if any mood or gesture tagged in the reply (and available to the
+character) did not play, if it did not look up as the person started
+speaking, or if it never responded in their pauses. Needs Xvfb. With
 COMPANION_TEST_VOICE set to an on-device voice folder, the reply is spoken
 by that voice instead of a stand-in, so the mouth follows real speech.
 """
@@ -42,7 +46,7 @@ async def main(stage, puppet, out):
     env = dict(os.environ, DISPLAY=":" + xvfb.stdout.readline().strip(), LIBGL_ALWAYS_SOFTWARE="1")
     captures = [round(1.0 + 0.1 * i, 1) for i in range(150)]
     proc = subprocess.Popen([stage, puppet, "--size", "360x640", "--gl", "es", "--no-stdin", "--socket", sock,
-                             "--capture-dir", out, "--capture-at", ",".join(map(str, captures)), "--exit-after", "16.5"],
+                             "--capture-dir", out, "--capture-at", ",".join(map(str, captures)), "--exit-after", "48"],
                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     seen = []
     link = StageLink(sock, on_event=lambda e: seen.append(e))
@@ -62,9 +66,17 @@ async def main(stage, puppet, out):
         conv = Conversation(llm=FakeLLM(REPLY, delay=0.02), tts=tts,
                             speaker=Speaker(command=None, realtime=True), stage=link,
                             memory=Memory(os.path.join(work, "memory")), persona="# Test\n\nYou are a test.")
+        link.clock(15.0)                         # mid-afternoon: awake
         await asyncio.sleep(3.0)                 # the stage settles; frame 0 is at rest
+        # The person speaks for six seconds, in stretches with pauses, while it listens.
+        link.state("listening")
+        await asyncio.sleep(1.8)
+        for i in range(300):
+            link.heard(0.55 if (i % 85) < 60 else 0.02)
+            await asyncio.sleep(0.02)
+        link.state("thinking")
         reply = await conv.respond("hello")
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(12.0)                # then alone a while
     finally:
         await asyncio.sleep(0.5)
         proc.wait(timeout=30)
@@ -81,16 +93,28 @@ async def main(stage, puppet, out):
     moods = [e["emotion"] for e in seen if e.get("event") == "emotion"]
     gestures = [(e["name"], e["cause"]) for e in seen if e.get("event") == "gesture"]
     mouth = [e for e in seen if e.get("event") == "heartbeat"]
+    drives = [e.get("drives") for e in mouth if e.get("drives")]
     report = {"puppet": ready.get("puppet"), "format": ready.get("format"), "params": len(ready.get("param_names", [])),
               "voice": "on-device" if os.environ.get("COMPANION_TEST_VOICE") else "stand-in",
-              "gestures_available": ready.get("gestures"), "states_seen": states, "moods_played": moods,
+              "gestures_available": ready.get("gestures"), "actions_available": ready.get("actions"),
+              "states_seen": states, "moods_played": moods,
               "gestures_played": gestures, "spoken": reply.spoken, "error": reply.error,
+              "drives_first_and_last": [drives[0], drives[-1]] if drives else None,
+              "skipped": [(e["name"], e.get("why")) for e in seen if e.get("event") == "gesture_skipped"],
               "errors_from_stage": [e for e in seen if e.get("event") in ("error", "fatal")]}
     print(json.dumps(report, indent=1))
     missing = (wanted_moods - set(moods)) | (wanted_gestures - {g for g, _ in gestures})
     if missing:
         print("not played:", sorted(missing))
-    ok = not reply.error and "speaking" in states and not report["errors_from_stage"] and not missing
+    looked_up = ("look_up", "reaction") in gestures
+    responded = any(cause == "listening" for _, cause in gestures)
+    if not looked_up:
+        print("it did not look up as the person started speaking")
+    if not responded:
+        print("it never responded in the person's pauses")
+    clocked = bool(drives) and abs(drives[-1].get("hour", 0) - 15.0) < 0.2
+    ok = (not reply.error and "speaking" in states and not report["errors_from_stage"] and not missing
+          and looked_up and responded and clocked)
     return 0 if ok else 1
 
 
