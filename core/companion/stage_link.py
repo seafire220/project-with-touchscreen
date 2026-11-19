@@ -29,6 +29,7 @@ class StageLink:
         # What the character can do, as the stage reports when it is ready.
         self.emotions = []
         self.gestures = list(DEFAULT_GESTURES)
+        self.strokes = {}           # gesture: seconds in that it lands
         # For a character with its own expressions: which one shows each emotion.
         self.emotion_map = {}
         self._task = None
@@ -62,6 +63,8 @@ class StageLink:
                         self.emotions = list(event.get("emotions") or [])
                         if "gestures" in event:
                             self.gestures = list(event.get("gestures") or [])
+                        # When each gesture lands, so the speech planner starts it in time for its word.
+                        self.strokes = dict(event.get("strokes") or {})
                     if self.on_event:
                         self.on_event(event)
             except (OSError, asyncio.IncompleteReadError):

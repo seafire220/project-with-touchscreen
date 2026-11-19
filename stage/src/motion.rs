@@ -117,6 +117,8 @@ pub enum Start {
 	Queued,
 	/// Not played, and why.
 	Skipped(&'static str),
+	/// The character cannot make it; this clip (by index) played in its place.
+	Instead(usize),
 }
 
 /// Controls that run from 0 to 1; the rest run from -1 to 1.
@@ -139,13 +141,57 @@ fn key_index(name: &str) -> Result<usize, String> {
 	KEYS.iter().position(|k| *k == name).ok_or(format!("unknown control '{name}'"))
 }
 
+/// One way of playing a clip: its tracks, each a list of (seconds, value) keys.
+#[derive(Clone, Debug)]
+struct Take {
+	tracks: Vec<(usize, Vec<(f32, f32)>)>,
+	duration: f32,
+}
+
+/// A control's mirror image: the other arm, or the same control turned the other way.
+fn mirrored_key(key: usize) -> (usize, f32) {
+	let name = KEYS[key];
+	let other = match name {
+		"arm_left" => "arm_right",
+		"arm_right" => "arm_left",
+		"arm_left_b" => "arm_right_b",
+		"arm_right_b" => "arm_left_b",
+		_ => name,
+	};
+	let sign = if matches!(name, "head_yaw" | "head_roll" | "body_yaw" | "body_roll" | "gaze_x") { -1.0 } else { 1.0 };
+	(key_index(other).unwrap_or(key), sign)
+}
+
+/// Channels, mirrored: the arms swap.
+fn mirrored_mask(mask: u16) -> u16 {
+	let (left, right) = (1u16 << 5, 1u16 << 6);
+	let mut m = mask & !(left | right);
+	if mask & left != 0 {
+		m |= right;
+	}
+	if mask & right != 0 {
+		m |= left;
+	}
+	m
+}
+
 #[derive(Clone, Debug)]
 pub struct Clip {
 	pub name: String,
 	/// Each need is met by any one of its controls.
 	pub needs: Vec<Vec<usize>>,
-	tracks: Vec<(usize, Vec<(f32, f32)>)>,
+	/// Ways of playing it, one chosen at random each time (the first when variation is off).
+	takes: Vec<Take>,
+	/// The longest take, in seconds.
 	pub duration: f32,
+	/// It may play mirrored (the other arm, the other way), at random or when only that side moves.
+	pub mirror: bool,
+	/// Its poses are exact (a hand on the hip): it varies in speed, never in size.
+	pub exact: bool,
+	/// What to play instead on a character that cannot make it.
+	pub instead: Option<String>,
+	/// When it lands (seconds in): the speech planner starts it this long before its word.
+	pub stroke: f32,
 	/// Channels it holds while it plays, and all it moves (one bit per channel).
 	pub holds: u16,
 	pub touches: u16,
@@ -155,9 +201,10 @@ pub struct Clip {
 }
 
 impl Clip {
-	/// The clip's offsets `t` seconds in, each channel by its own weight; keys are joined by smooth steps.
-	fn sample(&self, t: f32, out: &mut [f32; KEYS.len()], weights: &[f32; CHANNELS.len()]) {
-		for (key, points) in &self.tracks {
+	/// The clip's offsets `t` seconds into a take, mirrored or not, each channel by its own weight;
+	/// keys are joined by smooth steps.
+	fn sample(&self, take: usize, mirrored: bool, t: f32, out: &mut [f32; KEYS.len()], weights: &[f32; CHANNELS.len()]) {
+		for (key, points) in &self.takes[take.min(self.takes.len() - 1)].tracks {
 			let value = match points.iter().position(|(at, _)| *at > t) {
 				None => points.last().map(|p| p.1).unwrap_or(0.0),
 				Some(0) => points[0].1,
@@ -168,9 +215,41 @@ impl Clip {
 					v0 + (v1 - v0) * u * u * (3.0 - 2.0 * u)
 				}
 			};
-			out[*key] += value * weights[channel_of(*key)];
+			let (key, sign) = if mirrored { mirrored_key(*key) } else { (*key, 1.0) };
+			out[key] += sign * value * weights[channel_of(key)];
 		}
 	}
+
+	/// The channels it holds, mirrored or not.
+	fn holds_as(&self, mirrored: bool) -> u16 {
+		if mirrored { mirrored_mask(self.holds) } else { self.holds }
+	}
+
+	fn touches_as(&self, mirrored: bool) -> u16 {
+		if mirrored { mirrored_mask(self.touches) } else { self.touches }
+	}
+}
+
+/// A clip's tracks, from `{"head_pitch": [[0, 0], [0.3, -0.4], [0.75, 0]], ...}`.
+fn parse_take(name: &str, tracks: &Value) -> Result<Take, String> {
+	let mut out = Vec::new();
+	let mut duration: f32 = 0.0;
+	for (key, points) in tracks.as_object().ok_or(format!("gesture {name}: no tracks"))? {
+		let mut pts = Vec::new();
+		for p in points.as_array().ok_or(format!("gesture {name}: track {key} must be a list"))? {
+			let pair = p.as_array().filter(|a| a.len() == 2).ok_or(format!("gesture {name}: keys are [seconds, value]"))?;
+			pts.push((number(&pair[0], "a key's time")?, number(&pair[1], "a key's value")?));
+		}
+		if pts.len() < 2 || pts.windows(2).any(|w| w[1].0 <= w[0].0) {
+			return Err(format!("gesture {name}: track {key} needs two or more keys in time order"));
+		}
+		if pts[0].1 != 0.0 || pts.last().unwrap().1 != 0.0 {
+			return Err(format!("gesture {name}: track {key} must start and end at 0"));
+		}
+		duration = duration.max(pts.last().unwrap().0);
+		out.push((key_index(key)?, pts));
+	}
+	Ok(Take { tracks: out, duration })
 }
 
 #[derive(Clone, Debug)]
@@ -220,26 +299,14 @@ impl Library {
 				.iter()
 				.map(|k| k.as_str().unwrap_or("").split('|').map(key_index).collect::<Result<Vec<_>, _>>())
 				.collect::<Result<Vec<_>, _>>()?;
-			let mut tracks = Vec::new();
-			let mut duration: f32 = 0.0;
-			for (key, points) in g.get("tracks").and_then(Value::as_object).ok_or(format!("gesture {name}: no tracks"))? {
-				let mut pts = Vec::new();
-				for p in points.as_array().ok_or(format!("gesture {name}: track {key} must be a list"))? {
-					let pair = p.as_array().filter(|a| a.len() == 2).ok_or(format!("gesture {name}: keys are [seconds, value]"))?;
-					pts.push((number(&pair[0], "a key's time")?, number(&pair[1], "a key's value")?));
-				}
-				if pts.len() < 2 || pts.windows(2).any(|w| w[1].0 <= w[0].0) {
-					return Err(format!("gesture {name}: track {key} needs two or more keys in time order"));
-				}
-				if pts[0].1 != 0.0 || pts.last().unwrap().1 != 0.0 {
-					return Err(format!("gesture {name}: track {key} must start and end at 0"));
-				}
-				duration = duration.max(pts.last().unwrap().0);
-				tracks.push((key_index(key)?, pts));
+			let mut takes = vec![parse_take(name, g.get("tracks").unwrap_or(&Value::Null))?];
+			for extra in g.get("takes").and_then(Value::as_array).map(|a| a.as_slice()).unwrap_or(&[]) {
+				takes.push(parse_take(name, extra.get("tracks").unwrap_or(&Value::Null))?);
 			}
+			let duration = takes.iter().map(|t| t.duration).fold(0.0, f32::max);
 			// The channels it holds: as listed, or those it moves far.
 			let mut peak = [0.0f32; CHANNELS.len()];
-			for (key, pts) in &tracks {
+			for (key, pts) in takes.iter().flat_map(|t| t.tracks.iter()) {
 				let c = channel_of(*key);
 				peak[c] = pts.iter().fold(peak[c], |m, p| m.max(p.1.abs()));
 			}
@@ -261,7 +328,33 @@ impl Library {
 				}
 			};
 			let big = g.get("big").and_then(Value::as_bool).unwrap_or(false);
-			clips.push(Clip { name: name.clone(), needs, tracks, duration, holds, touches, kind, big });
+			// When it lands: as given, or when its strongest held move first nears its height.
+			let stroke = match g.get("stroke") {
+				Some(v) => number(v, "a stroke")?,
+				None => {
+					let held: Vec<&(usize, Vec<(f32, f32)>)> =
+						takes[0].tracks.iter().filter(|(k, _)| holds & (1 << channel_of(*k)) != 0).collect();
+					let top = held.iter().flat_map(|(_, p)| p.iter()).fold(0.0f32, |m, p| m.max(p.1.abs()));
+					held.iter()
+						.filter_map(|(_, p)| p.iter().find(|q| q.1.abs() >= 0.9 * top && top > 0.0).map(|q| q.0))
+						.fold(f32::MAX, f32::min)
+						.min(duration)
+				}
+			};
+			clips.push(Clip {
+				name: name.clone(),
+				needs,
+				takes,
+				duration,
+				mirror: g.get("mirror").and_then(Value::as_bool).unwrap_or(false),
+				exact: g.get("exact").and_then(Value::as_bool).unwrap_or(false),
+				instead: g.get("instead").and_then(Value::as_str).map(str::to_string),
+				stroke,
+				holds,
+				touches,
+				kind,
+				big,
+			});
 		}
 		let mut moods = Vec::new();
 		for (name, m) in root.get("moods").and_then(Value::as_object).ok_or("motion library has no moods")? {
@@ -297,6 +390,13 @@ impl Library {
 		if !moods.iter().any(|m| m.name == "neutral") {
 			return Err("motion library needs a neutral mood".into());
 		}
+		for c in &clips {
+			if let Some(other) = &c.instead {
+				if !clips.iter().any(|x| &x.name == other) {
+					return Err(format!("gesture {}: no gesture called {other} to play instead", c.name));
+				}
+			}
+		}
 		Ok(Self { moods, clips })
 	}
 }
@@ -305,6 +405,10 @@ struct Playing {
 	clip: usize,
 	start: f32,
 	weight: f32,
+	take: usize,
+	mirrored: bool,
+	/// Faster or slower than written, for variety.
+	speed: f32,
 	/// Who started it: ASKED, SPEECH or MOOD.
 	priority: u8,
 	/// When it was cut short by another gesture; it then fades out.
@@ -324,7 +428,12 @@ impl Playing {
 		if self.cut.is_some() {
 			return 0;
 		}
-		(0..CHANNELS.len()).filter(|c| self.released[*c].is_some()).fold(clip.holds, |m, c| m & !(1 << c))
+		(0..CHANNELS.len()).filter(|c| self.released[*c].is_some()).fold(clip.holds_as(self.mirrored), |m, c| m & !(1 << c))
+	}
+
+	/// How far into its take it is.
+	fn at(&self, t: f32) -> f32 {
+		(t - self.start) * self.speed
 	}
 }
 
@@ -335,7 +444,11 @@ const RANDOM_REST: f32 = 0.8;
 
 pub struct Motion {
 	lib: Library,
+	/// Whether the character has the controls for each clip as written, and mirrored.
 	available: Vec<bool>,
+	available_mirrored: Vec<bool>,
+	/// Vary each gesture's speed, size, take and side (off in tests that check exact values).
+	vary: bool,
 	mood: usize,
 	intensity: f32,
 	offsets: Vec<Spring>,
@@ -382,10 +495,17 @@ impl Motion {
 	pub fn new(lib: Library, has: impl Fn(&str) -> bool, seed: u64) -> Self {
 		let available =
 			lib.clips.iter().map(|c| c.needs.iter().all(|any| any.iter().any(|k| has(KEYS[*k])))).collect();
+		let available_mirrored = lib
+			.clips
+			.iter()
+			.map(|c| c.mirror && c.needs.iter().all(|any| any.iter().any(|k| has(KEYS[mirrored_key(*k).0]))))
+			.collect();
 		let mood = lib.moods.iter().position(|m| m.name == "neutral").unwrap_or(0);
 		let mut m = Self {
 			lib,
 			available,
+			available_mirrored,
+			vary: false,
 			mood,
 			intensity: 1.0,
 			offsets: KEYS.iter().map(|_| Spring::new(0.0, MOOD_TIME)).collect(),
@@ -414,21 +534,54 @@ impl Motion {
 		m
 	}
 
+	/// Vary each gesture a little every time: speed, size, which take, which side.
+	pub fn set_variation(&mut self, on: bool) {
+		self.vary = on;
+	}
+
+	/// Whether the character can make a clip, as written or mirrored.
+	fn playable(&self, i: usize) -> bool {
+		self.available[i] || self.available_mirrored[i]
+	}
+
+	/// The clip to play for clip `i`: itself, or what plays instead on a character that cannot make it.
+	fn resolve(&self, i: usize) -> Option<usize> {
+		let mut j = i;
+		for _ in 0..4 {
+			if self.playable(j) {
+				return Some(j);
+			}
+			j = self.lib.clips.iter().position(|c| Some(&c.name) == self.lib.clips[j].instead.as_ref())?;
+		}
+		None
+	}
+
+	pub fn clip_name(&self, i: usize) -> &str {
+		&self.lib.clips[i].name
+	}
+
+	/// When each gesture this character can make lands (seconds in), for timing it to a word.
+	pub fn strokes(&self) -> Vec<(String, f32)> {
+		self.lib
+			.clips
+			.iter()
+			.enumerate()
+			.filter(|(_, c)| c.kind == Kind::Gesture)
+			.filter_map(|(i, c)| self.resolve(i).map(|j| (c.name.clone(), (self.lib.clips[j].stroke * 100.0).round() / 100.0)))
+			.collect()
+	}
+
 	pub fn emotions(&self) -> Vec<String> {
 		let mut names: Vec<String> = self.lib.moods.iter().map(|m| m.name.clone()).collect();
 		names.sort();
 		names
 	}
 
-	/// Gestures this character can make (not its idle actions or reactions).
+	/// Gestures this character can make (not its idle actions or reactions), itself or with a stand-in.
 	pub fn gestures(&self) -> Vec<String> {
-		let mut names: Vec<String> = self
-			.lib
-			.clips
-			.iter()
-			.zip(&self.available)
-			.filter(|(c, ok)| **ok && c.kind == Kind::Gesture)
-			.map(|(c, _)| c.name.clone())
+		let mut names: Vec<String> = (0..self.lib.clips.len())
+			.filter(|i| self.lib.clips[*i].kind == Kind::Gesture && self.resolve(*i).is_some())
+			.map(|i| self.lib.clips[i].name.clone())
 			.collect();
 		names.sort();
 		names
@@ -450,7 +603,7 @@ impl Motion {
 			.iter()
 			.filter_map(|(name, w)| {
 				let i = self.lib.clips.iter().position(|c| c.name == *name && c.kind == Kind::Idle)?;
-				(self.available[i] && *w > 0.0).then_some((i, *w))
+				(self.playable(i) && *w > 0.0).then_some((i, *w))
 			})
 			.collect();
 	}
@@ -471,9 +624,9 @@ impl Motion {
 
 	/// A reaction, now, over anything else. Returns whether it started.
 	pub fn react(&mut self, name: &str) -> bool {
-		match self.lib.clips.iter().position(|c| c.name == name) {
-			Some(i) if self.available[i] => self.begin(i, 1.0, REACTION) == Start::Now,
-			_ => false,
+		match self.lib.clips.iter().position(|c| c.name == name).and_then(|i| self.resolve(i)) {
+			Some(i) => self.begin(i, 1.0, REACTION) == Start::Now,
+			None => false,
 		}
 	}
 
@@ -504,7 +657,7 @@ impl Motion {
 		self.next_random = self.random_gap(1.0);
 		if changed {
 			if let Some(g) = self.lib.moods[i].on_enter.clone() {
-				if let Some(c) = self.lib.clips.iter().position(|c| c.name == g).filter(|c| self.available[*c]) {
+				if let Some(c) = self.lib.clips.iter().position(|c| c.name == g).and_then(|c| self.resolve(c)) {
 					if self.begin(c, self.intensity, SPEECH) == Start::Now {
 						return Ok(Some(g));
 					}
@@ -522,20 +675,26 @@ impl Motion {
 	/// another asked-for gesture is using them: then it waits for that one.
 	pub fn play(&mut self, name: &str, intensity: f32) -> Result<Start, String> {
 		let i = self.find(name)?;
-		if !self.available[i] {
-			return Err(format!("this character cannot make the gesture '{name}'"));
+		let j = self.resolve(i).ok_or(format!("this character cannot make the gesture '{name}'"))?;
+		Ok(self.begin_for(i, j, intensity, ASKED))
+	}
+
+	/// Begin clip `j` in place of `i`, saying so if it is a stand-in.
+	fn begin_for(&mut self, i: usize, j: usize, intensity: f32, priority: u8) -> Start {
+		match self.begin(j, intensity, priority) {
+			Start::Now if j != i => Start::Instead(j),
+			other => other,
 		}
-		Ok(self.begin(i, intensity, ASKED))
 	}
 
 	/// A gesture the speech suggests (a nod on "yes"). It plays if the character can make it, nothing
 	/// asked for is using the parts of the body it needs, and the budget allows.
 	pub fn suggest(&mut self, name: &str, intensity: f32) -> Result<Start, String> {
 		let i = self.find(name)?;
-		if !self.available[i] {
-			return Ok(Start::Skipped("this character cannot make it"));
+		match self.resolve(i) {
+			Some(j) => Ok(self.begin_for(i, j, intensity, SPEECH)),
+			None => Ok(Start::Skipped("this character cannot make it")),
 		}
-		Ok(self.begin(i, intensity, SPEECH))
 	}
 
 	/// The budget, for gestures the character starts by itself.
@@ -575,7 +734,15 @@ impl Motion {
 		if let Err(why) = self.within_budget(i, priority) {
 			return Start::Skipped(why);
 		}
-		let holds = self.lib.clips[i].holds;
+		// Which side, which take, how fast and how big: a little different each time.
+		let clip = &self.lib.clips[i];
+		let (can_plain, can_mirror) = (self.available[i], self.available_mirrored[i]);
+		let (takes, exact, wants_vary) = (clip.takes.len(), clip.exact, self.vary);
+		let mirrored = !can_plain || (wants_vary && can_mirror && self.next_random_number() < 0.5);
+		let take = if wants_vary && takes > 1 { (self.next_random_number() * takes as f32) as usize % takes } else { 0 };
+		let speed = if wants_vary { 0.88 + 0.24 * self.next_random_number() } else { 1.0 };
+		let size = if wants_vary && !exact { 0.85 + 0.25 * self.next_random_number() } else { 1.0 };
+		let holds = self.lib.clips[i].holds_as(mirrored);
 		let conflicts: Vec<usize> = (0..self.playing.len())
 			.filter(|j| self.playing[*j].holding(&self.lib.clips[self.playing[*j].clip]) & holds != 0)
 			.collect();
@@ -595,7 +762,7 @@ impl Motion {
 		for p in &mut self.playing {
 			let clip = &self.lib.clips[p.clip];
 			for c in 0..CHANNELS.len() {
-				if holds & (clip.holds | clip.touches) & (1 << c) != 0 {
+				if holds & (clip.holds_as(p.mirrored) | clip.touches_as(p.mirrored)) & (1 << c) != 0 {
 					p.released[c].get_or_insert(t);
 				}
 			}
@@ -607,11 +774,21 @@ impl Motion {
 		let others = self.playing.iter().fold(0u16, |m, p| m | p.holding(&self.lib.clips[p.clip]));
 		let mut released = [None; CHANNELS.len()];
 		for (c, r) in released.iter_mut().enumerate() {
-			if others & self.lib.clips[i].touches & (1 << c) != 0 {
+			if others & self.lib.clips[i].touches_as(mirrored) & (1 << c) != 0 {
 				*r = Some(t - CUT_FADE);
 			}
 		}
-		self.playing.push(Playing { clip: i, start: t, weight: intensity.clamp(0.0, 1.5), priority, cut: None, released });
+		self.playing.push(Playing {
+			clip: i,
+			start: t,
+			weight: intensity.clamp(0.0, 1.5) * size,
+			take,
+			mirrored,
+			speed,
+			priority,
+			cut: None,
+			released,
+		});
 		self.recent.push_back((t, priority, self.lib.clips[i].big));
 		self.last_start[i] = t;
 		Start::Now
@@ -650,7 +827,7 @@ impl Motion {
 		let was_playing = !self.playing.is_empty();
 		self.playing.retain(|p| {
 			let clip = &self.lib.clips[p.clip];
-			let done = self.t - p.start >= clip.duration;
+			let done = p.at(self.t) >= clip.takes[p.take].duration;
 			let faded = p.cut.is_some_and(|c| self.t - c >= CUT_FADE);
 			!(done || faded)
 		});
@@ -696,7 +873,7 @@ impl Motion {
 			let pool: Vec<(usize, f32)> = pool
 				.into_iter()
 				.filter_map(|(g, w)| {
-					let i = self.lib.clips.iter().position(|c| c.name == g).filter(|i| self.available[*i])?;
+					let i = self.lib.clips.iter().position(|c| c.name == g).filter(|i| self.playable(*i))?;
 					let wait = if self.lib.clips[i].big { FRESH_BIG } else { FRESH_SMALL };
 					let again = if self.last_pick == Some(i) { AGAIN } else { 1.0 };
 					Some((i, w * again * ((self.t - self.last_start[i]) / wait).clamp(0.0, 1.0)))
@@ -736,7 +913,7 @@ impl Motion {
 					held[c] = held[c].max(w.min(1.0));
 				}
 			}
-			clip.sample(self.t - p.start, &mut add, &weights);
+			clip.sample(p.take, p.mirrored, p.at(self.t), &mut add, &weights);
 		}
 		if !self.smooth_eyelids {
 			let lids = KEYS.iter().position(|k| *k == "blink").unwrap_or(0);
@@ -1056,18 +1233,31 @@ mod tests {
 	}
 
 	#[test]
-	fn gestures_need_the_controls_they_move() {
+	fn gestures_need_the_controls_they_move_or_a_stand_in() {
 		let only_head = |k: &str| k.starts_with("head") || k.starts_with("body");
 		let mut m = Motion::new(Library::builtin(), only_head, 1);
 		assert!(m.gestures().contains(&"nod".to_string()));
-		assert!(!m.gestures().contains(&"wave".to_string()));
-		assert!(m.play("wave", 1.0).is_err());
+		// No arms: it waves with raised brows, a smile and a tilt instead.
+		assert!(m.gestures().contains(&"wave".to_string()));
+		match m.play("wave", 1.0).unwrap() {
+			Start::Instead(i) => assert_eq!(m.clip_name(i), "greet"),
+			other => panic!("{other:?}"),
+		}
+		// Nothing to move at all: nothing is offered, and nothing plays.
+		let mut none = Motion::new(Library::builtin(), |_| false, 1);
+		assert!(!none.gestures().contains(&"nod".to_string()));
+		assert!(none.play("nod", 1.0).is_err());
+		assert!(matches!(none.suggest("nod", 1.0).unwrap(), Start::Skipped(_)));
 	}
 
 	#[test]
 	fn hands_on_hips_needs_an_elbow_and_bends_it() {
 		let no_elbows = |k: &str| !k.ends_with("_b");
-		assert!(!Motion::new(Library::builtin(), no_elbows, 1).gestures().contains(&"hands_on_hips".to_string()));
+		let mut m = Motion::new(Library::builtin(), no_elbows, 1);
+		match m.play("hands_on_hips", 1.0).unwrap() {
+			Start::Instead(i) => assert_eq!(m.clip_name(i), "lean_back", "without elbows, a proud lean back instead"),
+			other => panic!("{other:?}"),
+		}
 		let one_arm = |k: &str| !k.starts_with("arm_left");
 		assert!(Motion::new(Library::builtin(), one_arm, 1).gestures().contains(&"hands_on_hips".to_string()),
 			"one hand on the hip");
@@ -1122,5 +1312,64 @@ mod tests {
 		let between = poses.iter().filter(|p| p.blink > 0.05 && p.blink < 0.95).count() as f32 / poses.len() as f32;
 		assert!(between < 0.12, "{between}");
 		assert!(poses.iter().any(|p| p.blink > 0.99), "shut while it yawns");
+	}
+
+	#[test]
+	fn each_gesture_varies_a_little_but_exact_poses_keep_their_size() {
+		let deepest = |seed: u64, name: &str, key: fn(&Pose) -> f32| {
+			let mut m = Motion::new(Library::builtin(), all, seed);
+			m.set_random(false);
+			m.set_variation(true);
+			m.play(name, 1.0).unwrap();
+			let (poses, _) = run(&mut m, 2.0, State::Speaking);
+			let end = poses.iter().rposition(|p| key(p).abs() > 1e-4).unwrap_or(0);
+			(poses.iter().map(|p| key(p).abs()).fold(0.0f32, f32::max), end)
+		};
+		let tilts: Vec<(f32, usize)> = (1..9).map(|s| deepest(s, "tilt", |p| p.head_roll)).collect();
+		let sizes: Vec<f32> = tilts.iter().map(|t| t.0).collect();
+		let lengths: Vec<usize> = tilts.iter().map(|t| t.1).collect();
+		assert!(sizes.iter().cloned().fold(0.0, f32::max) - sizes.iter().cloned().fold(1.0, f32::min) > 0.04, "{sizes:?}");
+		assert!(lengths.iter().max().unwrap() - lengths.iter().min().unwrap() >= 6, "{lengths:?}");
+		let hips: Vec<f32> = (1..9)
+			.map(|seed| {
+				let mut m = Motion::new(Library::builtin(), all, seed);
+				m.set_random(false);
+				m.set_variation(true);
+				m.play("hands_on_hips", 1.0).unwrap();
+				let (poses, _) = run(&mut m, 1.5, State::Idle);
+				poses.last().unwrap().arm_right_b
+			})
+			.collect();
+		assert!(hips.iter().all(|v| (v + 0.9).abs() < 0.03), "a hand stays on the hip: {hips:?}");
+	}
+
+	#[test]
+	fn a_gesture_plays_mirrored_at_random_or_with_the_arm_that_moves() {
+		let mut sides = (0, 0);
+		for seed in 1..21 {
+			let mut m = Motion::new(Library::builtin(), all, seed);
+			m.set_random(false);
+			m.set_variation(true);
+			m.play("tilt", 1.0).unwrap();
+			let (poses, _) = run(&mut m, 0.6, State::Speaking);
+			if poses.last().unwrap().head_roll > 0.0 { sides.0 += 1 } else { sides.1 += 1 }
+		}
+		assert!(sides.0 >= 4 && sides.1 >= 4, "tilts both ways: {sides:?}");
+		// Only the left arm moves: it waves with the left.
+		let left_only = |k: &str| !k.starts_with("arm_right");
+		let mut m = Motion::new(Library::builtin(), left_only, 1);
+		m.set_random(false);
+		assert_eq!(m.play("wave", 1.0).unwrap(), Start::Now);
+		let (poses, _) = run(&mut m, 0.7, State::Speaking);
+		assert!(poses.last().unwrap().arm_left > 0.4 && poses.last().unwrap().arm_right.abs() < 1e-5);
+	}
+
+	#[test]
+	fn each_gesture_says_when_it_lands() {
+		let m = Motion::new(Library::builtin(), all, 1);
+		let strokes: std::collections::HashMap<String, f32> = m.strokes().into_iter().collect();
+		assert!((strokes["nod"] - 0.18).abs() < 0.01, "the nod's lowest point: {}", strokes["nod"]);
+		assert!(strokes["brow_flash"] < 0.15 && strokes["wave"] > 0.3 && strokes["bow"] > 0.5, "{strokes:?}");
+		assert!(!strokes.contains_key("yawn"), "only gestures");
 	}
 }

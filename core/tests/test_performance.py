@@ -53,6 +53,14 @@ class MeaningTest(unittest.TestCase):
         really = 2                                          # well(1) I(1) -> "really" starts at syllable 2
         self.assertEqual(plan["events"], [[really - 1, "brow_flash", 0.7]])
 
+    def test_a_gesture_starts_as_early_as_it_takes_to_land(self):
+        text = "Well, I really think so."                   # "really" starts at syllable 2
+        slow = planner().plan(text, ["brow_flash"], strokes={"brow_flash": 0.36})
+        quick = planner().plan(text, ["brow_flash"], strokes={"brow_flash": 0.05})
+        self.assertEqual(slow["events"][0][0], 0, "two syllables early for a gesture that lands 0.36 s in")
+        self.assertEqual(quick["events"][0][0], 2, "on the word for one that lands at once")
+        self.assertEqual(pf.lead_for("wave", {"wave": "nonsense"}), 2, "the usual lead if the stage says nonsense")
+
     def test_it_never_flails(self):
         p = planner()
         plan = p.plan("Haha, yes, hello, I really don't know, maybe, goodbye?", ALL, first=True)

@@ -313,6 +313,10 @@ impl StageApp {
 			},
 			Command::Gesture(name, intensity) => match self.motion.play(&name, intensity) {
 				Ok(Start::Now) => self.events.emit(json!({"event": "gesture", "name": name, "cause": "command"})),
+				// The character cannot make it: a stand-in played (a smile and raised brows for a wave).
+				Ok(Start::Instead(i)) => self.events.emit(
+					json!({"event": "gesture", "name": name, "cause": "command", "played": self.motion.clip_name(i)}),
+				),
 				// It starts (and is reported, as "queued") when the one before it is done.
 				Ok(Start::Queued) => self.events.emit(json!({"event": "gesture_waiting", "name": name})),
 				Ok(Start::Skipped(why)) => {
@@ -326,6 +330,9 @@ impl StageApp {
 				for (name, strength) in self.speech.syllable(k) {
 					match self.motion.suggest(&name, strength) {
 						Ok(Start::Now) => self.events.emit(json!({"event": "gesture", "name": name, "cause": "speech"})),
+						Ok(Start::Instead(i)) => self.events.emit(
+							json!({"event": "gesture", "name": name, "cause": "speech", "played": self.motion.clip_name(i)}),
+						),
 						Ok(Start::Skipped(why)) => self
 							.events
 							.emit(json!({"event": "gesture_skipped", "name": name, "cause": "speech", "why": why})),
@@ -402,6 +409,13 @@ impl App for StageApp {
 					"controls": controls,
 					"emotions": self.motion.emotions(),
 					"gestures": self.motion.gestures(),
+					// When each gesture lands, seconds in: the core starts it that long before its word.
+					"strokes": self
+						.motion
+						.strokes()
+						.into_iter()
+						.map(|(name, at)| (name, json!(at)))
+						.collect::<serde_json::Map<String, serde_json::Value>>(),
 					"expressions": self.info.expressions,
 					"opengl": format!("{}{}.{}", if version.is_embedded { "ES " } else { "" }, version.major, version.minor),
 				}));
@@ -459,7 +473,9 @@ impl App for StageApp {
 		self.react(&direction.reactions);
 		for (name, strength) in &direction.responses {
 			match self.motion.suggest(name, *strength) {
-				Ok(Start::Now) => self.events.emit(json!({"event": "gesture", "name": name, "cause": "listening"})),
+				Ok(Start::Now) | Ok(Start::Instead(_)) => {
+					self.events.emit(json!({"event": "gesture", "name": name, "cause": "listening"}))
+				}
 				Ok(Start::Skipped(why)) => {
 					self.events.emit(json!({"event": "gesture_skipped", "name": name, "cause": "listening", "why": why}))
 				}
@@ -648,7 +664,9 @@ fn run(opts: Options) -> Result<(), String> {
 	let frame = AppFrame::init(builder, opts.gl).map_err(|e| format!("cannot open a window: {e}"))?;
 	let mut behaviour = Behaviour::new(opts.seed);
 	behaviour.set_idle_motion(!opts.still);
-	let motion = Motion::new(Library::builtin(), |key| mapper.drives(key), opts.seed);
+	let mut motion = Motion::new(Library::builtin(), |key| mapper.drives(key), opts.seed);
+	// Each gesture a little different every time (unless holding still, for comparisons).
+	motion.set_variation(!opts.still);
 	let expressions = match &puppet {
 		Puppet::Live2d(p) => p.expressions.clone(),
 		Puppet::Inox(_) => Vec::new(),

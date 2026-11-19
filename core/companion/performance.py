@@ -43,7 +43,21 @@ WORD = re.compile(r"[^\W_](?:[^\W_]|['’-][^\W_])*")
 
 # Movements by meaning: (gesture, strength, syllables before its word to start).
 BIG = {"wave", "laugh", "shrug", "bow", "lean_in", "hands_on_hips"}
+# How many syllables before its word a gesture starts, so that it lands on the word: from when the stage
+# says it lands (its stroke) over a syllable's length in the device's voice (measured: 0.18 s on
+# average); these are used when the stage has not said.
 LEAD = {"wave": 2, "shrug": 2, "bow": 2}
+SYLLABLE_SECONDS = 0.18
+
+
+def lead_for(gesture, strokes=None):
+    """Syllables before its word to start a gesture."""
+    if strokes and gesture in strokes:
+        try:
+            return max(0, min(3, int(round(float(strokes[gesture]) / SYLLABLE_SECONDS))))
+        except (TypeError, ValueError):
+            pass
+    return LEAD.get(gesture, 1)
 YES = {"yes", "yeah", "yep", "yup", "sure", "absolutely", "definitely", "exactly", "certainly", "indeed", "okay",
        "ok", "alright", "agreed", "correct", "totally", "right"}
 NO = {"no", "nope", "nah", "not", "never", "don't", "doesn't", "didn't", "can't", "cannot", "won't", "isn't",
@@ -206,7 +220,7 @@ class Planner:
         self.voice = voice
         self.sentences_since_big = 99
 
-    def plan(self, text, available, asked=(), first=False):
+    def plan(self, text, available, asked=(), first=False, strokes=None):
         """The performance for one sentence, or None for no words:
         {"syllables": a mouth shape per syllable, "events": [[syllable, gesture, strength], ...],
          "timing": {"at": each syllable's place in phonemes, "length": the sentence's length in phonemes,
@@ -232,12 +246,12 @@ class Planner:
             if following and all(c[0] != starts[following] for c in clauses):
                 kind = "end" if SENTENCE_END.search(mark.group()) else "clause"
                 clauses.append([starts[following], round(word_at[following], 2), kind])
-        events = self._events(text, words, starts, set(available), set(asked), first)
+        events = self._events(text, words, starts, set(available), set(asked), first, strokes)
         return {"syllables": "".join(shapes),
                 "events": [[k, name, round(strength, 2)] for k, name, strength in events],
                 "timing": {"at": at, "length": round(pos, 2), "clauses": clauses}}
 
-    def _events(self, text, words, starts, available, asked, first):
+    def _events(self, text, words, starts, available, asked, first, strokes=None):
         lower = [w.lower().replace("’", "'") for w in words]
         joined = " ".join(lower)
         found = []                                   # (priority, word index, gesture, strength)
@@ -314,7 +328,7 @@ class Planner:
                     continue
                 big = True
             used.add(index)
-            chosen.append((max(0, starts[index] - LEAD.get(gesture, 1)), gesture, strength))
+            chosen.append((max(0, starts[index] - lead_for(gesture, strokes)), gesture, strength))
         if big:
             self.sentences_since_big = 0
         return sorted(chosen)

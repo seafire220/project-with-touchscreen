@@ -271,7 +271,8 @@ class Conversation:
         """The sentence's performance, or None (the stage then moves the mouth with the loudness alone)."""
         try:
             available = self.gestures if self.gestures is not None else getattr(self.stage, "gestures", ())
-            return self.planner.plan(text, available or (), asked=asked, first=first)
+            return self.planner.plan(text, available or (), asked=asked, first=first,
+                                     strokes=getattr(self.stage, "strokes", None))
         except Exception:
             log.exception("could not plan a sentence's performance")
             return None

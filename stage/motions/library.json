@@ -53,28 +53,29 @@
  "gestures": {
   "nod": {
    "needs": ["head_pitch"],
-   "tracks": {"head_pitch": [[0, 0], [0.18, -0.4], [0.36, 0.1], [0.54, -0.25], [0.75, 0]]}
+   "tracks": {"head_pitch": [[0, 0], [0.18, -0.4], [0.36, 0.1], [0.54, -0.25], [0.75, 0]]},
+   "takes": [{"tracks": {"head_pitch": [[0, 0], [0.25, -0.38], [0.6, 0]]}}]
   },
   "emphatic_nod": {
    "needs": ["head_pitch"],
    "tracks": {"head_pitch": [[0, 0], [0.2, -0.5], [0.55, 0]], "brows": [[0, 0], [0.15, 0.3], [0.55, 0]]}
   },
-  "shake": {
+  "shake": { "mirror": true,
    "needs": ["head_yaw"],
    "tracks": {"head_yaw": [[0, 0], [0.18, -0.35], [0.38, 0.35], [0.58, -0.3], [0.76, 0.2], [0.92, 0]]}
   },
-  "tilt": {
+  "tilt": { "mirror": true,
    "needs": ["head_roll"],
    "tracks": {"head_roll": [[0, 0], [0.4, 0.45], [1.2, 0.45], [1.6, 0]],
               "head_yaw": [[0, 0], [0.4, -0.15], [1.2, -0.15], [1.6, 0]],
               "brows": [[0, 0], [0.4, 0.2], [1.2, 0.2], [1.6, 0]]}
   },
-  "bow": { "big": true,
+  "bow": { "instead": "nod", "big": true,
    "needs": ["head_pitch", "body_pitch"],
    "tracks": {"head_pitch": [[0, 0], [0.6, -0.7], [1.1, -0.7], [1.7, 0]],
               "body_pitch": [[0, 0], [0.6, -0.6], [1.1, -0.6], [1.7, 0]]}
   },
-  "bounce": {
+  "bounce": { "instead": "nod",
    "needs": ["body_pitch"],
    "tracks": {"body_pitch": [[0, 0], [0.15, 0.25], [0.3, 0], [0.45, 0.2], [0.6, 0], [0.8, 0]],
               "head_pitch": [[0, 0], [0.15, 0.1], [0.3, 0], [0.45, 0.08], [0.6, 0], [0.8, 0]],
@@ -85,7 +86,11 @@
    "tracks": {"head_pitch": [[0, 0], [0.2, 0.2], [0.35, 0.1], [0.5, 0.2], [0.65, 0.1], [0.8, 0.18], [1.2, 0]],
               "shoulders": [[0, 0], [0.15, 0.4], [0.3, 0.1], [0.45, 0.4], [0.6, 0.1], [0.75, 0.35], [1.2, 0]],
               "smile": [[0, 0], [0.15, 0.6], [1.0, 0.6], [1.2, 0]],
-              "eye_smile": [[0, 0], [0.15, 0.7], [1.0, 0.7], [1.2, 0]]}
+              "eye_smile": [[0, 0], [0.15, 0.7], [1.0, 0.7], [1.2, 0]]},
+   "takes": [{"tracks": {"head_pitch": [[0, 0], [0.15, 0.12], [0.3, 0.05], [0.45, 0.12], [0.75, 0]],
+               "shoulders": [[0, 0], [0.12, 0.3], [0.27, 0.08], [0.42, 0.28], [0.75, 0]],
+               "smile": [[0, 0], [0.12, 0.55], [0.6, 0.55], [0.8, 0]],
+               "eye_smile": [[0, 0], [0.12, 0.6], [0.6, 0.6], [0.8, 0]]}}]
   },
   "sigh": {
    "needs": ["head_pitch"],
@@ -93,12 +98,12 @@
               "head_pitch": [[0, 0], [0.6, 0.05], [1.2, -0.3], [1.8, 0]],
               "body_pitch": [[0, 0], [0.6, 0.05], [1.2, -0.12], [1.8, 0]]}
   },
-  "sway": {
+  "sway": { "mirror": true, "instead": "tilt",
    "needs": ["body_roll"],
    "tracks": {"body_roll": [[0, 0], [0.8, 0.4], [1.8, -0.4], [2.8, 0.25], [3.4, 0]],
               "head_roll": [[0, 0], [0.8, -0.15], [1.8, 0.15], [2.8, -0.1], [3.4, 0]]}
   },
-  "look_away": {
+  "look_away": { "mirror": true,
    "needs": ["head_yaw"],
    "tracks": {"head_yaw": [[0, 0], [0.35, 0.45], [1.6, 0.45], [2.1, 0]],
               "head_pitch": [[0, 0], [0.35, -0.2], [1.6, -0.2], [2.1, 0]],
@@ -109,12 +114,12 @@
    "tracks": {"head_pitch": [[0, 0], [0.5, -0.4], [1.4, -0.4], [1.9, 0]],
               "gaze_y": [[0, 0], [0.3, -0.5], [1.4, -0.5], [1.8, 0]]}
   },
-  "lean_in": { "big": true,
+  "lean_in": { "instead": "nod", "big": true,
    "needs": ["body_pitch"],
    "tracks": {"body_pitch": [[0, 0], [0.45, 0.4], [1.0, 0.4], [1.5, 0]],
               "head_pitch": [[0, 0], [0.45, 0.1], [1.0, 0.1], [1.5, 0]]}
   },
-  "lean_back": {
+  "lean_back": { "instead": "tilt",
    "needs": ["body_pitch"],
    "tracks": {"body_pitch": [[0, 0], [0.35, -0.35], [0.9, -0.35], [1.3, 0]],
               "head_pitch": [[0, 0], [0.35, 0.25], [0.9, 0.25], [1.3, 0]],
@@ -127,7 +132,7 @@
               "brows": [[0, 0], [0.1, 0.6], [0.6, 0.3], [0.9, 0]],
               "shoulders": [[0, 0], [0.1, 0.5], [0.5, 0.2], [0.9, 0]]}
   },
-  "think": {
+  "think": { "mirror": true, "instead": "look_away",
    "needs": ["head_roll"],
    "tracks": {"head_roll": [[0, 0], [0.5, 0.3], [1.8, 0.3], [2.3, 0]],
               "head_yaw": [[0, 0], [0.5, -0.25], [1.8, -0.25], [2.3, 0]],
@@ -135,7 +140,7 @@
               "gaze_y": [[0, 0], [0.3, 0.5], [1.8, 0.5], [2.2, 0]],
               "brows": [[0, 0], [0.4, 0.25], [1.8, 0.25], [2.3, 0]]}
   },
-  "hands_on_hips": { "big": true,
+  "hands_on_hips": { "exact": true, "instead": "lean_back", "big": true,
    "needs": ["arm_left|arm_right", "arm_left_b|arm_right_b"],
    "tracks": {"arm_left": [[0, 0], [0.55, 0.6], [2.5, 0.6], [3.0, 0]],
               "arm_right": [[0, 0], [0.55, 0.6], [2.5, 0.6], [3.0, 0]],
@@ -144,19 +149,19 @@
               "shoulders": [[0, 0], [0.55, 0.2], [2.5, 0.2], [3.0, 0]],
               "body_pitch": [[0, 0], [0.55, -0.05], [2.5, -0.05], [3.0, 0]]}
   },
-  "wave": { "big": true,
+  "wave": { "mirror": true, "exact": true, "instead": "greet", "big": true,
    "needs": ["arm_right"],
    "tracks": {"arm_right": [[0, 0], [0.4, 0.5], [0.65, 0.46], [0.9, 0.5], [1.15, 0.46], [1.4, 0.5], [1.85, 0]],
               "arm_right_b": [[0, 0], [0.4, 0.85], [0.65, 0.7], [0.9, 0.95], [1.15, 0.7], [1.4, 0.85], [1.85, 0]],
               "head_roll": [[0, 0], [0.4, 0.15], [1.4, 0.15], [1.85, 0]],
               "smile": [[0, 0], [0.3, 0.4], [1.45, 0.4], [1.85, 0]]}
   },
-  "brow_flash": {
+  "brow_flash": { "instead": "nod",
    "needs": ["brows"],
    "tracks": {"brows": [[0, 0], [0.1, 0.75], [0.32, 0.7], [0.55, 0]],
               "head_pitch": [[0, 0], [0.12, 0.08], [0.3, 0.06], [0.55, 0]]}
   },
-  "shrug": { "big": true,
+  "shrug": { "instead": "tilt", "big": true,
    "needs": ["shoulders"],
    "tracks": {"shoulders": [[0, 0], [0.3, 0.8], [0.8, 0.8], [1.1, 0]],
               "arm_left": [[0, 0], [0.3, 0.2], [0.8, 0.2], [1.1, 0]],
@@ -169,7 +174,7 @@
  },
  "actions": {
   "_comment": "Idle actions (kind idle) the character does by itself when nobody is talking, chosen by how bored, sleepy and lively it is; and reactions (kind reaction) to things that happen. Not offered to the language model.",
-  "stretch": { "kind": "idle", "big": true,
+  "stretch": { "exact": true, "kind": "idle", "big": true,
    "needs": ["head_pitch"],
    "tracks": {"shoulders": [[0, 0], [0.8, 0.7], [1.9, 0.7], [2.6, -0.1], [3.2, 0]],
               "body_pitch": [[0, 0], [0.8, -0.3], [1.9, -0.3], [2.6, 0.05], [3.2, 0]],
@@ -180,13 +185,13 @@
               "blink": [[0, 0], [0.7, 0.6], [1.9, 0.6], [2.4, 0]],
               "mouth_open": [[0, 0], [0.8, 0.25], [1.8, 0.25], [2.3, 0]]}
   },
-  "look_around": { "kind": "idle",
+  "look_around": { "mirror": true, "kind": "idle",
    "needs": ["head_yaw"],
    "tracks": {"gaze_x": [[0, 0], [0.2, -0.55], [1.4, -0.55], [1.7, 0.55], [3.0, 0.55], [3.3, 0], [4.5, 0]],
               "head_yaw": [[0, 0], [0.5, -0.4], [1.5, -0.4], [2.1, 0.4], [3.1, 0.4], [3.7, 0], [4.5, 0]],
               "gaze_y": [[0, 0], [0.2, 0.1], [3.3, 0.1], [3.6, 0]]}
   },
-  "look_out_window": { "kind": "idle",
+  "look_out_window": { "mirror": true, "kind": "idle",
    "needs": ["head_yaw"],
    "tracks": {"head_yaw": [[0, 0], [0.8, 0.55], [3.5, 0.5], [5.8, 0.55], [6.8, 0]],
               "gaze_x": [[0, 0], [0.5, 0.65], [5.9, 0.65], [6.6, 0]],
@@ -208,14 +213,14 @@
               "eye_smile": [[0, 0], [0.4, 0.3], [2.0, 0.3], [2.6, 0]],
               "brows": [[0, 0], [0.3, 0.2], [0.9, 0.05], [2.6, 0]]}
   },
-  "hum_sway": { "kind": "idle",
+  "hum_sway": { "mirror": true, "kind": "idle",
    "needs": ["body_roll"],
    "tracks": {"body_roll": [[0, 0], [1.5, 0.25], [3.0, -0.25], [4.5, 0.2], [6.0, 0]],
               "head_roll": [[0, 0], [1.5, -0.12], [3.0, 0.12], [4.5, -0.1], [6.0, 0]],
               "smile": [[0, 0], [0.8, 0.3], [5.2, 0.3], [6.0, 0]],
               "blink": [[0, 0], [0.8, 0.3], [5.2, 0.3], [6.0, 0]]}
   },
-  "settle": { "kind": "idle",
+  "settle": { "mirror": true, "kind": "idle",
    "needs": ["body_roll"],
    "tracks": {"body_roll": [[0, 0], [0.7, 0.15], [1.5, 0.1], [2.2, 0]],
               "shoulders": [[0, 0], [0.6, 0.25], [1.2, -0.15], [2.2, 0]],
