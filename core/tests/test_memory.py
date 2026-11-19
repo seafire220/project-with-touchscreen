@@ -312,6 +312,15 @@ class ProcessTest(Base):
                           "They said: the basil is already sprouting"], "a plain answer, or their own words")
         self.assertTrue(all(s["done"] for s in m.sessions()))
 
+    def test_a_question_answered_is_not_asked_again(self):
+        m = self.m
+        question = m.add_memory("how the driving test went", "plans and events", 3, "2026-11-13", follow_up=True, now=at(9, 19))
+        self.talk(at(14, 10), ("I passed!", "Wonderful!"))
+        run(m.process(FakeLLM("TITLE: Passed\nSUMMARY: They passed.\nMOOD: proud\n"
+                              "UPDATE #%d | They passed their driving test on the first try" % question["id"]), now=at(14, 11)))
+        self.assertEqual(m.follow_ups(now=at(15, 9)), [])
+        self.assertFalse(m.memories()[0].get("follow_up"))
+
     def test_an_update_of_a_memory_it_was_never_shown_is_something_new(self):
         m = self.m
         self.talk(at(9, 19), ("my sister Kim is flying in from Perth", "How lovely!"))

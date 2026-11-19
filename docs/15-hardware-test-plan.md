@@ -36,7 +36,8 @@ they change a decision.
 | 14 | Interrupt | Press the button while it speaks | Sound stops within 0.3 s |
 | 15 | Long reply | Ask for a story | Speech continues without gaps between sentences |
 | 16 | Timer | "Set a timer for one minute" | It confirms, and announces the timer after a minute |
-| 17 | Memory | Tell it a fact; after six exchanges check Memory | The fact appears in the notes; edits there are used |
+| 17 | Memory | Tell it a fact and a plan with a date ("my sister Kim visits on Saturday"), say goodbye, wait four minutes, check Memory; talk again the day after the date | The conversation is summed up and both are kept (the plan with its date); edits there are used; the day after, it asks how the plan went (`31-memory.md`) |
+| 17b | A model on your own computer | Run Ollama on a laptop on the same Wi-Fi (`OLLAMA_HOST=0.0.0.0`), then **AI services → My own computer → Find on my network**, choose a model, **Save and test**; talk | Found without typing an address; replies within its usual time (the first after a pause is slower); the Memory tab fills as with a cloud model |
 | 18 | Failure | Remove the language model key, then talk | A short tone and a clear message in the console; no hang |
 | 19 | Restart recovery | `sudo systemctl kill companion-stage`, then the core | Both come back within 5 s |
 | 20 | Echo | Turn listening on and let it speak loudly | It does not answer itself (the microphone is ignored while it speaks) |

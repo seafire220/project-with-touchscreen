@@ -867,6 +867,11 @@ class Memory:
         index = Index([m["text"] for m in memories])
         related = sorted(index.scores(text), reverse=True)[:40]
         shown = [memories[i] for _, i in related]
+        # Plans whose day has come (in the month before), whatever words were said: what a conversation settles.
+        day = datetime.date.fromtimestamp(session.get("start", now))
+        month = (day - datetime.timedelta(days=31)).isoformat()
+        shown += [m for m in memories if m.get("when") and month <= m["when"] <= day.isoformat() and m not in shown
+                  and (m.get("follow_up") or m.get("category") == "plans and events")][:10]
         shown += [m for m in memories if m.get("importance", 3) >= 4 and m not in shown][:15]
         known = "\n".join("#%d [%s] %s%s" % (m["id"], m.get("category", "other"), m["text"],
                                              " (%s)" % m["when"] if m.get("when") else "") for m in shown) or "(none yet)"
@@ -921,7 +926,9 @@ class Memory:
                                    source=session["id"], now=now):
                     changed += 1
             elif op["op"] == "update" and op["id"] in visible:
-                if self.edit_memory(op["id"], now=now, text=op["text"], **({"when": op["when"]} if op.get("when") else {})):
+                # A question to follow up that the model rewrites has had its answer: no longer to ask.
+                if self.edit_memory(op["id"], now=now, text=op["text"], follow_up=False,
+                                    **({"when": op["when"]} if op.get("when") else {})):
                     changed += 1
             elif op["op"] == "update":
                 # A number it was never shown: a small model's way of saying something new.
