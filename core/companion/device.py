@@ -457,6 +457,7 @@ class Device:
         if not cid:
             return None
         memory = self.memory(cid)
+        memory.close_stale(now)               # needs no model: a conversation ends on time even without one
         keep = int(settings.get("history_turns", 12))
         if not memory.needs_work(now, keep=keep):
             return None

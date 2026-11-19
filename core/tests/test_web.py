@@ -525,6 +525,21 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
                          [("Tea", "They said hello and we talked about tea.", "quiet")])
         self.assertEqual([x["text"] for x in memory.memories()], ["They love tea"])
 
+    async def test_a_conversation_ends_on_time_even_without_a_working_model(self):
+        await self.login()
+        self.device.characters.install(package.build(good_files(), manifest()))
+        self.device.provider_factory = lambda which, device: {"llm": FakeLLM(fail="start")}.get(which)
+        memory = self.device.memory("aria")
+        memory.add_turn("hello", "hi", now=time.time() - 3600)
+        m = await (await self.client.get("/api/memory/aria")).json()
+        self.assertIsNone(m["open"], "an hour quiet: over")
+        self.assertEqual([(s["why"], s["done"]) for s in m["sessions"]], [("quiet", False)], "waiting to be summed up")
+        memory.add_turn("hello again", "hi", now=time.time() - 3600)
+        memory.new_conversation()
+        memory.add_turn("and again", "hi", now=time.time() - 1800)
+        await self.device.keep_memory("aria")
+        self.assertIsNone(memory.open_session(), "the background step ends it before asking the model anything")
+
     async def test_a_failed_memory_update_is_reported_and_retried_later(self):
         self.device.characters.install(package.build(good_files(), manifest()))
         self.device.provider_factory = lambda which, device: {"llm": FakeLLM(fail="start")}.get(which)

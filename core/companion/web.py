@@ -636,6 +636,7 @@ class Console:
         conversations (newest first), the one going on, and its diary."""
         memory = self.device.memory(self._cid(request))
         now = time.time()
+        memory.close_stale(now)               # one gone quiet is shown as ended, waiting to be summed up
         sessions = memory.sessions()
         open_session = memory.open_session()
         return web.json_response({
