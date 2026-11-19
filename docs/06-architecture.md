@@ -100,8 +100,10 @@ One user turn:
 4. **Speech recognition.** Audio is recognised as it arrives, on the device
    by default.
 5. **Context.** The turn manager assembles: the character's persona, the
-   memory notes, the latest conversation summary and the older summaries
-   that match what was said, recent turns, and the current time.
+   owner's notes, the lasting memories that matter now, earlier
+   conversations that match what was said, plans whose day has come, when
+   they last talked and about what, this conversation's turns, and the
+   current time, all within what the model can read (`31-memory.md`).
 6. **LLM.** The reply is requested as a stream.
 7. **Response processing.** As text arrives it is split at sentence
    boundaries. Emotion markers the persona is instructed to emit (for example
@@ -112,10 +114,12 @@ One user turn:
    used.
 9. **Playback and lip movement.** Audio plays as it arrives, and loudness is
    sent to the stage as described above.
-10. **Memory.** The turn is appended to the character's history. Every few
-    turns, and when a conversation goes quiet, a background LLM call folds
-    the new turns into the notes and into a dated summary of the
-    conversation (`core/companion/memory.py`, `25-product-review.md`).
+10. **Memory.** The turn is kept, in the conversation going on. A
+    conversation ends after 20 quiet minutes, after a goodbye, at a new day
+    or when the owner starts afresh; then one background LLM call gives it
+    a title and summary and adds, updates or retires lasting memories. A
+    long conversation is condensed as it goes, and a diary entry is written
+    each day (`core/companion/memory.py`, `31-memory.md`).
 
 ```
 mic → voice activity → speech recognition → context → LLM (stream)
@@ -277,7 +281,7 @@ that no paid service is needed.
 | Data | Location | Protection |
 |---|---|---|
 | Characters | Data partition | Validated on import |
-| Memory per character: notes, dated conversation summaries, turn history | Data partition | Readable and editable in the console; cleared per character |
+| Memory per character: conversations (summed up, every word archived), lasting memories, a diary, the owner's notes | Data partition | Readable and editable in the console; cleared per character |
 | Settings | Data partition | Written atomically so a power cut cannot corrupt them |
 | API keys | Separate file readable only by the core service | Write-only in the console (shown as last four characters); masked in all logs; excluded from every export and backup |
 | Logs | Journal, size-capped | Rotated automatically |

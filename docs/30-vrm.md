@@ -37,6 +37,30 @@ memory. Two outside handoffs were read first:
   textures at import, and a first feelings map from the avatar's
   expressions.
 
+## Does it work on any avatar? Does it need rigging?
+
+Any reasonable `.vrm` works, and **nobody rigs anything**. A VRM file
+carries its own map of a standard humanoid skeleton (hips, spine, chest,
+neck, head, both arms and legs down to the fingers, eyes). That is what
+VRM is for. The device reads that map, and every movement and clip is
+written for that skeleton, then fitted to each avatar's own bones, rest pose
+and proportions as it loads (below). Expressions (joy, sorrow, blinking,
+the vowel mouth shapes) are named in the file too.
+
+Tested on six avatars from four makers (VirtualCast, pixiv, Dwango, VRoid
+Project), both VRM versions, 101 to 357 bones: all load, and every gesture,
+idle loop and clip plays on each.
+
+Limits:
+- **Other 3D formats** (FBX, PMX, plain glTF) are not read. Convert them to
+  VRM first, with VRoid Studio, UniVRM in Unity, or the VRM add-on for
+  Blender.
+- **Hands that touch the body** (on the hips, at the chin) are placed for
+  average proportions. On an unusual avatar they can float or sink a little.
+- **Very heavy avatars** are refused, or drawn lighter (failsafes, below).
+- A missing optional bone (upper chest, toes) is fine: its turn passes to the
+  next bone.
+
 ## How it fits: one rig, three drawings
 
 ```
@@ -161,7 +185,7 @@ and 2 minutes; an avatar's clips may take at most 24 MB.
 
 ## The built-in animations (`stage/motions/vrma`)
 
-Thirty clips, written from scratch for this project with
+Thirty-four clips, written from scratch for this project with
 `stage/tools/vrma_kit.py` and `stage/tools/vrma_library.py` (no
 third-party motion). The kit poses a reference skeleton (a 1.55 m VRoid
 girl in VRM's T-pose) the way an animator describes a pose: the hips moved,
@@ -177,10 +201,19 @@ and beats are layered on; the kit writes standard `.vrma` files.
 | Idle loops | `idle` (weight drifting foot to foot), `idle_happy` (hands behind the back, rocking in time), `idle_sad` (slumped, a sigh), `idle_angry` (fists, shoulders up, a foot tapping), `idle_embarrassed` (hands together, toes in), `idle_listen` (leaning in, head tilted), `idle_think` (hand to the chin), `idle_talk` (hands moving with the words), `idle_sleep` (dozing on its feet) |
 | Gestures | `wave`, `greet` (a small hello), `bow`, `bounce`, `laugh`, `sigh`, `sway`, `lean_in`, `lean_back`, `surprise`, `think`, `hands_on_hips`, `shrug` |
 | Idle actions | `stretch` (arms over the head), `look_around`, `look_out_window`, `yawn` (hand over the mouth), `hum_sway`, `settle`, `nod_off`, `wake` |
+| Turning | `turn_around` (round on the spot to show the back, a peek back over the shoulder, round again), `twirl` (a happy spin, arms flaring; happy moods sometimes choose it), `turn_aside` (side-on a while, then back), `look_back` (over the shoulder, head first, then the body) |
+
+The turning clips **step**: the feet lift and set down in turn (the kit's
+stepping helper), with the knees following the way the body faces, so the
+avatar never spins on a fixed pair of feet. Each is also played mirrored.
+They are gestures only full-body animation can play (`clip_only` in
+`stage/motions/library.json`): a 2D character has no back to show, so it
+never asks for them, and the model is offered them only when the avatar
+can.
 
 Head-only gestures (nods, shakes, tilts, glances) stay with the motion
 library, which times them to speech. The device installs the clips beside
-the stage (`/opt/companion/share/vrma`); together they are 1.9 MB.
+the stage (`/opt/companion/share/vrma`); together they are 2.0 MB.
 
 `stage/tools/vrma_sheets.py AVATAR.vrm OUT` plays every clip on an avatar
 with the real stage and saves sheets of frames (and GIFs with `--gif`).
@@ -217,12 +250,13 @@ textures. On a 1 GB board, the stage's service may use 300 MB in all.
    cost: points, triangles, textures as drawn, and the stage's memory for it
    at most (the program, the file while it loads, its meshes and the
    processor's copy of them while they go to the graphics chip, its face
-   shapes, its textures). Textures are scaled to the device's size, and to
+   shapes, its textures). Points that several parts share are counted once,
+   as the stage keeps them. Textures are scaled to the device's size, and to
    512 pixels if it would not fit otherwise. An avatar with more than
    400,000 triangles or 300,000 points, or still over 260 MB, is refused,
    saying why and what to export instead (VRoid Studio's polygon reduction
    and texture atlas size; Blender's Decimate). One that fits but is heavy
-   (over 200 MB or 120,000 triangles) starts with its drawing kept light.
+   (over 240 MB or 120,000 triangles) starts with its drawing kept light.
    The settings page shows the figures.
 2. **When the stage loads it**, textures are kept within a budget (96 MB on
    1 GB boards, 160 MB above), halving their size until they fit. **Lite**
@@ -245,7 +279,13 @@ added for 3D).
 
 - **Skinning on the graphics chip.** Each skin's joint matrices are sent as
   a small texture every frame, so avatars with hundreds of bones (the
-  samples have 132 to 357) work on chips that allow few uniforms.
+  samples have 101 to 357) work on chips that allow few uniforms.
+- **Points shared between parts.** VRoid Studio and UniVRM 0.x exports give
+  every part of a mesh (skin, clothes, hair) the same set of points, each
+  part drawing its own triangles from it. The stage keeps one copy of each
+  set on the graphics chip and shapes it once a frame. Before this, each part
+  had its own copy: AvatarSample_B used 5.6 times its vertex memory, and
+  AvatarSample_A was refused as too detailed.
 - **Face shapes on the processor**, only for meshes whose shape weights
   changed, from sparse deltas (a face's targets each touch few points).
 - **MToon's toon look**: lit and shade colours split at a soft line
@@ -280,13 +320,16 @@ holds separately):
 
 | Avatar | Format | Bones | Textures (L1) | Peak, light | Peak, full body | Peak, lite |
 |---|---|---|---|---|---|---|
-| Seed-san (VirtualCast) | VRM 1.0 | 132 | 33 MB | 168 MB | 169 MB | 148 MB |
-| VRM1_Constraint_Twist_Sample (pixiv) | VRM 1.0 | 357 | 42 MB | 176 MB | 178 MB | 145 MB |
-| Alicia Solid (Dwango) | VRM 0.x | 272 | 27 MB | 164 MB | 166 MB | 146 MB |
-| AvatarSample_B (VRoid Project) | VRM 1.0, VroidStudio export | 339 | 65 MB | 216 MB | 218 MB | 167 MB |
+| Seed-san (VirtualCast) | VRM 1.0 | 132 | 33 MB | 167 MB | 169 MB | 147 MB |
+| VRM1_Constraint_Twist_Sample (pixiv) | VRM 1.0 | 357 | 42 MB | 175 MB | 177 MB | 144 MB |
+| Alicia Solid (Dwango) | VRM 0.x | 272 | 27 MB | 161 MB | 163 MB | 143 MB |
+| AvatarSample_A (VRoid Project) | VRM 0.x, VRoid Studio 0.14 | 103 | 50 MB | 180 MB | 182 MB | 148 MB |
+| AvatarSample_B (VRoid Project) | VRM 1.0, VroidStudio export | 339 | 65 MB | 202 MB | 204 MB | 154 MB |
+| AvatarSample_C (VRoid Project) | VRM 0.x, VRoid Studio 0.14 | 101 | 44 MB | 175 MB | 176 MB | 147 MB |
 
-All are under the stage's 300 MB limit. The full-body style adds 1 to 2 MB
-(the clips); lite saves 20 to 50 MB. Posing (clips, bones, springs, face)
+All are under the stage's 300 MB limit (measured 2026-11-19, after points
+shared between parts were kept once; AvatarSample_B fell from 216 MB). The
+full-body style adds 1 to 2 MB (the clips); lite saves 18 to 50 MB. Posing (clips, bones, springs, face)
 takes 0.06 ms a frame in either style; drawing is the cost. Frame rates on a Pi are
 still to be measured (`15-hardware-test-plan.md`); compressed textures
 (ETC2, which every OpenGL ES 3 chip reads) would cut texture memory by
@@ -340,9 +383,9 @@ redistribute them.
   - expressions and feelings;
   - the device showing the VRM drawing;
   - uploading on the settings page.
-- Four real avatars (above), played through all 19 gestures, 11 idle
+- Six real avatars (above), played through all 19 gestures, 11 idle
   actions, 7 moods and the states with `stage/tools/clip_sheets.py`, which
-  now takes `.vrm` files. All 37 clips play on all four with no stand-ins,
+  now takes `.vrm` files. All 37 clips play on all of them with no stand-ins,
   because a VRM offers every control. Brows move only on VroidStudio faces;
   other avatars' brows stay still, since VRM has no standard brow
   expression. The sample models stay out of the repository.
@@ -362,9 +405,14 @@ redistribute them.
   `try_animation` command. `core/tests/test_animations.py` (checking clips,
   the built-in ones too; roles; the style; the settings file; reinstalling;
   the crash fallback) and the web test of the 3D animation section.
-  Every built-in clip on all four avatars with `vrma_sheets.py`: hands land
+  Every built-in clip on all six avatars with `vrma_sheets.py`: hands land
   where they should (on the hips, at the chin, over the mouth, palms up in
-  a shrug) on avatars from 132 to 357 bones, both VRM versions.
+  a shrug) on avatars from 101 to 357 bones, both VRM versions. The four
+  turning clips on three (AvatarSample_A and B, Alicia), as GIFs: the feet
+  step, the knees follow, and the avatar ends where it began.
+- Points shared between parts: `stage/src/vrm/tests.rs` (parts that share
+  points share them on the graphics chip) and the import's estimate counting
+  each set once (`test_vrm.py`).
 - Failsafes: import refuses too-detailed and too-large avatars and shrinks
   textures further when that is enough (`test_vrm.py`); lite and half
   resolution drawn and compared by eye.

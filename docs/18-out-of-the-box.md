@@ -51,7 +51,7 @@ running Raspberry Pi OS (`13-build-and-install.md`).
 | `/var/lib/companion/current-map.json` | The movement settings of the character on the screen, for the stage | Rewritten when the character changes |
 | `/var/lib/companion/current-stage.json` | A 3D avatar's animation style, animation folders, drawing cost and shot, for the stage | Rewritten when the character or its settings change |
 | `/opt/companion/share/vrma/` | The built-in full-body animations for 3D avatars | Software update |
-| `/var/lib/companion/memory/<id>/` | What each character remembers (conversation, notes, dated summaries of conversations) | Conversations; the owner can edit or clear |
+| `/var/lib/companion/memory/<id>/` | What each character remembers: conversations and their words, lasting memories, its diary, the owner's notes (`31-memory.md`) | Conversations; the owner can edit or clear |
 | `/var/lib/companion/current.inp` | Link to what the screen shows: the active character, or a message card | The device |
 | `/etc/systemd/system/companion-*.service` | Starts the core, and the character full screen on the display | Software update |
 | `/etc/default/companion` | Optional: force a particular sound card | Rarely |

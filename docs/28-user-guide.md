@@ -22,9 +22,10 @@ personality.
 
 - The device and its power supply.
 - Home Wi-Fi, and a phone or computer on it, to use the settings page.
-- **A key for a language model** (the character's mind). Several services
-  have free allowances; see "AI services" below. The device comes with no
-  keys: you add your own, and they never leave the device.
+- **A language model** (the character's mind): a key for a service (several
+  have free allowances), or a model running on your own computer, which is
+  free and keeps your words at home. See "AI services" below. The device
+  comes with no keys: you add your own, and they never leave the device.
 - Optional: a key for a voice service (the device has a free voice of its
   own), and a web-search key (only for models that cannot search by
   themselves; Claude can).
@@ -191,19 +192,55 @@ you doing it (`14-making-characters.md`).
 
 ## Memory
 
-The **Memory** tab shows the notes the character keeps about you (edit them
-freely; it uses your edits), its recent conversation, and earlier
-conversations it can recall. **Forget everything** clears that character's
-memory.
+The character remembers each conversation as a whole, the lasting things
+it learns about you, and keeps a diary (`31-memory.md`).
+
+- **A conversation ends** after 20 quiet minutes, a few minutes after you
+  say goodbye, when a new day starts (4 am), or when you press **Start a
+  new conversation**. It is then summed up in the background: a title, a
+  summary, how you seemed, and what it learnt.
+- **What it learns** is kept as short memories with a category and an
+  importance: your name, your people, what you like, plans with their
+  dates. When something changes ("Kim moved to Darwin"), the old memory is
+  updated, not kept beside the new one. Once a plan's day has passed, it
+  asks how it went.
+- **Each evening** it writes a diary entry in its own voice, and the next
+  day it picks up where you left off.
+
+The **Memory** tab shows all of it:
+- **Always remember**: notes it keeps in mind in every conversation, which
+  it never changes itself.
+- **What it remembers about you**: its memories, which you can add, pin,
+  change or forget; ones it found no longer true can be restored.
+- **Conversations**: each with its summary; **Show words** shows every word.
+- **Diary**: its entries.
+
+**Forget everything** clears that character's memory.
 
 ## AI services
 
 Under **AI services**, in three parts:
 
 1. **Language model**: Claude (Anthropic), OpenAI, Gemini, Groq, OpenRouter,
-   or any service with an OpenAI-style address (including a model on your
-   own computer). Choose the service and model, paste the key, then **Save
-   and test**.
+   or any service with an OpenAI-style address. Choose the service and model,
+   paste the key, then **Save and test**.
+
+   **A model on your own computer** (*My own computer or server*):
+   - Supported: Ollama, LM Studio, llama.cpp, vLLM, KoboldCpp,
+     text-generation-webui, Jan or GPT4All on a computer in your home. Free,
+     and nothing you say leaves your home network. With the device's own voice
+     and speech recognition, the character then works without the internet.
+   - **Open the model to your network:**
+     - Ollama: start it with `OLLAMA_HOST=0.0.0.0`.
+     - LM Studio: turn on *Serve on Local Network*.
+     - llama.cpp: start its server with `--host 0.0.0.0`.
+   - **Connect:** press **Find on my network**, pick your server and a model,
+     then **Save and test**. If it isn't found, type the computer's address.
+   - **Context** is how much the model reads at once (8,192 if left empty).
+     More lets it remember more of a long conversation, but needs more of the
+     computer's memory.
+   - A model of 3 to 8 billion parameters works well on a recent laptop.
+     The first reply after a while is slower, as the model loads.
 2. **Voice**: the free on-device voice, or a voice service.
 3. **Speech recognition** (hearing you): free and on the device by default,
    or a cloud service.
@@ -219,7 +256,9 @@ Under **AI services**, in three parts:
   (with the on-device speech recognition, your voice itself stays on the
   device). With a cloud voice or cloud speech recognition, the text or audio
   goes to that service. Their own privacy terms apply.
-- **Memory** (notes and conversations) stays on the device.
+- **Memory** (conversations, memories, the diary and your notes) stays on
+  the device. What the character reads for a reply goes to the language
+  model you chose; with a model on your own computer, it stays in your home.
 - **The settings page** only answers on your home network, behind your
   password.
 
@@ -245,7 +284,11 @@ own private use. Clone only your own voice, or a voice whose owner agrees.
 | Forgot the settings-page password | Hold the listen button for 12 seconds, then set up again (characters, memories and keys stay) |
 | It does not hear you | Is listening on (press the button)? Look at *What is happening* on the Home tab |
 | "refused the key" | The key is wrong, expired, or the account has no credit: paste it again under AI services and **Save and test** |
-| It answers slowly | Choose a faster model, or lower *Effort* under the language model |
+| It answers slowly | Choose a faster model, or lower *Effort* under the language model. With a model on your own computer, choose a smaller one; the first reply after a pause is slower while it loads |
+| **Find on my network** finds nothing | Is the computer on, with the model server running and opened to the network (see AI services)? Type its address instead, such as `192.168.1.20`; a firewall may need to allow the port (Ollama: 11434, LM Studio: 1234) |
+| "requires more system memory" | The model is too big for that computer: choose a smaller one, or lower *Context* |
+| It forgot something it should know | Look on the **Memory** tab: add or correct the memory, or pin it so it is always in mind |
+| The Home tab says the memory was not brought up to date | The language model could not be reached; it tries again in 15 minutes |
 | An arm moves wrongly | Make the character again in Character Studio with that arm unticked |
 | It moves too much, or too little | Its **Temperament** sliders |
 | An imported model moves the wrong part | Its **Movement** section: choose another setting for that movement and test it |

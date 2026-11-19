@@ -658,3 +658,71 @@ rejected. Settled entries are not reopened without new evidence.
   an estimate of their memory, kept within a texture budget when loaded,
   drawn more simply by a frame-rate watchdog, and shown drawn lightly (then
   replaced by a card) if the stage fails with them.
+
+## D-049 — Turning is a full-body gesture that steps, offered only where a back can be shown
+
+- Date: 2026-11-19. Status: built (owner: "why not add a few animations of
+  characters turning?"; `30-vrm.md`).
+- Four clips: turn around, twirl, turn aside, look back. The feet step in
+  turn, and the knees follow the way the body faces; a turn on fixed feet
+  reads as a statue on a turntable.
+- They are `clip_only` gestures: playable only where a clip exists, so only
+  3D avatars in the full-body style can do them. The language model is
+  offered them only then. A 2D character has no back to show, and faking one
+  by squashing the picture would look broken.
+- The same change made the stage keep points that several parts share
+  once, as VRoid and UniVRM 0.x exports intend. Without it, the import
+  refused an ordinary VRoid avatar, and another used 5.6 times the vertex
+  memory it needed. Any VRM is fitted from its own humanoid bone map, so
+  owners never rig anything.
+
+## D-050 — A language model on the owner's own computer, spoken to in its own way
+
+- Date: 2026-11-19. Status: built (owner: "an option for the user to
+  connect to their own self-hosted LLM"; `28-user-guide.md`).
+- **Ollama is spoken to natively** (`/api/chat`). Its OpenAI-style door
+  takes neither a context length nor a keep-alive, and Ollama's default
+  context is small enough to cut the character's memory short. We ask for
+  the context the owner sets (8,192 by default) and keep the model loaded
+  for 30 minutes. Every other server (LM Studio, llama.cpp, vLLM, KoboldCpp,
+  text-generation-webui, Jan, GPT4All) is spoken to as OpenAI-compatible,
+  at its usual port.
+- **Finding servers** looks only at this device and the private addresses
+  around it, on the usual ports, and asks each what it is. It never looks
+  beyond the home network.
+- **Patience**: up to 120 seconds for the first words, since a home
+  computer may need to load the model; the cloud keeps its shorter limit.
+- A reasoning model's thinking (`<think>…</think>`) is never spoken.
+- A server error carries the server's own words ("model requires more
+  system memory than is available").
+- The key, if a server wants one, is stored like every other key.
+- Checked against a real Ollama (qwen2.5:3b on a 4-core processor) with
+  the device's own client (`31-memory.md`).
+
+## D-051 — Memory as conversations, lasting memories and a diary
+
+- Date: 2026-11-19. Status: built (owner: "how does it decide one
+  conversation has ended and another has begun … long-term and dynamic
+  memory capabilities, to try and match what Code27 Sybran does";
+  `31-memory.md`).
+- **A conversation has clear ends**: 20 quiet minutes, three minutes after
+  a goodbye, a new day at 4 am, or the owner's *Start a new conversation*.
+  Before this, a summary covered "a stretch of turns", which matched
+  nothing a person would call a conversation.
+- **Lasting memories are items, not a page of notes**: one sentence each,
+  with a category, an importance and dates. The model changes them by
+  number (add, update, forget), so what was said replaces what was
+  remembered without rewriting everything. A free-text page drifted, and
+  grew or lost things at each rewrite.
+- **One call when a conversation ends**, in the background, instead of a
+  call every six turns. Long conversations are condensed as they go,
+  between replies.
+- **A dated plan comes back by itself** once its day has passed, until the
+  person says how it went. This doesn't depend on the model remembering to
+  ask for a follow-up, which a small model often forgot.
+- **The diary** is the character's own voice and continuity, as in CODE27.
+- **Words, not meaning, for recall**: on-device and instant, with no extra
+  service. Embeddings can be added later if matching by meaning is missed.
+- **Forgiving of the model**: answers are read in every form a real small
+  model wrote, and a plain or empty answer still leaves a summary.
+- Not done: speaking first, encryption at rest, more than one person.
