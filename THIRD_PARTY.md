@@ -41,4 +41,7 @@ not in the product or the repository (`docs/19-live2d-format-licensing.md`).
 Test pictures of commercial characters are kept out as well (D-024), and so
 are the VRM sample avatars used for testing (`docs/30-vrm.md`); the VRM
 support is our own code, written from the VRM specifications (no VRM
-library is included).
+library is included). The built-in full-body animations
+(`stage/motions/vrma`) are original to this project, made with
+`stage/tools/vrma_kit.py`; they follow the VRM Animation (`VRMC_vrm_animation`)
+specification, and contain no third-party motion data.

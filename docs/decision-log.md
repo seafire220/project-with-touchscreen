@@ -632,3 +632,29 @@ rejected. Settled entries are not reopened without new evidence.
   boards, 2048 above).
 - An avatar's own licence terms are shown on the settings page, not
   enforced; whoever imports it is responsible for the right to use it.
+
+## D-048 — 3D avatars can move with full-body animation clips, the motion system still deciding
+
+- Date: 2026-11-19. Status: built (owner's request: "allow more complex VRM
+  animation ... choose which animation style ... upload your own
+  animations ... failsafes"; `30-vrm.md`).
+- Each VRM character moves in one of two styles, chosen on the settings
+  page: **full body** (the default) plays animation clips on the whole
+  skeleton; **light** keeps the generic controls of D-045. Only the chosen
+  style's data is loaded (no clip is read in the light style).
+- Clips are **VRM Animation** (`.vrma`), the VRM consortium's standard,
+  so owners can bring animations from other tools. The motion system stays
+  the brain: it picks gestures, times them to words and moods, keeps the
+  budget and channels; a clip only supplies a gesture's body movement, and
+  idle loops are chosen by state and mood. Arms take a clip's pose; the
+  head and body add its movement, so looking, nods and breathing carry on.
+  A separate animation player with its own state machine would have split
+  the character's mind in two.
+- The 30 built-in clips are written from scratch with our own kit (poses
+  described with hand placement and planted feet, solved on a reference
+  skeleton), so there are no third-party motion licences to carry.
+  Head-only gestures stay with the library, which times them to speech.
+- Heavy avatars are met at every stage: refused or shrunk at import with
+  an estimate of their memory, kept within a texture budget when loaded,
+  drawn more simply by a frame-rate watchdog, and shown drawn lightly (then
+  replaced by a card) if the stage fails with them.

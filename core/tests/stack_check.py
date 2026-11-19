@@ -1,6 +1,6 @@
 """Run the real core against the real stage, with stand-in AI providers, and record what the stage shows.
 
-    python tests/stack_check.py STAGE_BINARY PUPPET.inp OUT_DIR
+    python tests/stack_check.py STAGE_BINARY PUPPET.inp OUT_DIR [STAGE OPTIONS ...]
 
 Starts the stage on a virtual display with its command socket, connects the
 core to it, tells it the time of day, has it listen to a person speaking (a
@@ -13,7 +13,8 @@ and fails if any mood or gesture tagged in the reply (and available to the
 character) did not play, if it did not look up as the person started
 speaking, or if it never responded in their pauses. Needs Xvfb. With
 COMPANION_TEST_VOICE set to an on-device voice folder, the reply is spoken
-by that voice instead of a stand-in, so the mouth follows real speech.
+by that voice instead of a stand-in, so the mouth follows real speech. Options after OUT_DIR go to
+the stage (for a 3D avatar's full-body style: --vrm-animation full).
 """
 import asyncio
 import json
@@ -37,7 +38,7 @@ REPLY = ("[happy] [wave] Hello! It is lovely to meet you, and I am glad you came
          "[embarrassed] Sorry, I get a little excited when someone new visits.")
 
 
-async def main(stage, puppet, out):
+async def main(stage, puppet, out, *options):
     os.makedirs(out, exist_ok=True)
     work = tempfile.mkdtemp()
     sock = os.path.join(work, "stage.sock")
@@ -46,7 +47,8 @@ async def main(stage, puppet, out):
     env = dict(os.environ, DISPLAY=":" + xvfb.stdout.readline().strip(), LIBGL_ALWAYS_SOFTWARE="1")
     captures = [round(1.0 + 0.1 * i, 1) for i in range(150)]
     proc = subprocess.Popen([stage, puppet, "--size", "360x640", "--gl", "es", "--no-stdin", "--socket", sock,
-                             "--capture-dir", out, "--capture-at", ",".join(map(str, captures)), "--exit-after", "48"],
+                             "--capture-dir", out, "--capture-at", ",".join(map(str, captures)), "--exit-after", "48",
+                             *options],
                             env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     seen = []
     link = StageLink(sock, on_event=lambda e: seen.append(e))
@@ -119,4 +121,4 @@ async def main(stage, puppet, out):
 
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(main(*sys.argv[1:4])))
+    sys.exit(asyncio.run(main(*sys.argv[1:])))

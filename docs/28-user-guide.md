@@ -128,11 +128,31 @@ character's moods.
 
 On **Characters → Add a character**, choose a `.vrm` file (as made with
 VRoid Studio and most VTubing programs). Adding it takes up to a minute
-while its pictures are fitted to the device's memory. It moves and talks
-like any other character: the same moods, gestures, idle life and lip
-sync, with its arms, hands and hair moving in 3D. Its maker's terms (who may
-use it, whether commercially) are shown under it; follow them. **Feelings**
-starts with its own happy, sad, angry and surprised expressions.
+while its pictures are fitted to the device's memory. If an avatar is too
+detailed for the device, it says so and what to do (export it again with
+fewer polygons and smaller textures). Its maker's terms (who may use it,
+whether commercially) are shown under it; follow them. **Feelings** starts
+with its own happy, sad, angry and surprised expressions.
+
+It talks like any other character, with the same moods, gestures and lip
+sync. Under **3D animation** you choose how it moves:
+
+- **Full body** (the usual): it stands and moves like a person, with a
+  different idle pose for each mood and for listening, thinking and
+  talking, and gestures with its whole body (waving, bowing, a hand on the
+  chin while it thinks, stretching, yawning behind its hand).
+- **Light**: it moves the way the 2D characters do, using a little less of
+  the device.
+- **Show**: head to thighs, head and shoulders, or the whole body.
+- **Simplify the drawing**: no outlines and smaller pictures, for a slow
+  device. The device does this by itself if the screen gets slow.
+
+**Its own animations**: add VRM Animation files (`.vrma`, from VRoid Hub,
+VRM Posing Desktop or Blender) as an idle pose (for a mood, or for
+listening, thinking or talking), in place of one of its gestures, or as a
+new gesture with a few words saying when to use it ("do a little dance").
+**Try** plays one on the screen. Use only animations you have the right to
+use.
 
 ### Who the character is
 
@@ -230,4 +250,7 @@ own private use. Clone only your own voice, or a voice whose owner agrees.
 | It moves too much, or too little | Its **Temperament** sliders |
 | An imported model moves the wrong part | Its **Movement** section: choose another setting for that movement and test it |
 | The screen says a character cannot be shown | Choose another character; the file may be damaged or of an unsupported kind |
+| The screen says a 3D avatar is too detailed for this device | Choose another character, or export the avatar again with fewer polygons and smaller textures and add it again |
+| A 3D avatar moves stiffly or the screen is slow | Under **3D animation**, tick *Simplify the drawing*, or choose the *Light* style |
+| A 3D animation you added will not load | It must be a `.vrma` file of at most 16 MB and 2 minutes; the settings page says what is wrong |
 | Giving the device away | **Device → Reset everything** (password, then type RESET): removes characters, memories, keys, settings, timers and saved Wi-Fi |

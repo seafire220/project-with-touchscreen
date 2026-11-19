@@ -1,16 +1,26 @@
 # VRM avatars: 3D characters beside the 2D ones
 
 Status: 2026-11-19. Built and tested in software (unit tests, four real
-avatars, the full conversation check). Not yet run on a Raspberry Pi.
+avatars, the full conversation check in both animation styles). Not yet run
+on a Raspberry Pi.
 
 ## What it is
 
 A buyer can add a **VRM avatar** (`.vrm`, the 3D humanoid format VRoid
 Studio and most VTubing tools use) on the settings page, beside the 2D
 characters made from pictures and imported Live2D-format models. It
-talks, moves and feels exactly as those do: the same moods, gestures, idle
-life, listening, lip sync, temperament and Animation tab. Only the drawing
-differs.
+talks, moves and feels as those do: the same moods, gestures, idle life,
+listening, lip sync, temperament and Animation tab.
+
+It moves in one of two styles, chosen for each avatar:
+
+| Style | How it moves | Costs |
+|---|---|---|
+| **Full body** (the default) | Animation clips on the whole skeleton: an idle pose for each mood and for listening, thinking, talking and dozing; gestures such as a wave, a bow, hands on hips, a stretch, a yawn with a hand over the mouth. Where it looks, nods, its face and lip sync go on top. The owner can add their own clips. | About 2 MB more for the clips; posing still takes under 0.1 ms a frame |
+| **Light** | The controls the 2D characters use, turned into bone turns (below). No clips are read. | The least |
+
+Only the chosen style's data is in memory: in the light style no clip is
+read at all.
 
 The owner asked for an alternative to the 2D animation system: upload your
 own VRM, have it matched to our default rig, and have it animated by our
@@ -68,6 +78,10 @@ avatars, which face the other way, are turned round first.
 | Blush | an expression or shape named for one (blush, cheek, shy, 照れ, 頬) |
 | Moods (through Feelings) | the avatar's own happy, sad, angry and surprised, shown a little softer than full (a full "happy" closes many avatars' eyes for as long as the mood lasts) |
 
+That table is the light style. The full-body style plays clips for the
+body and keeps the rows from Eyes down (the face, the mouth, the moods)
+exactly as they are; see below.
+
 Fingers rest slightly curled, as a relaxed hand does. Expressions follow
 VRM's override rules (an expression that hides blinking hides it), except
 that the mouth is never silenced: speech always shows at half or more.
@@ -81,6 +95,148 @@ VRM 0.x's `secondaryAnimation`), pushed out of the body's collider spheres
 and capsules. They settle for a second before the first frame.
 **Constraints** (`VRMC_node_constraint`: rotation, roll and aim) keep
 twist bones and accessories with the bones they follow.
+
+## Full-body animation (`stage/src/vrm/anim.rs`)
+
+The owner asked for real 3D animation for VRM avatars, beside the light
+style, with their own animations and with failsafes for avatars too heavy
+for the device. Clips are **VRM Animation** files (`.vrma`, the
+`VRMC_vrm_animation` glTF extension), the VRM consortium's format for
+humanoid animation: VRoid Hub, VRM Posing Desktop, Blender with the VRM
+add-on and other tools save them, so animations made anywhere play on any
+avatar.
+
+**What plays.** Underneath everything, an **idle loop**, chosen by what the
+character is doing and its mood, and faded into the next over 0.7 s:
+
+| Loop | Plays |
+|---|---|
+| `idle_sleep` | while it dozes |
+| `idle_think` | while it thinks (and in the thinking mood) |
+| `idle_listen` | while someone speaks to it |
+| `idle_talk` | while it speaks (neutral or happy; in other moods the mood's loop) |
+| `idle_<mood>` | its mood's loop: happy, sad, angry, embarrassed ... |
+| `idle` | otherwise |
+
+Each falls back to the next that exists. On top play **gestures and idle
+actions**: a clip named like a motion-library gesture (`wave`, `bow`,
+`stretch` ...) plays that gesture's body. The motion system stays the brain
+(`24-motion.md`): it decides which gesture plays, when (words, moods, the
+budget, idle time), on which parts of the body, mirrored or not, and when a
+more important one takes a part over; the clip only supplies the
+movement. The library's face tracks for the gesture (a laugh's smile and
+closed eyes) still play; its head, body and arm tracks give way to the
+clip's. A clip with no gesture of its name becomes a new gesture, asked for
+by name.
+
+**How they combine.**
+
+- The arms take a gesture clip's pose (faded in and out), so a wave goes
+  up from wherever the arms were.
+- The head and body *add* a gesture clip's movement (measured from its
+  first frame) to the idle loop's, so breathing, looking at the person and
+  nodding carry on through a bow.
+- The stage's own turns go on top of the loop: where it looks, head turns
+  and nods from speech and listening, a shrug's shoulders, the body's turns
+  at a little over half strength. The clips breathe themselves, so the
+  controls' breathing is left out.
+- Gestures without a clip (nods, shakes, the owner's own gestures from the
+  editor) still play through the controls: the arms follow them while such
+  a gesture holds them.
+- A mood with its own idle loop leaves the posture to it (a sad loop's
+  slump is not slumped again); the face still shows the mood.
+- Expressions in a clip (a smile, a custom one) are added; blinking,
+  looking and the mouth's shapes stay the stage's, so speech always shows.
+
+**Fitting any avatar.** A clip's keys become normalised humanoid turns,
+`n = P x q x W^-1` (P the bone's parent's turn at rest, W its own), the
+same space the light style poses in, so the avatar's own bone axes never
+matter; a clip made on a skeleton facing the other way is turned round;
+the hips' movement is kept in hips heights and scaled to the avatar's legs,
+held near where it stands (a clip that walks stays in place on the
+screen); bones the avatar lacks pass their turns to the bones below them.
+Clips are resampled to 30 frames a second, a bone that holds still keeps
+one value, and idle loops are joined end to start. Files of at most 16 MB
+and 2 minutes; an avatar's clips may take at most 24 MB.
+
+## The built-in animations (`stage/motions/vrma`)
+
+Thirty clips, written from scratch for this project with
+`stage/tools/vrma_kit.py` and `stage/tools/vrma_library.py` (no
+third-party motion). The kit poses a reference skeleton (a 1.55 m VRoid
+girl in VRM's T-pose) the way an animator describes a pose: the hips moved,
+the pelvis, torso and head turned, shoulders raised, each **hand placed**
+where it should be (relative to the shoulder, the chest, the hips or the
+floor; the elbow finds its own place, bending towards a given side, and the
+palm faces a given way), the fingers curled, and the **feet planted**
+(the knees bend as the hips move). Keys are eased, and breathing, sways
+and beats are layered on; the kit writes standard `.vrma` files.
+
+| Kind | Clips |
+|---|---|
+| Idle loops | `idle` (weight drifting foot to foot), `idle_happy` (hands behind the back, rocking in time), `idle_sad` (slumped, a sigh), `idle_angry` (fists, shoulders up, a foot tapping), `idle_embarrassed` (hands together, toes in), `idle_listen` (leaning in, head tilted), `idle_think` (hand to the chin), `idle_talk` (hands moving with the words), `idle_sleep` (dozing on its feet) |
+| Gestures | `wave`, `greet` (a small hello), `bow`, `bounce`, `laugh`, `sigh`, `sway`, `lean_in`, `lean_back`, `surprise`, `think`, `hands_on_hips`, `shrug` |
+| Idle actions | `stretch` (arms over the head), `look_around`, `look_out_window`, `yawn` (hand over the mouth), `hum_sway`, `settle`, `nod_off`, `wake` |
+
+Head-only gestures (nods, shakes, tilts, glances) stay with the motion
+library, which times them to speech. The device installs the clips beside
+the stage (`/opt/companion/share/vrma`); together they are 1.9 MB.
+
+`stage/tools/vrma_sheets.py AVATAR.vrm OUT` plays every clip on an avatar
+with the real stage and saves sheets of frames (and GIFs with `--gif`).
+
+## The owner's own animations (`core/companion/animations.py`)
+
+Under the character, **3D animation** on the settings page:
+
+- **Style** (full body or light), **Show** (head to thighs, head and
+  shoulders, the whole body) and **Simplify the drawing**.
+- **Its own animations**: add a `.vrma` file as an idle loop (any of the
+  table above), *instead of* a built-in gesture or idle action, or as a
+  **new gesture** with a name and a few words saying what it means (the
+  language model is told, as for gestures made in the gesture editor).
+  **Try** plays it once on the screen; **Remove** takes it away.
+
+Files are checked first: a glTF binary with the VRM Animation extension
+and a hips bone, its data inside the one file, at most 16 MB and 2 minutes,
+and no API key in its text. They are kept in
+`characters/<id>/animations/` on the device, beside the character's other
+device choices: never written into its package, kept when it is
+reinstalled. The core writes the character's choices to
+`/var/lib/companion/current-stage.json`, which the stage reads when it
+starts (`--settings`): the style, the clip folders (the built-in ones,
+then the character's own, which win), the drawing's cost and the shot.
+
+## Failsafes for heavy avatars
+
+Avatars vary a lot: VRoid Studio's have 30,000 to 70,000 triangles, while
+some made for VRChat have several hundred thousand and a dozen 4K
+textures. On a 1 GB board, the stage's service may use 300 MB in all.
+
+1. **At import** (`vrm.fit`) the device works out what the avatar would
+   cost: points, triangles, textures as drawn, and the stage's memory for it
+   at most (the program, the file while it loads, its meshes and the
+   processor's copy of them while they go to the graphics chip, its face
+   shapes, its textures). Textures are scaled to the device's size, and to
+   512 pixels if it would not fit otherwise. An avatar with more than
+   400,000 triangles or 300,000 points, or still over 260 MB, is refused,
+   saying why and what to export instead (VRoid Studio's polygon reduction
+   and texture atlas size; Blender's Decimate). One that fits but is heavy
+   (over 200 MB or 120,000 triangles) starts with its drawing kept light.
+   The settings page shows the figures.
+2. **When the stage loads it**, textures are kept within a budget (96 MB on
+   1 GB boards, 160 MB above), halving their size until they fit. **Lite**
+   (the owner's switch, or set by the device) draws textures at 512 pixels,
+   leaves out outlines and moves hair and clothes at half rate.
+3. **While it runs**, a watchdog times the frames. Under 20 a second for two
+   3-second spells in a row, it gives something up, one step at a time:
+   outlines, then hair and clothes at half rate, then drawing at three
+   quarters and then half resolution, scaled up to the screen. Each step is
+   reported, and noted on the settings page.
+4. **If the stage stops** with a 3D avatar (it crashes, runs out of memory,
+   or never starts), the core shows it again drawn lightly; if it fails
+   again, it shows a card saying the avatar is too detailed for this
+   device, with what to do.
 
 ## Drawing (`stage/src/vrm/render.rs`)
 
@@ -98,9 +254,12 @@ added for 3D).
   their order. VRM 0.x MToon settings are converted to 1.0's.
 - **Framing**: a VRM frames itself from its bones. `--shot upper` (head to
   mid-thigh, the default) shows the face large and the arms' gestures;
-  `bust` and `full` are the others. The camera pulls back a little (at
-  most a third) while a hand is raised out to the side, so a wave stays on
-  the portrait screen.
+  `bust` and `full` are the others (a setting under the character). The
+  camera pulls back a little (at most a third) while a hand is raised out
+  to the side or above the head, so a wave or a stretch stays on the
+  portrait screen.
+- **Lighter drawing** when asked or needed: no outlines, smaller textures,
+  or the whole frame drawn at a lower resolution and scaled up.
 
 ## Memory
 
@@ -119,15 +278,16 @@ Measured here (a desktop, software drawing at 720 x 1280; peak memory
 includes the software renderer's own buffers, which a Pi's graphics chip
 holds separately):
 
-| Avatar | Format | Bones | Textures (L1) | Peak memory, L1 |
-|---|---|---|---|---|
-| Seed-san (VirtualCast) | VRM 1.0 | 132 | 33 MB | 167 MB |
-| VRM1_Constraint_Twist_Sample (pixiv) | VRM 1.0 | 357 | 42 MB | 175 MB |
-| Alicia Solid (Dwango) | VRM 0.x | 272 | 27 MB | 164 MB |
-| AvatarSample_B (VRoid Project) | VRM 1.0, VroidStudio export | 339 | 65 MB | 215 MB |
+| Avatar | Format | Bones | Textures (L1) | Peak, light | Peak, full body | Peak, lite |
+|---|---|---|---|---|---|---|
+| Seed-san (VirtualCast) | VRM 1.0 | 132 | 33 MB | 168 MB | 169 MB | 148 MB |
+| VRM1_Constraint_Twist_Sample (pixiv) | VRM 1.0 | 357 | 42 MB | 176 MB | 178 MB | 145 MB |
+| Alicia Solid (Dwango) | VRM 0.x | 272 | 27 MB | 164 MB | 166 MB | 146 MB |
+| AvatarSample_B (VRoid Project) | VRM 1.0, VroidStudio export | 339 | 65 MB | 216 MB | 218 MB | 167 MB |
 
-All four are under the stage's 300 MB limit. Posing (bones, springs, face)
-takes under 0.1 ms a frame; drawing is the cost. Frame rates on a Pi are
+All are under the stage's 300 MB limit. The full-body style adds 1 to 2 MB
+(the clips); lite saves 20 to 50 MB. Posing (clips, bones, springs, face)
+takes 0.06 ms a frame in either style; drawing is the cost. Frame rates on a Pi are
 still to be measured (`15-hardware-test-plan.md`); compressed textures
 (ETC2, which every OpenGL ES 3 chip reads) would cut texture memory by
 four if needed.
@@ -139,8 +299,9 @@ Upload a `.vrm` on **Characters → Add a character**. The device:
 1. checks it: a glTF binary with VRM information (1.0 or 0.x), the fifteen
    bones VRM requires, its data in the one file, at most 160 MB, and no
    API key in its text;
-2. scales its textures down for the device (PNG stays PNG, JPEG stays
-   JPEG) and re-packs the file;
+2. works out what it would cost the device and scales its textures down to
+   fit (PNG stays PNG, JPEG stays JPEG), re-packing the file, or refuses it
+   (see Failsafes);
 3. reads its maker's terms (who may use it, commercial use, the licence
    address) into the package. The settings page shows them under the
    character, with a warning if only its maker may use it;
@@ -189,18 +350,36 @@ redistribute them.
   stage, the on-device voice) on two (VRoid 1.0 and Alicia 0.x): every
   mood in order, the asked-for wave and nod, looking up as the person
   starts speaking, nodding in their pauses, gestures with the words, idle
-  actions alone.
+  actions alone. Repeated in the full-body style on AvatarSample_B
+  (`stack_check.py ... --vrm-animation full`): the same, with the wave,
+  bounce, think and surprise played from their clips and the listening,
+  thinking and talking loops in turn.
+- Full-body animation: `stage/src/vrm/anim.rs` (reading clips on skeletons
+  with their own rest turns, facing either way; hips; expressions;
+  mirroring; loops), `motion.rs` (gestures from clips last as long as their
+  clip, keep their face tracks, hold the right channels; new gestures from
+  clips; a mood's posture left to its loop), the watchdog's steps, the
+  `try_animation` command. `core/tests/test_animations.py` (checking clips,
+  the built-in ones too; roles; the style; the settings file; reinstalling;
+  the crash fallback) and the web test of the 3D animation section.
+  Every built-in clip on all four avatars with `vrma_sheets.py`: hands land
+  where they should (on the hips, at the chin, over the mouth, palms up in
+  a shrug) on avatars from 132 to 357 bones, both VRM versions.
+- Failsafes: import refuses too-detailed and too-large avatars and shrinks
+  textures further when that is enough (`test_vrm.py`); lite and half
+  resolution drawn and compared by eye.
 - The stage builds for the Pi (aarch64).
 
 ## Not done yet
 
 - **On a Pi**: frame rate, memory and loading time, per the test plan.
-- **VRM Animation (`.vrma`) clips**: motions from other tools played on
-  any avatar. The motion library covers speaking, moods and idle life.
+- **Foot contact at run time**: clips plant the feet on the reference
+  skeleton; on avatars with very different legs the feet can slide a
+  little (out of shot in the default framing).
+- **Hands that touch the body** (on the hips, at the chin) are placed for
+  average proportions; on unusual avatars they can float or sink a little.
 - **Parts of MToon left out**: matcap, UV animation, normal maps and
   outline-width textures. The look is close without them, and they cost
   memory.
-- **A device setting for the shot** (upper, bust, full). It is a stage
-  option today.
 - **Character Studio** taking a `.vrm` for its personality step before
   sending. Today a `.vrm` goes straight to the device's settings page.
