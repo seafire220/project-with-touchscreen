@@ -513,3 +513,32 @@ class ParseTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CheckToolTest(unittest.TestCase):
+    """`tools/memory_check.py`: the eleven days run through the memory and are judged."""
+
+    def run_tool(self, replies):
+        sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+        import memory_check
+        notes = ["TITLE: Test nerves\nSUMMARY: Sam is nervous about Friday's test.\nMOOD: nervous\n"
+                 "ADD about them | 5 | Their name is Sam | -\nADD their people | 4 | Their sister Kim lives in Perth | -\n"
+                 "ADD plans and events | 4 | Their driving test is on Friday | 2026-11-13",
+                 "Sam told me about the test today. I hope it goes well for them.",
+                 "TITLE: Passed\nSUMMARY: Sam passed.\nMOOD: proud\nUPDATE #3 | They passed their driving test | 2026-11-13",
+                 "Sam passed the driving test today, on the first try. I am so proud of them.",
+                 "TITLE: Darwin\nSUMMARY: Kim moved to Darwin.\nMOOD: sad\nUPDATE #2 | Their sister Kim lives in Darwin",
+                 "Kim moved to Darwin, and Sam misses her. I will keep them company.",
+                 "TITLE: Questions\nSUMMARY: Sam asked about Kim and the test.\nMOOD: curious",
+                 "Sam asked where Kim lives and when they passed. I remembered both."]
+        with tempfile.TemporaryDirectory() as d:
+            return asyncio.run(memory_check.run_check(FakeLLM(replies), FakeLLM(notes), d, show=lambda *a: None))
+
+    def test_the_tool_runs_the_eleven_days_and_judges_them(self):
+        replies = ["Hi Sam!"] * 4 + ["Good morning! How did your driving test go?"] + ["Wonderful!"] * 6 + \
+                  ["Kim lives in Darwin now, and you passed on Friday the 13th!"]
+        self.assertTrue(all(self.run_tool(replies).values()))
+        forgetful = self.run_tool(["Hello!"] * 12)
+        self.assertFalse(forgetful["asks how the test went"])
+        self.assertFalse(forgetful["answers Darwin"])
+        self.assertTrue(forgetful["remembers Kim lives in Darwin"], "the memory itself was kept")

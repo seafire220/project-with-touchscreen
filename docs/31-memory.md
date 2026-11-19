@@ -250,17 +250,30 @@ From CODE27's website and manual, November 2026:
 - `test_conversation.py`: the model is reminded of a matching earlier conversation.
 - The Memory tab, checked in a browser with a synthetic week.
 
-**With a real model, over eleven days.** Gemini 3.5 Flash Lite, a small, cheap model, ran with the device's memory code and system prompt. The person's lines were scripted; the character's replies, summaries, memories and diary were the model's own. The changes it showed were made (above), and on the final run:
+**With a real model, over eleven days.** Gemini 3.5 Flash Lite, a small, cheap model, ran with the device's memory code and system prompt, through the eleven days of `core/tools/memory_check.py`. That tool runs the same days against the model a device is set up with, so anyone can see how well their own model keeps memory before relying on it:
+
+```bash
+python3 core/tools/memory_check.py --data /var/lib/companion
+```
+
+It ends by passing or failing the key moments. The person's lines were scripted; the character's replies, summaries, memories and diary were the model's own. Six runs found the faults the changes above fix. The last run, on the final code:
 
 | Day | Sam said | What happened |
 |---|---|---|
-| Mon 9, 19:00 | "I'm Sam … my driving test is this Friday, the 13th … my sister Kim is flying in from Perth … Bye!" | Ended by the goodbye. Summed up with six changes: "Their name is Sam", the test with its date, Kim in Perth, and a follow-up. Diary at 22:00 |
-| Sat 14, 10:00 | "Good morning, Mika!" | **Mika: "Good morning, Sam! How did your driving test go yesterday, and how is it having Kim here from Perth?"** |
-| | "I passed! First try …", "Kim took me out for pancakes" | Summed up: the test memory updated to "passed on the first try", the follow-up retired |
-| Thu 19, 20:00 | "Big news: Kim moved to Darwin last week for a new job. … I'm a bit sad" | Mika: "Oh, wow! Darwin all the way from Perth?" Summed up: Kim's memory updated to Darwin (the answer above) |
-| Fri 20, 18:00 | "Where does my sister live now, and when did I pass my driving test?" | **Mika: "She lives up in Darwin now! And you passed your driving test a week ago today, on Friday the thirteenth, and even nailed that parallel parking."** |
+| Mon 9, 19:00 | "I'm Sam … my driving test is this Friday, the 13th … my sister Kim is flying in from Perth … Bye!" | Ended by the goodbye. Summed up: the test with its date, Kim flying in from Perth, a question to ask after the test. Diary at 22:00 |
+| Sat 14, 10:00 | "Good morning, Mika!" | **Mika: "Good morning, Sam! How did your driving test go yesterday, and how was it having Kim visit from Perth?"** |
+| | "I passed! First try …", "Kim took me out for pancakes" | Summed up: the test memory became "they passed on the first try"; the question was rewritten with its answer, so it isn't asked again |
+| Thu 19, 20:00 | "Big news: Kim moved to Darwin last week for a new job. … I'm a bit sad" | Summed up: Kim's memory became "moved to Darwin … after previously living in Perth" |
+| Fri 20, 18:00 | "Where does my sister live now, and when did I pass my driving test?" | **Mika: "She lives in Darwin now, after moving there for her new job! And you passed your driving test on Friday the thirteenth, right on the first try."** |
 
-The diary was in Mika's voice and noticed the gaps ("Four whole days since we last talked. I missed Sam so much."). One detail was wrong: the last entry called the test "years ago", after the summing-up had titled that chat a "driving test anniversary". Small models embellish.
+The diary was in Mika's voice and noticed the gaps ("Four whole days is far too long to wait.").
+
+What varied between runs:
+- One run kept "Their name is Sam" as a memory and another didn't; the summaries had the name either way.
+- Asked for dates rather than "last week", the model once guessed one (Kim moved "on 12 November").
+- One diary entry called the test "years ago", after that chat had been titled a "driving test anniversary".
+
+Small models embellish, and the owner can correct any of it on the Memory tab.
 
 **A model on your own computer**: see below.
 
