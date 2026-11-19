@@ -68,6 +68,19 @@ class MakeCharacterTest(unittest.TestCase):
         names = {n.get("name") for n in refine._nodes(puppet["nodes"])}
         self.assertTrue({"arm_l", "arm_r"} <= names)
 
+    def test_a_kept_work_folder_does_not_bring_back_an_earlier_builds_arm(self):
+        with tempfile.TemporaryDirectory() as work:
+            shutil.copytree(os.path.join(self.dir.name, "layers"), os.path.join(work, "layers"))
+            self.assertTrue(any("arm_l" in f for f in os.listdir(os.path.join(work, "layers"))))
+            args = argparse.Namespace(labels=self.labels_path, see_through=None, weights=None, device="cpu",
+                                      persona=None, author="tester", live2d=False, still_arms=("l",))
+            data, report = make_character.make(self.image_path, "Test Figure", args, work)
+            self.assertFalse(report["capabilities"]["arm_left"])
+            self.assertEqual(sorted(report["refine"]["arms"]), ["r"])
+            puppet, _ = refine.read_puppet(package.open_package(io.BytesIO(data)).files["visual/puppet.inp"])
+            names = {n.get("name") for n in refine._nodes(puppet["nodes"])}
+            self.assertNotIn("arm_l", names, "the earlier build's left arm is not rigged again")
+
     def test_a_preview_of_it_moving_is_drawn_without_the_stage(self):
         import preview
         from PIL import Image

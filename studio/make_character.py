@@ -130,13 +130,20 @@ def make(image_path, name, args, work, progress=None):
     invented = {}
     layers, split_report = partsplit.split(image, masks, invented, still_arms=getattr(args, "still_arms", ()) or ())
     layers_dir = os.path.join(work, "layers")
+    invented_dir = os.path.join(work, "invented")
+    # A kept work folder may hold an earlier build's layers (an arm that now stays with the body, the
+    # rigger's painted blush): the rigger would use them again, so they go first.
+    for folder in (layers_dir, invented_dir):
+        if os.path.isdir(folder):
+            for old in os.listdir(folder):
+                if old.endswith(".png"):
+                    os.remove(os.path.join(folder, old))
     os.makedirs(layers_dir, exist_ok=True)
     for role, array in layers:
         Image.fromarray(partsplit.pad_square(array), "RGBA").save(
             os.path.join(layers_dir, "%02d_%s.png" % (partsplit.ORDER[role], role)))
     # Which pixels were made up rather than copied, for reveal.py; kept beside the layers,
     # never in the package.
-    invented_dir = os.path.join(work, "invented")
     os.makedirs(invented_dir, exist_ok=True)
     for role, mask in invented.items():
         marked = np.zeros(mask.shape + (4,), np.uint8)

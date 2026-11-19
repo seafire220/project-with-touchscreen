@@ -51,6 +51,16 @@ ARM_MIN_WIDTH = 0.022
 ARM_MIN_LENGTH = 0.12
 ARM_FOLDED_SHARE = 0.3      # ... and fewer than this share of its rows cross it twice (folded back)
 ARM_HAIR_SHARE = 0.35       # ... and hair lies along less than this share of its outline (long hair over it)
+# Measured against the face (checked on the owner's eleven test pictures, 2026-11-19): an arm that
+# shows whole starts within this many face heights below the chin (lower down, armour, a cape or hair
+# hides its upper part and only a forearm would swing), is at least this many face heights long, and
+# at most this many face widths wide on average (wider is a bell sleeve or a cape, which swings as a
+# block). And its end differs in colour from its middle by at least this much (0-255): a hand or a
+# glove; the same colour all the way is a sleeve whose hand is folded up out of it or in a pocket.
+ARM_START_FACES = 1.2
+ARM_MIN_FACES = 2.4
+ARM_MAX_WIDTH_FACES = 1.0
+ARM_HAND_CONTRAST = 12
 # The neck under the face: its width when no neck was found (share of face
 # width), and how much wider than the neck it is at the chin.
 NECK_SHARE = 0.36
@@ -135,11 +145,13 @@ def soft_fill(rgb, known, wanted, radius):
     return out
 
 
-def arm_unusable(arm, chin, top, height, centre_line, hair=None, drawn=None):
+def arm_unusable(arm, chin, top, height, centre_line, hair=None, drawn=None, face=None, rgb=None):
     """Why an arm cannot move on its own (it would come apart or swing from the wrong place), or None.
 
     `drawn` is the part of the arm the picture shows (the rest was completed under hair crossing it);
-    with `hair`, an arm with hair lying along much of its outline is mostly hidden by it.
+    with `hair`, an arm with hair lying along much of its outline is mostly hidden by it. With `face`
+    (its height and width in pixels) the arm is measured against the face: where it starts, how long
+    and how wide it is; with `rgb` (the picture), whether a hand shows at its end.
     """
     labelled, count = ndimage.label(arm)
     sizes = ndimage.sum(arm, labelled, range(1, count + 1))
@@ -170,7 +182,36 @@ def arm_unusable(arm, chin, top, height, centre_line, hair=None, drawn=None):
         doubled += int(np.sum(ends - starts >= 3) >= 2)
     if doubled > ARM_FOLDED_SHARE * len(rows):
         return "is folded up (a hand raised)"
+    if face is not None:
+        face_height, face_width = face
+        if rows[0] - chin > ARM_START_FACES * face_height:
+            return "starts well below the shoulder (only its lower part shows)"
+        if rows[-1] - rows[0] < ARM_MIN_FACES * face_height:
+            return "is too short (only part of it shows)"
+        if arm.sum() / len(rows) > ARM_MAX_WIDTH_FACES * face_width:
+            return "is too wide to swing (a wide sleeve or a cape)"
+    if rgb is not None and not hand_at_end(arm if drawn is None else drawn, rgb, centre_line):
+        return "shows no hand at its end (a hand folded up out of the sleeve, or in a pocket)"
     return None
+
+
+def hand_at_end(arm, rgb, centre_line):
+    """Whether the far end of an arm (from the shoulder) differs in colour from its middle: a hand or a
+    glove, rather than a sleeve carrying on in one colour to where it is cut off."""
+    ys, xs = np.nonzero(arm)
+    if len(ys) < 20:
+        return False
+    top, bottom = ys.min(), ys.max()
+    band = ys <= top + 0.05 * (bottom - top)
+    outer = np.argmax(np.abs(xs[band] - centre_line))
+    reach = np.hypot(ys - ys[band][outer], xs - xs[band][outer])
+    far = reach.max()
+    colours = rgb[ys, xs].astype(np.float32)
+    end = colours[reach >= 0.85 * far]
+    middle = colours[(reach >= 0.4 * far) & (reach <= 0.7 * far)]
+    if not len(end) or not len(middle):
+        return False
+    return float(np.abs(end.mean(axis=0) - middle.mean(axis=0)).max()) >= ARM_HAND_CONTRAST
 
 
 def behind_arm(body, arm, outward):
@@ -606,10 +647,20 @@ def split(image, masks, invented=None, still_arms=()):
             arm_sides[side] = np.zeros_like(body)
         if arm_sides[side].any():
             drawn = arm_sides[side] & ~under_hair[side] if side in under_hair else arm_sides[side]
-            why = arm_unusable(arm_sides[side], chin, int(rows[0]), height, centre_line, hair, drawn)
+            why = arm_unusable(arm_sides[side], chin, int(rows[0]), height, centre_line, hair, drawn,
+                               face=(len(face_rows), face_width), rgb=rgb)
             if why:
                 warn("the %s arm %s; it stays part of the body and will not move on its own" % (name, why))
                 arm_sides[side] = np.zeros_like(body)
+            else:
+                # Its small separate pieces stay with the body: swung about the shoulder they would fly
+                # off on their own.
+                pieces, count = ndimage.label(arm_sides[side], structure=np.ones((3, 3)))
+                if count > 1:
+                    sizes = ndimage.sum(arm_sides[side], pieces, range(1, count + 1))
+                    arm_sides[side] = pieces == (1 + int(np.argmax(sizes)))
+                    if side in under_hair:
+                        under_hair[side] &= arm_sides[side]
 
     # --- everything else is the body, extended a little under what covers it, and completed behind
     # each arm so an arm can swing without leaving empty space

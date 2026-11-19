@@ -299,6 +299,21 @@ since the existing checks have passed motion that looked wrong.
   (`studio/record_motion.py`, MediaPipe).
   The fill behind the arms uses today's smooth colour fill; See-through's
   completed layers would draw it properly.
+- Arms on all eleven test characters (2026-11-19, `27-character-tests.md`):
+  played on the real stage, six of the nine arms the studio let move came
+  apart or swung wrongly (a forearm stub under armour, a cape or hair; a
+  sleeve whose hand was folded up to the chin or in a pocket; a bell
+  sleeve). `studio/partsplit.py` now measures an arm against the face: it
+  must start within 1.2 face heights below the chin, be at least 2.4 face
+  heights long and at most a face wide, and its end must differ in colour
+  from its middle (a hand or a glove). Small separate pieces of an arm stay
+  with the body. An arm that fails stays with the body, and the gestures
+  that need it play their stand-ins (a greeting for a wave, leaning back
+  for hands on hips). The shrug now plays on the forearms when there are
+  no shoulders to raise (it needed shoulders, which no character made from
+  a picture has), with the elbows kept in. Two cases still get through and
+  are left to the review step in Character Studio (keep an arm still):
+  hands in pockets, and an arm drawn bent with the hand on the hip.
 
 Our own characters have no gaze or brow parameters yet (the rigger does not
 make them), so on them these controls do nothing until the studio adds them;

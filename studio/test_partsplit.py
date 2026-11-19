@@ -5,18 +5,20 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 import partsplit
-from test_flatsplit import BODY, HAIR, ORNAMENT, SKIN, figure
+from test_flatsplit import BODY, HAIR, ORNAMENT, SKIN, figure  # noqa: F401
 
 ARM = (30, 120, 60)
+GLOVE = (225, 205, 170)       # the hand at the end of each arm
 
 
 def figure_with_arms():
-    """The flatsplit test figure plus a neck and two arms."""
+    """The flatsplit test figure plus a neck and two arms, each hanging whole from the shoulder to a hand."""
     im = figure()
     d = ImageDraw.Draw(im)
     d.rectangle([110, 130, 130, 140], fill=SKIN + (255,))            # neck, between head and body
-    d.rectangle([48, 140, 68, 250], fill=ARM + (255,))               # arm on the viewer's left
-    d.rectangle([172, 140, 192, 250], fill=ARM + (255,))             # arm on the viewer's right
+    for x in (48, 172):                                              # arms on the viewer's left and right
+        d.rectangle([x, 140, x + 20, 262], fill=ARM + (255,))
+        d.rectangle([x + 2, 263, x + 18, 282], fill=GLOVE + (255,))  # the hand
     return im
 
 
@@ -43,7 +45,7 @@ def labels_for(image):
     put("mouth", mouth)
     put("neck", neck)
     put("face", near(SKIN) & ~neck)
-    put("handwear", near(ARM))
+    put("handwear", near(ARM) | near(GLOVE))
     put("topwear", near(BODY))
     return masks
 
@@ -258,6 +260,37 @@ class ArmTest(unittest.TestCase):
         self.assertIn("short", why(arm((100, 130, 120, 140))))
         hair = arm((100, 220, 138, 150))                 # long hair lying along the arm's outer side
         self.assertIn("hidden by hair", partsplit.arm_unusable(arm((100, 220, 120, 140)), chin, top, size, centre, hair))
+
+    def test_arms_are_measured_against_the_face(self):
+        size, chin, top, centre, face = 400, 80, 10, 200, (40, 40)
+
+        def arm(y0, y1, x0, x1):
+            m = np.zeros((size, size), bool)
+            m[y0:y1, x0:x1] = True
+            return m
+
+        def why(m, rgb=None):
+            return partsplit.arm_unusable(m, chin, top, size, centre, face=face, rgb=rgb)
+        self.assertIsNone(why(arm(100, 220, 120, 140)), "half a face below the chin, three faces long")
+        self.assertIn("starts well below the shoulder", why(arm(140, 260, 120, 140)), "a forearm under armour")
+        self.assertIn("too short", why(arm(100, 180, 120, 140)), "two faces long: only part shows")
+        self.assertIn("too wide", why(arm(100, 220, 110, 155)), "wider than the face: a bell sleeve")
+        sleeve = arm(100, 220, 120, 140)
+        rgb = np.zeros((size, size, 3), np.uint8)
+        rgb[...] = ARM
+        self.assertIn("no hand", why(sleeve, rgb), "one colour to its end: the hand is folded up or in a pocket")
+        rgb[200:220, 120:140] = GLOVE
+        self.assertIsNone(why(sleeve, rgb), "a hand at its end")
+
+    def test_a_small_separate_piece_of_an_arm_stays_with_the_body(self):
+        image = figure_with_arms()
+        ImageDraw.Draw(image).rectangle([24, 292, 42, 310], fill=GLOVE + (255,))   # apart from the left arm
+        layers, report = partsplit.split(image, labels_for(image))
+        layers = dict(layers)
+        self.assertTrue(report["capabilities"]["arm_left"])
+        self.assertFalse((layers["arm_l"][292:311, 24:43, 3] > 0).any(), "it does not swing with the arm")
+        self.assertTrue((layers["torso"][292:311, 24:43, 3] > 0).all(), "it is drawn with the body")
+        self.assertTrue((layers["arm_l"][150:250, 50:66, 3] > 0).all(), "the arm itself moves")
 
     def test_an_arm_crossed_by_a_strand_of_hair_carries_on_under_it(self):
         image = figure_with_arms()
