@@ -305,6 +305,14 @@ class ProcessTest(Base):
                           "They said: the basil is already sprouting"], "a plain answer, or their own words")
         self.assertTrue(all(s["done"] for s in m.sessions()))
 
+    def test_a_model_stuck_in_a_loop_adds_only_so_much(self):
+        m = self.m
+        self.talk(at(18, 10), ("my sister moved to Darwin", "Oh wow!"))
+        lines = "\n".join("ADD their people | 2 | They mentioned fact number %s about Darwin" % w for w in
+                          ("one two three four five six seven eight nine ten eleven twelve".split()))
+        run(m.process(FakeLLM("TITLE: Darwin\nSUMMARY: Kim moved.\nMOOD: sad\n" + lines), now=at(18, 11)))
+        self.assertEqual(len(m.memories()), mem.MAX_CHANGES)
+
     def test_forgetting_meanwhile_is_not_undone(self):
         m = self.m
         self.talk(at(18, 10), ("my secret is X", "I'll keep it"))
@@ -442,6 +450,11 @@ class ParseTest(unittest.TestCase):
                                 {"op": "add", "category": "about them", "importance": 5, "text": "Their name is Sam."},
                                 {"op": "update", "id": 2, "text": "They passed their driving test.", "when": "2026-11-13"}],
                          "lines a real small model wrote")
+        garbage = parse_sum_up("ADD | their people | Kim\nADD | about them 1 | about them\nADD about them | 1 | 2026-11-13\n"
+                               "UPDATE 1 | The memory as it is now\nADD | health and wellbeing 2 | They hoped Kim settles in well\n"
+                               "FOLLOW UP: 2026-11-10")["ops"]
+        self.assertEqual(garbage, [{"op": "add", "category": "health and wellbeing", "importance": 2,
+                                    "text": "They hoped Kim settles in well"}], "what a 3-billion model wrote: only the real one kept")
 
     def test_dates_in_words(self):
         now = datetime.datetime(2026, 11, 18, 15, 0).timestamp()

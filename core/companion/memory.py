@@ -901,7 +901,12 @@ class Memory:
             _write_jsonl(self.sessions_path, sessions)
         changed = 0
         visible = {m["id"] for m in shown}
+        counts = {}
         for op in result["ops"]:
+            kind = "add" if op["op"] in ("add", "follow") else op["op"]
+            counts[kind] = counts.get(kind, 0) + 1
+            if counts[kind] > MAX_CHANGES:
+                continue
             if op["op"] == "add":
                 if self.add_memory(op["text"], op["category"], op["importance"], op.get("when"), source=session["id"],
                                    now=now):
@@ -1087,6 +1092,9 @@ UPDATE_LINE = re.compile(r"(?i)^update\b[\s:]*#?\s*(\d+)\b\s*(.*)$")
 FORGET_LINE = re.compile(r"(?i)^(?:forget|remove|retire)\b[\s:]*#?\s*(\d+)\b")
 FOLLOW_LINE = re.compile(r"(?i)^follow[\s-]*up\b(.*)$")
 PLACEHOLDER = re.compile(r"\b[Yy]{4}-[Mm]{2}-[Dd]{2}\b")
+TEMPLATE_WORDS = {"the memory", "the memory as it is now", "the memory, one short sentence", "why", "what to ask",
+                  "one short sentence", "-", "none", "n/a"}
+MAX_CHANGES = 8                       # of each kind, from one conversation: a model stuck in a loop adds no more
 SEPARATORS = " |:-\u2013\u2014"
 FIELD_LINE = re.compile(r"(?i)^(title|summary|mood)\s*:\s*(.*)$")
 
@@ -1096,6 +1104,7 @@ def parse_sum_up(text):
     out = {"title": "", "summary": "", "mood": "", "ops": []}
     for raw in (text or "").splitlines():
         line = PLACEHOLDER.sub("", re.sub(r"^[\s>*#_\-•]+", "", raw).replace("**", "").replace("__", "")).strip()
+        line = re.sub(r"(?i)^add\s*\|\s*", "ADD ", line)           # "ADD | category | ...": the category one field on
         if not line:
             continue
         m = FIELD_LINE.match(line)
@@ -1105,8 +1114,14 @@ def parse_sum_up(text):
         m = ADD_LINE.match(line)
         if m:
             category = m.group(1).strip().strip("[]()").strip().lower()
-            category = next((c for c in CATEGORIES if c == category), next((c for c in CATEGORIES if category in c or c in category), "other"))
-            op = {"op": "add", "category": category, "importance": int(m.group(2) or 3), "text": _tail(m.group(3))[0]}
+            glued = re.match(r"(.*?)\s+([1-5])$", category)              # "about them 4": the importance glued on
+            importance = int(m.group(2) or (glued.group(2) if glued else 3))
+            category = glued.group(1) if glued else category
+            category = next((c for c in CATEGORIES if c == category),
+                            next((c for c in CATEGORIES if category and (category in c or c in category)), "other"))
+            op = {"op": "add", "category": category, "importance": importance, "text": _tail(m.group(3))[0]}
+            if not _meaningful(op["text"]):
+                continue
             if m.group(4) and m.group(4)[0].isdigit() and _valid_date(m.group(4)):
                 op["when"] = m.group(4)
             out["ops"].append(op)
@@ -1114,7 +1129,7 @@ def parse_sum_up(text):
         m = UPDATE_LINE.match(line)
         if m:
             text, day = _tail(_drop_category(m.group(2).strip(SEPARATORS)))
-            if text:
+            if _meaningful(text):
                 op = {"op": "update", "id": int(m.group(1)), "text": text}
                 if day:
                     op["when"] = day
@@ -1130,12 +1145,20 @@ def parse_sum_up(text):
             found = re.search(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", rest)
             text = (rest[:found.start()] + " | " + rest[found.end():]) if found else rest
             text = " ".join(part.strip(SEPARATORS) for part in text.split("|") if part.strip(SEPARATORS))
-            if text:                          # a date alone: its plan comes up by itself
+            if _meaningful(text):             # a date alone: its plan comes up by itself
                 op = {"op": "follow", "text": text}
                 if found and _valid_date(found.group(0)):
                     op["when"] = found.group(0)
                 out["ops"].append(op)
     return out
+
+
+def _meaningful(text):
+    """Whether a memory a model wrote says something: not a category's name, not the form's own words, not a
+    single word."""
+    plain = (text or "").strip(" .").lower()
+    return (len(plain.split()) >= 2 and len(plain) >= 8 and plain not in CATEGORIES and plain not in TEMPLATE_WORDS
+            and not plain.startswith(("category |", "importance")))
 
 
 def _drop_category(text):
