@@ -22,7 +22,7 @@
 //! a bow) to two, and the mood picks gestures it has not made lately, so it never flails or repeats
 //! itself. A gesture asked for always plays, if the character can make it.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use serde_json::Value;
 
@@ -137,6 +137,29 @@ pub enum Kind {
 	Reaction,
 }
 
+/// A gesture an avatar plays from its own animation clip (a VRM avatar's full-body style): how long
+/// the clip lasts, the channels it moves a little and a lot, when it moves most, and the channels whose
+/// tracks it plays instead of the library's (its face tracks still play).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct External {
+	pub duration: f32,
+	pub touches: u16,
+	pub holds: u16,
+	pub stroke: f32,
+	pub replaces: u16,
+}
+
+/// A gesture playing from a clip this frame, for the avatar's animation player.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExternalLayer {
+	pub name: String,
+	/// Seconds into the clip.
+	pub at: f32,
+	pub mirrored: bool,
+	/// How much it shows on each channel.
+	pub weights: [f32; CHANNELS.len()],
+}
+
 fn key_index(name: &str) -> Result<usize, String> {
 	KEYS.iter().position(|k| *k == name).ok_or(format!("unknown control '{name}'"))
 }
@@ -201,6 +224,8 @@ pub struct Clip {
 	pub kind: Kind,
 	/// A big movement (a wave, a bow): rarer, and at most a couple a minute unless asked for.
 	pub big: bool,
+	/// Played from the avatar's own clip, if it has one.
+	pub ext: Option<External>,
 }
 
 impl Clip {
@@ -219,6 +244,10 @@ impl Clip {
 				}
 			};
 			let (key, sign) = if mirrored { mirrored_key(*key) } else { (*key, 1.0) };
+			// The clip moves this part of the body instead.
+			if self.replaces_as(mirrored) & (1 << channel_of(key)) != 0 {
+				continue;
+			}
 			out[key] += sign * value * weights[channel_of(key)];
 		}
 	}
@@ -267,13 +296,35 @@ impl Clip {
 		Value::Object(out)
 	}
 
-	/// The channels it holds, mirrored or not.
+	/// The channels it holds, mirrored or not (with its clip's, if it plays one).
 	fn holds_as(&self, mirrored: bool) -> u16 {
-		if mirrored { mirrored_mask(self.holds) } else { self.holds }
+		let h = self.holds | self.ext.map_or(0, |e| e.holds);
+		if mirrored { mirrored_mask(h) } else { h }
 	}
 
 	fn touches_as(&self, mirrored: bool) -> u16 {
-		if mirrored { mirrored_mask(self.touches) } else { self.touches }
+		let t = self.touches | self.ext.map_or(0, |e| e.touches);
+		if mirrored { mirrored_mask(t) } else { t }
+	}
+
+	/// The channels its clip moves instead of its tracks.
+	fn replaces_as(&self, mirrored: bool) -> u16 {
+		let r = self.ext.map_or(0, |e| e.replaces);
+		if mirrored { mirrored_mask(r) } else { r }
+	}
+
+	/// How long a take of it lasts (its clip's length, if longer).
+	fn length(&self, take: usize) -> f32 {
+		let own = self.takes[take.min(self.takes.len() - 1)].duration;
+		self.ext.map_or(own, |e| own.max(e.duration))
+	}
+
+	/// When it lands: its clip's moment when it has no tracks of its own.
+	fn stroke_now(&self) -> f32 {
+		match self.ext {
+			Some(e) if self.takes.iter().all(|t| t.tracks.is_empty()) => e.stroke,
+			_ => self.stroke,
+		}
 	}
 }
 
@@ -395,6 +446,7 @@ fn parse_clip(name: &String, g: &Value, section: Kind) -> Result<Clip, String> {
 			touches,
 			kind,
 			big,
+			ext: None,
 		})
 }
 
@@ -549,6 +601,13 @@ pub struct Motion {
 	disabled: Vec<bool>,
 	/// How expressive the character is (1 usual): the size of its own gestures.
 	expressiveness: f32,
+	/// Gestures the avatar plays from its own clips, by name.
+	external: HashMap<String, External>,
+	/// How far gestures without clips hold each channel (eased): an avatar's arms then follow the controls.
+	proc_busy: [f32; CHANNELS.len()],
+	/// Whether the mood moves the posture (head, body, arms); off while an avatar's own idle loop for
+	/// the mood shows it.
+	mood_posture: bool,
 }
 
 /// Asked-for gestures waiting their turn, at most.
@@ -556,6 +615,11 @@ const QUEUE: usize = 2;
 
 /// Controls that belong to the face, which a model's own expression replaces.
 const FACE: [&str; 5] = ["smile", "eye_smile", "cheek", "brows", "brow_form"];
+/// Controls that make up the posture, which an avatar's own idle loop for a mood can show instead.
+const POSTURE: [&str; 11] = [
+	"head_yaw", "head_pitch", "head_roll", "body_yaw", "body_pitch", "body_roll", "arm_left", "arm_right", "arm_left_b",
+	"arm_right_b", "shoulders",
+];
 
 impl Motion {
 	/// `has` says whether the character has a parameter for a control.
@@ -602,6 +666,9 @@ impl Motion {
 			smooth_eyelids: true,
 			disabled: Vec::new(),
 			expressiveness: 1.0,
+			external: HashMap::new(),
+			proc_busy: [0.0; CHANNELS.len()],
+			mood_posture: true,
 		};
 		m.disabled = vec![false; m.lib.clips.len()];
 		m.removed = vec![false; m.lib.clips.len()];
@@ -637,6 +704,8 @@ impl Motion {
 				return Err(format!("gesture {name}: no gesture called {other} to play instead"));
 			}
 		}
+		let mut clip = clip;
+		clip.ext = self.external.get(&name).copied();
 		let plain = clip.needs.iter().all(|any| any.iter().any(|k| self.has[*k]));
 		let mirrored = clip.mirror && clip.needs.iter().all(|any| any.iter().any(|k| self.has[mirrored_key(*k).0]));
 		match self.lib.clips.iter().position(|c| c.name == name) {
@@ -664,6 +733,7 @@ impl Motion {
 		match self.builtin.iter().find(|c| c.name == name) {
 			Some(original) => {
 				self.lib.clips[i] = original.clone();
+				self.lib.clips[i].ext = self.external.get(name).copied();
 				let clip = &self.lib.clips[i];
 				self.available[i] = clip.needs.iter().all(|any| any.iter().any(|k| self.has[*k]));
 				self.available_mirrored[i] =
@@ -700,6 +770,10 @@ impl Motion {
 				// Whether this character can make it, itself or with a stand-in (and which).
 				let resolved = self.resolve(i);
 				map.insert("can".into(), resolved.is_some().into());
+				// Played from the avatar's own animation clip (full-body 3D).
+				if clip.ext.is_some() {
+					map.insert("clip3d".into(), true.into());
+				}
 				if let Some(j) = resolved.filter(|j| *j != i) {
 					map.insert("as".into(), self.lib.clips[j].name.clone().into());
 				}
@@ -732,7 +806,7 @@ impl Motion {
 			.iter()
 			.enumerate()
 			.filter(|(_, c)| c.kind == Kind::Gesture)
-			.filter_map(|(i, c)| self.resolve(i).map(|j| (c.name.clone(), (self.lib.clips[j].stroke * 100.0).round() / 100.0)))
+			.filter_map(|(i, c)| self.resolve(i).map(|j| (c.name.clone(), (self.lib.clips[j].stroke_now() * 100.0).round() / 100.0)))
 			.collect()
 	}
 
@@ -818,6 +892,54 @@ impl Motion {
 	/// Whether the mood shows on the face (off while a model's own expression does).
 	pub fn set_face(&mut self, on: bool) {
 		self.face = on;
+	}
+
+	/// The gestures this avatar plays from its own clips (replacing the list given before). Clips with
+	/// no gesture of their name in the library become new gestures, asked for by name.
+	pub fn set_external(&mut self, clips: &[(String, External)]) -> Vec<String> {
+		self.external = clips.iter().cloned().collect();
+		let mut added = Vec::new();
+		for (name, e) in clips {
+			if self.lib.clips.iter().enumerate().any(|(i, c)| &c.name == name && !self.removed[i]) {
+				continue;
+			}
+			let entry = serde_json::json!({"name": name, "kind": "gesture", "needs": [], "tracks": {}, "big": e.duration > 2.5});
+			if self.define(&entry).is_ok() {
+				added.push(name.clone());
+			}
+		}
+		for clip in &mut self.lib.clips {
+			clip.ext = self.external.get(&clip.name).copied();
+		}
+		added
+	}
+
+	/// The gestures playing from clips now: each one's name, how far in, mirrored or not, and how much
+	/// it shows on each channel. Its size counts a little (a smaller wave is still a wave).
+	pub fn external_layers(&self) -> Vec<ExternalLayer> {
+		self.playing
+			.iter()
+			.filter_map(|p| {
+				let clip = &self.lib.clips[p.clip];
+				clip.ext?;
+				let whole = (0.75 + 0.25 * p.weight.min(1.0)) * fade(p.cut, self.t);
+				let mut weights = [0.0f32; CHANNELS.len()];
+				for (c, w) in weights.iter_mut().enumerate() {
+					*w = whole * fade(p.released[c], self.t);
+				}
+				Some(ExternalLayer { name: clip.name.clone(), at: p.at(self.t), mirrored: p.mirrored, weights })
+			})
+			.collect()
+	}
+
+	/// How far gestures without clips hold each channel now.
+	pub fn procedural_hold(&self) -> [f32; CHANNELS.len()] {
+		self.proc_busy
+	}
+
+	/// Whether the mood moves the posture (head, body, arms) as well as the face.
+	pub fn set_mood_posture(&mut self, on: bool) {
+		self.mood_posture = on;
 	}
 
 	fn next_random_number(&mut self) -> f32 {
@@ -1039,7 +1161,9 @@ impl Motion {
 		let (energy, beats, mood_gestures) = {
 			let mood = &self.lib.moods[self.mood];
 			for (key, v) in &mood.offsets {
-				if self.face || !FACE.contains(&KEYS[*key]) {
+				let face = FACE.contains(&KEYS[*key]);
+				let posture = POSTURE.contains(&KEYS[*key]);
+				if !(face && !self.face) && !(posture && !self.mood_posture) {
 					target[*key] = v * k;
 				}
 			}
@@ -1052,7 +1176,7 @@ impl Motion {
 		let was_playing = !self.playing.is_empty();
 		self.playing.retain(|p| {
 			let clip = &self.lib.clips[p.clip];
-			let done = p.at(self.t) >= clip.takes[p.take].duration;
+			let done = p.at(self.t) >= clip.length(p.take);
 			let faded = p.cut.is_some_and(|c| self.t - c >= CUT_FADE);
 			!(done || faded)
 		});
@@ -1064,7 +1188,7 @@ impl Motion {
 		}
 		// An asked-for gesture waiting its turn starts once no other asked-for one uses its channels.
 		if let Some(&(i, intensity)) = self.queued.first() {
-			let holds = self.lib.clips[i].holds;
+			let holds = self.lib.clips[i].holds_as(false);
 			let blocked = self
 				.playing
 				.iter()
@@ -1128,14 +1252,20 @@ impl Motion {
 		// gestures hold are busy, and the living motion there gives way, eased in and out.
 		let mut add = [0.0f32; KEYS.len()];
 		let mut held = [0.0f32; CHANNELS.len()];
+		let mut held_by_tracks = [0.0f32; CHANNELS.len()];
 		for p in &self.playing {
 			let clip = &self.lib.clips[p.clip];
 			let whole = p.weight * fade(p.cut, self.t);
 			let mut weights = [0.0f32; CHANNELS.len()];
+			let (holds, replaced) = (clip.holds_as(p.mirrored), clip.replaces_as(p.mirrored));
+			let own = if p.mirrored { mirrored_mask(clip.holds) } else { clip.holds };
 			for (c, w) in weights.iter_mut().enumerate() {
 				*w = whole * fade(p.released[c], self.t);
-				if clip.holds & (1 << c) != 0 {
+				if holds & (1 << c) != 0 {
 					held[c] = held[c].max(w.min(1.0));
+				}
+				if own & !replaced & (1 << c) != 0 {
+					held_by_tracks[c] = held_by_tracks[c].max(w.min(1.0));
 				}
 			}
 			clip.sample(p.take, p.mirrored, p.at(self.t), &mut add, &weights);
@@ -1147,6 +1277,9 @@ impl Motion {
 		}
 		let step = dt / CUT_FADE;
 		for (busy, target) in self.busy.iter_mut().zip(held) {
+			*busy += (target - *busy).clamp(-step, step);
+		}
+		for (busy, target) in self.proc_busy.iter_mut().zip(held_by_tracks) {
 			*busy += (target - *busy).clamp(-step, step);
 		}
 		for key in 0..KEYS.len() {
@@ -1183,6 +1316,77 @@ mod tests {
 			poses.push(p);
 		}
 		(poses, started)
+	}
+
+	fn ext(duration: f32, touches: u16, holds: u16) -> External {
+		External { duration, touches, holds, stroke: 0.4, replaces: touches }
+	}
+
+	const ARMS: u16 = 1 << 5 | 1 << 6;
+
+	#[test]
+	fn a_gesture_with_a_clip_lasts_as_long_as_the_clip_and_keeps_only_its_face_tracks() {
+		let mut m = Motion::new(Library::builtin(), all, 1);
+		m.set_random(false);
+		let added = m.set_external(&[("wave".into(), ext(3.0, 1 << 6 | 1, 1 << 6)), ("little_dance".into(), ext(4.0, ARMS | 3, ARMS | 2))]);
+		assert_eq!(added, vec!["little_dance".to_string()], "a clip with no gesture of its name becomes one");
+		assert!(m.gestures().contains(&"little_dance".to_string()));
+		assert_eq!(m.describe()["wave"]["clip3d"], true);
+		m.play("wave", 1.0).unwrap();
+		let (poses, _) = run(&mut m, 2.5, State::Speaking);
+		// The library's arm and head tracks give way to the clip; its smile still shows.
+		assert!(poses.iter().all(|p| p.arm_right.abs() < 1e-4 && p.arm_left.abs() < 1e-4 && p.arm_right_b.abs() < 1e-4));
+		assert!(poses.iter().all(|p| p.head_roll.abs() < 1e-4));
+		assert!(poses.iter().any(|p| p.smile > 0.1));
+		let layers = m.external_layers();
+		assert_eq!(layers.len(), 1, "still playing past the library's 1.85 seconds");
+		let wave = &layers[0];
+		assert_eq!(wave.name, "wave");
+		assert!((wave.at - 2.5).abs() < 0.05);
+		assert!(wave.weights[6] > 0.7);
+		assert_eq!(m.holders().iter().find(|(c, _)| *c == "arm_right").map(|(_, n)| n.as_str()), Some("wave"));
+		run(&mut m, 0.6, State::Speaking);
+		assert!(m.external_layers().is_empty(), "over when the clip is");
+		// A new gesture from a clip: no tracks of its own, played for its clip's length.
+		assert_eq!(m.play("little_dance", 1.0).unwrap(), Start::Now);
+		run(&mut m, 3.9, State::Speaking);
+		assert_eq!(m.external_layers().len(), 1);
+		run(&mut m, 0.2, State::Speaking);
+		assert!(m.external_layers().is_empty());
+	}
+
+	#[test]
+	fn arms_held_by_gestures_without_clips_are_told_apart() {
+		let mut m = Motion::new(Library::builtin(), all, 1);
+		m.set_random(false);
+		m.set_external(&[("wave".into(), ext(2.0, 1 << 6, 1 << 6))]);
+		m.play("hands_on_hips", 1.0).unwrap();
+		run(&mut m, 1.0, State::Idle);
+		let hold = m.procedural_hold();
+		assert!(hold[5] > 0.9 && hold[6] > 0.9, "{hold:?}");
+		let mut m = Motion::new(Library::builtin(), all, 1);
+		m.set_random(false);
+		m.set_external(&[("wave".into(), ext(2.0, 1 << 6, 1 << 6))]);
+		m.play("wave", 1.0).unwrap();
+		run(&mut m, 1.0, State::Idle);
+		assert!(m.procedural_hold()[6] < 1e-3, "the clip moves the arm, not the controls");
+	}
+
+	#[test]
+	fn the_mood_can_leave_the_posture_to_an_idle_loop() {
+		let posture = |on: bool| {
+			let mut m = Motion::new(Library::builtin(), all, 1);
+			m.set_random(false);
+			m.set_mood_posture(on);
+			m.set_emotion("sad", 1.0).unwrap();
+			let (poses, _) = run(&mut m, 2.0, State::Idle);
+			let p = poses.last().unwrap().clone();
+			(p.head_pitch, p.smile)
+		};
+		let (with_pitch, with_smile) = posture(true);
+		let (without_pitch, without_smile) = posture(false);
+		assert!(with_pitch.abs() > 0.05 && without_pitch.abs() < 1e-3, "{with_pitch} {without_pitch}");
+		assert!((with_smile - without_smile).abs() < 1e-4 && with_smile < -0.05, "the face still shows the mood");
 	}
 
 	#[test]

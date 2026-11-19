@@ -152,6 +152,9 @@ pub struct Rig {
 	humanoid_parent: [Option<usize>; 55],
 	/// Each skin's joint matrices for drawing.
 	pub skins: Vec<Vec<Mat4>>,
+	/// How far the hips are moved from where they stand at rest, in metres (full-body animation).
+	pub hips_offset: Vec3,
+	hips_node: Option<usize>,
 }
 
 impl Rig {
@@ -188,6 +191,8 @@ impl Rig {
 			node_bone,
 			humanoid_parent,
 			skins: model.skins.iter().map(|s| vec![Mat4::IDENTITY; s.joints.len()]).collect(),
+			hips_offset: Vec3::ZERO,
+			hips_node: model.humanoid[0],
 		};
 		rig.update_world(model);
 		rig.rest_world_rot = rig.world_rot.clone();
@@ -200,9 +205,15 @@ impl Rig {
 	}
 
 	fn parent_world(&self, model: &Model, n: usize) -> (Mat4, Quat) {
-		match model.nodes[n].parent {
+		let (w, r) = match model.nodes[n].parent {
 			Some(p) => (self.world[p], self.world_rot[p]),
 			None => (self.root, self.root_rot),
+		};
+		// The hips (and so everything on them) moved by the animation.
+		if Some(n) == self.hips_node && self.hips_offset != Vec3::ZERO {
+			(Mat4::from_translation(self.hips_offset) * w, r)
+		} else {
+			(w, r)
 		}
 	}
 

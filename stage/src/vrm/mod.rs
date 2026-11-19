@@ -7,6 +7,7 @@
 //! unchanged. Underneath, those become bone turns on the avatar's humanoid skeleton and expression
 //! weights.
 
+pub mod anim;
 pub mod gltf;
 pub mod model;
 pub mod render;
@@ -20,6 +21,7 @@ use serde_json::{json, Value};
 
 use crate::live2d::{Blend, Expression as StageExpression};
 use crate::puppet_info::{ParamInfo, PuppetInfo};
+use anim::{Animator, Scene};
 use gltf::Glb;
 use model::{AlphaMode, ColorKind, Model, Override};
 use rig::{normalised_pose, Controls, Rig};
@@ -157,6 +159,10 @@ pub struct VrmPuppet {
 	pub material_uv: Vec<(Vec2, Vec2)>,
 	/// Where the avatar's head and hips are at rest, for framing it.
 	pub framing: Framing,
+	/// Full-body animation (clips on the whole skeleton), when the avatar is set to it.
+	animator: Option<Animator>,
+	/// What the character is doing, for the animation.
+	scene: Scene,
 }
 
 /// Points of the avatar at rest, in metres, for the camera.
@@ -231,6 +237,8 @@ impl VrmPuppet {
 			material_colors,
 			material_uv,
 			framing: Framing::default(),
+			animator: None,
+			scene: Scene::default(),
 			model,
 		};
 		// Pose it at rest once, then let the hair and clothes settle from there.
@@ -246,6 +254,33 @@ impl VrmPuppet {
 	/// No swinging hair or clothes (for comparisons).
 	pub fn drop_physics(&mut self) {
 		self.springs = None;
+	}
+
+	/// The hips' height above the feet at rest, in metres.
+	pub fn hips_height(&self) -> f32 {
+		(self.framing.hips - self.framing.feet - 0.05).max(0.2)
+	}
+
+	/// Play these clips on the whole skeleton (the full-body style).
+	pub fn animate(&mut self, clips: Vec<anim::Clip>) {
+		self.animator = Some(Animator::new(clips, &self.model, self.hips_height()));
+	}
+
+	/// Add a clip to play (starting the full-body player for it if needed, to try a clip).
+	pub fn add_clip(&mut self, clip: anim::Clip) {
+		match &mut self.animator {
+			Some(a) => a.add(clip, &self.model),
+			None => self.animator = Some(Animator::new(vec![clip], &self.model, self.hips_height())),
+		}
+	}
+
+	pub fn animator(&self) -> Option<&Animator> {
+		self.animator.as_ref()
+	}
+
+	/// What the character is doing now, for the next frame's animation.
+	pub fn set_scene(&mut self, scene: Scene) {
+		self.scene = scene;
 	}
 
 	/// The file's bytes, while textures are still to be made from it.
@@ -361,7 +396,17 @@ impl VrmPuppet {
 				}
 			}
 		}
-		let mut q = normalised_pose(&self.model, &c);
+		let mut q = match &mut self.animator {
+			Some(a) => {
+				let q = a.pose(&self.model, &c, &self.scene, dt);
+				for (e, w) in expr.iter_mut().zip(&a.expressions) {
+					*e += w;
+				}
+				self.rig.hips_offset = a.hips_offset;
+				q
+			}
+			None => normalised_pose(&self.model, &c),
+		};
 		let look_weights = self.look_at(&c, &mut q);
 		self.rig.pose(&self.model, &q);
 		self.rig.constrain(&self.model);
