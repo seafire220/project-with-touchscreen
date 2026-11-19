@@ -312,6 +312,14 @@ class ProcessTest(Base):
                           "They said: the basil is already sprouting"], "a plain answer, or their own words")
         self.assertTrue(all(s["done"] for s in m.sessions()))
 
+    def test_an_update_of_a_memory_it_was_never_shown_is_something_new(self):
+        m = self.m
+        self.talk(at(9, 19), ("my sister Kim is flying in from Perth", "How lovely!"))
+        run(m.process(FakeLLM("TITLE: Kim\nSUMMARY: Kim is coming.\nMOOD: happy\n"
+                              "UPDATE #1 | Their sister Kim is flying in from Perth for the driving test | 2026-11-13"), now=at(9, 20)))
+        self.assertEqual([(x["text"], x["category"], x.get("when")) for x in m.memories()],
+                         [("Their sister Kim is flying in from Perth for the driving test", "their people", "2026-11-13")])
+
     def test_a_model_stuck_in_a_loop_adds_only_so_much(self):
         m = self.m
         self.talk(at(18, 10), ("my sister moved to Darwin", "Oh wow!"))

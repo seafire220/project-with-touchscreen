@@ -923,6 +923,11 @@ class Memory:
             elif op["op"] == "update" and op["id"] in visible:
                 if self.edit_memory(op["id"], now=now, text=op["text"], **({"when": op["when"]} if op.get("when") else {})):
                     changed += 1
+            elif op["op"] == "update":
+                # A number it was never shown: a small model's way of saying something new.
+                if self.add_memory(op["text"], _guess_category(op["text"], op.get("when")), 3, op.get("when"),
+                                   source=session["id"], now=now):
+                    changed += 1
             elif op["op"] == "forget" and op["id"] in visible:
                 if self.edit_memory(op["id"], now=now, status="retired"):
                     changed += 1
