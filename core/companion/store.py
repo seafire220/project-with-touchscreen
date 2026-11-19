@@ -15,7 +15,10 @@ import tempfile
 import threading
 
 DEFAULT_SETTINGS = {
-    "llm": {"provider": "", "model": "", "base_url": "", "temperature": 0.8, "max_tokens": 400},
+    # provider "selfhosted": a model on the owner's own computer or server; `server` says which kind
+    # (providers.LOCAL_SERVERS) and `context` how much text it takes, in tokens.
+    "llm": {"provider": "", "model": "", "base_url": "", "temperature": 0.8, "max_tokens": 400, "server": "ollama",
+            "context": 0},
     "stt": {"provider": "local", "model": "", "base_url": "", "language": "en"},
     # The voice: "local" speaks on the device for free (a Piper voice; `voice` is a speaker number).
     "tts": {"provider": "local", "model": "", "voice": "", "base_url": "", "speed": 1.0},
@@ -32,7 +35,7 @@ DEFAULT_SETTINGS = {
 }
 
 # The secret names the device accepts: one key per provider.
-SECRET_NAMES = ("openai", "anthropic", "openai_compatible", "elevenlabs", "groq", "openrouter", "search")
+SECRET_NAMES = ("openai", "anthropic", "openai_compatible", "elevenlabs", "groq", "openrouter", "search", "local_llm")
 
 
 def write_atomic(path, data, mode=0o644):

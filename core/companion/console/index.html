@@ -195,9 +195,27 @@
       <label>Service <select id="llm-provider">
         <option value="">choose…</option><option value="openai">OpenAI</option><option value="anthropic">Anthropic (Claude)</option>
         <option value="groq">Groq</option><option value="openrouter">OpenRouter</option><option value="gemini">Google Gemini</option>
-        <option value="custom">Other (OpenAI-compatible)</option></select></label>
+        <option value="custom">Other (OpenAI-compatible)</option>
+        <option value="selfhosted">My own computer or server (Ollama, LM Studio …)</option></select></label>
       <div class="keybox" data-key-for="llm"></div>
-      <label class="for-custom">Address <input id="llm-base_url" placeholder="https://…/v1"></label>
+      <div class="for-selfhosted">
+        <p class="muted">A model running on a computer or server in your home. Nothing you say leaves your home
+          network, and with the device's own voice and speech recognition the character works without the
+          internet at all. The model has to be open to the network: with Ollama, start it with
+          <code>OLLAMA_HOST=0.0.0.0</code>; in LM Studio, turn on <i>Serve on Local Network</i>.</p>
+        <label>Kind <select id="llm-server">
+          <option value="ollama">Ollama</option><option value="lmstudio">LM Studio</option>
+          <option value="llamacpp">llama.cpp server</option><option value="vllm">vLLM</option>
+          <option value="koboldcpp">KoboldCpp</option><option value="textgen">text-generation-webui</option>
+          <option value="jan">Jan</option><option value="gpt4all">GPT4All</option>
+          <option value="openai">Other (OpenAI-compatible)</option></select></label>
+      </div>
+      <label class="for-address">Address <input id="llm-base_url" placeholder="https://…/v1"></label>
+      <div class="for-selfhosted">
+        <button type="button" id="btn-find-llm">Find on my network</button> <span id="find-llm-msg"></span>
+        <ul id="find-llm-list" class="plain"></ul>
+        <label>Context (tokens; how much the model reads at once) <input id="llm-context" type="number" min="0" max="262144" step="1024" placeholder="8192"></label>
+      </div>
       <label>Model <input id="llm-model" list="llm-models" placeholder="press “List models” after saving the key">
         <button type="button" id="btn-models">List models</button></label>
       <datalist id="llm-models"></datalist>

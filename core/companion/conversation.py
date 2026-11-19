@@ -130,7 +130,7 @@ class Conversation:
                 sentences = asyncio.Queue()
                 writer = asyncio.ensure_future(self._write(system, messages, sentences, reply))
                 queries = []
-                await asyncio.wait_for(self._speak(sentences, reply, queries), REPLY_TIMEOUT)
+                await asyncio.wait_for(self._speak(sentences, reply, queries), max(REPLY_TIMEOUT, self.patience + 60))
                 if not (queries and self.search) or round_ == 1:
                     break
                 self.stage.state("thinking")
@@ -184,8 +184,13 @@ class Conversation:
             log.exception("language model stream failed")
             await sentences.put(ProviderError("the language model failed (%s)" % type(error).__name__))
 
+    @property
+    def patience(self):
+        """Seconds to wait for the model's first words (longer for a model on the owner's own computer)."""
+        return getattr(self.llm, "patience", None) or FIRST_WORDS_TIMEOUT
+
     async def _next(self, sentences, first):
-        item = await asyncio.wait_for(sentences.get(), FIRST_WORDS_TIMEOUT if first else REPLY_TIMEOUT)
+        item = await asyncio.wait_for(sentences.get(), self.patience if first else max(REPLY_TIMEOUT, self.patience))
         if isinstance(item, ProviderError):
             raise item
         return item

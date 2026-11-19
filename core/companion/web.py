@@ -15,10 +15,11 @@ import os
 import re
 import secrets
 import time
+import urllib.parse
 
 from aiohttp import web
 
-from . import animations, cards, motions, package, persona, speech_text, temperament, vrm
+from . import animations, cards, motions, package, persona, providers, speech_text, temperament, vrm
 from .memory import when
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
@@ -205,6 +206,28 @@ class Console:
         except (ProviderError, asyncio.TimeoutError, AttributeError) as error:
             return web.json_response({"ok": False, "message": str(error) or "timed out", "models": []})
         return web.json_response({"ok": True, "models": names})
+
+    async def find_llm(self, request):
+        """Language-model servers on the home network, or at the address the owner typed, to choose from."""
+        try:
+            body = await request.json()
+        except ValueError:
+            body = {}
+        typed = str((body or {}).get("host") or "").strip() if isinstance(body, dict) else ""
+        hosts, ports = None, None
+        if typed:
+            try:
+                parts = urllib.parse.urlsplit(typed if "://" in typed else "http://" + typed)
+                hosts = [parts.hostname] if parts.hostname else None
+                if parts.port:
+                    ports = sorted({v["port"] for v in providers.LOCAL_SERVERS.values() if v["port"]} | {parts.port})
+            except ValueError:
+                raise web.HTTPBadRequest(text="that does not look like a computer's address")
+        try:
+            found = await asyncio.wait_for(providers.find_servers(hosts=hosts, ports=ports), 25)
+        except asyncio.TimeoutError:
+            found = []
+        return web.json_response({"servers": found})
 
     async def voices(self, request):
         try:
@@ -727,6 +750,7 @@ def make_app(device):
     r.add_put("/api/keys/{name}", console.put_key)
     r.add_post("/api/test/{which}", console.test_provider)
     r.add_get("/api/models", console.models)
+    r.add_post("/api/llm/find", console.find_llm)
     r.add_get("/api/voices", console.voices)
     r.add_get("/api/characters", console.list_characters)
     r.add_post("/api/characters", console.upload_character)

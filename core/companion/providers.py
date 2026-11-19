@@ -7,8 +7,13 @@ Language models stream text: `async for piece in llm.stream(system, messages)`.
 Speech recognition takes 16-bit mono PCM and returns text.
 Voices stream 16-bit mono PCM at `tts.rate` samples per second.
 """
+import asyncio
 import io
+import ipaddress
 import json
+import re
+import socket
+import urllib.parse
 import wave
 
 import aiohttp
@@ -32,6 +37,108 @@ OPENAI_COMPATIBLE = {
     "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "secret": "openai_compatible"},
     "custom": {"base_url": "", "secret": "openai_compatible"},
 }
+
+
+# Language-model servers people run on their own computers: the port each listens on unless told
+# otherwise, and the path of its OpenAI-compatible API (Ollama is spoken to in its own API, which lets
+# the device set the model's context size and keep it loaded between replies).
+LOCAL_SERVERS = {
+    "ollama": {"label": "Ollama", "port": 11434, "path": ""},
+    "lmstudio": {"label": "LM Studio", "port": 1234, "path": "/v1"},
+    "llamacpp": {"label": "llama.cpp server", "port": 8080, "path": "/v1"},
+    "vllm": {"label": "vLLM", "port": 8000, "path": "/v1"},
+    "koboldcpp": {"label": "KoboldCpp", "port": 5001, "path": "/v1"},
+    "textgen": {"label": "text-generation-webui", "port": 5000, "path": "/v1"},
+    "jan": {"label": "Jan", "port": 1337, "path": "/v1"},
+    "gpt4all": {"label": "GPT4All", "port": 4891, "path": "/v1"},
+    "openai": {"label": "Other (OpenAI-compatible)", "port": None, "path": "/v1"},
+}
+# A model on a home computer can take a while to start answering (it may first be loaded from disk).
+LOCAL_PATIENCE = 120.0
+# How much text (in tokens) the model is given at most, unless the owner says otherwise.
+LOCAL_CONTEXT = 8192
+CLOUD_CONTEXT = 32000
+
+
+def local_address(address, kind):
+    """A server's base address from what the owner typed ("192.168.1.20", "laptop.local:1234",
+    "http://host:8080/v1" all do), with the kind's usual port and path where none is given."""
+    info = LOCAL_SERVERS.get(kind) or LOCAL_SERVERS["openai"]
+    text = (address or "").strip()
+    if not text:
+        raise ProviderError("type the address of the computer the model runs on")
+    if not re.match(r"(?i)^https?://", text):
+        text = "http://" + text
+    try:
+        parts = urllib.parse.urlsplit(text)
+        host, port = parts.hostname, parts.port
+    except ValueError:
+        raise ProviderError("that does not look like a computer's address: %s" % address)
+    if not host:
+        raise ProviderError("that does not look like a computer's address: %s" % address)
+    port = port or info["port"] or (443 if parts.scheme.lower() == "https" else 80)
+    path = parts.path.rstrip("/")
+    if kind == "ollama":
+        path = re.sub(r"/(v1|api)$", "", path)
+    elif not path:
+        path = info["path"]
+    shown = "[%s]" % host if ":" in host else host
+    return "%s://%s:%d%s" % (parts.scheme.lower(), shown, port, path)
+
+
+class ThinkFilter:
+    """Leaves a reasoning model's thinking (between <think> and </think>) out of what is said, even
+    when the tags arrive split across pieces, or the opening one is missing."""
+
+    OPEN, CLOSE = "<think>", "</think>"
+
+    def __init__(self):
+        self.buffer = ""
+        self.inside = False
+        self.said = False
+
+    def feed(self, piece):
+        self.buffer += piece
+        out = ""
+        while True:
+            if self.inside:
+                end = self.buffer.find(self.CLOSE)
+                if end < 0:
+                    self.buffer = self.buffer[-(len(self.CLOSE) - 1):]
+                    return out
+                self.buffer = self.buffer[end + len(self.CLOSE):].lstrip()
+                self.inside = False
+                continue
+            start = self.buffer.find(self.OPEN)
+            close = self.buffer.find(self.CLOSE)
+            if close >= 0 and (start < 0 or close < start):
+                # Thinking that began without its opening tag: before anything was said, it all goes.
+                if not self.said and not out:
+                    self.buffer = self.buffer[close + len(self.CLOSE):].lstrip()
+                else:
+                    out += self.buffer[:close]
+                    self.buffer = self.buffer[close + len(self.CLOSE):]
+                continue
+            if start >= 0:
+                out += self.buffer[:start]
+                self.buffer = self.buffer[start + len(self.OPEN):]
+                self.inside = True
+                continue
+            # Keep back what could be the start of a tag.
+            keep = 0
+            for k in range(1, min(len(self.CLOSE) - 1, len(self.buffer)) + 1):
+                tail = self.buffer[-k:]
+                if self.OPEN.startswith(tail) or self.CLOSE.startswith(tail):
+                    keep = k
+            out += self.buffer[:len(self.buffer) - keep]
+            self.buffer = self.buffer[len(self.buffer) - keep:]
+            if out.strip():
+                self.said = True
+            return out
+
+    def flush(self):
+        rest, self.buffer = ("" if self.inside else self.buffer), ""
+        return rest
 
 
 def _status_error(service, status, body):
@@ -79,6 +186,9 @@ class OpenAICompatibleLLM:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.service = service
+        # Seconds to wait for the first words, and how much text the model takes (tokens).
+        self.patience = None
+        self.context = CLOUD_CONTEXT
 
     def _headers(self):
         headers = {"Content-Type": "application/json"}
@@ -99,9 +209,10 @@ class OpenAICompatibleLLM:
                 async with session.post(self.base_url + "/chat/completions", json=body, headers=self._headers()) as r:
                     if r.status != 200:
                         raise _status_error(self.service, r.status, await r.text())
+                    thinking = ThinkFilter()
                     async for data in iter_sse(r):
                         if data == "[DONE]":
-                            return
+                            break
                         try:
                             event = json.loads(data)
                         except ValueError:
@@ -111,7 +222,12 @@ class OpenAICompatibleLLM:
                         for choice in event.get("choices") or []:
                             piece = (choice.get("delta") or {}).get("content")
                             if piece:
-                                yield piece
+                                piece = thinking.feed(piece)
+                                if piece:
+                                    yield piece
+                    rest = thinking.flush()
+                    if rest:
+                        yield rest
             except aiohttp.ClientError as error:
                 raise ProviderError("%s could not be reached (%s)" % (self.service, type(error).__name__), retry=True)
 
@@ -131,6 +247,168 @@ class OpenAICompatibleLLM:
         async for piece in self.stream("Reply with the single word: ready", [{"role": "user", "content": "Are you there?"}]):
             reply += piece
         return "replied: %s" % reply.strip()[:60]
+
+
+class OllamaLLM:
+    """A model on the owner's own computer through Ollama's own API: the device sets how much text the
+    model takes (Ollama's default is small, and it cuts longer prompts from the start, persona first)
+    and keeps the model loaded between replies."""
+
+    def __init__(self, base_url, model, temperature=0.8, max_tokens=400, context=LOCAL_CONTEXT,
+                 service="The model on your computer"):
+        if not model:
+            raise ProviderError("no model is chosen: press List models, or on that computer run: ollama pull <model>")
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.context = int(context or LOCAL_CONTEXT)
+        self.service = service
+        self.patience = LOCAL_PATIENCE
+
+    async def stream(self, system, messages):
+        body = {
+            "model": self.model,
+            "messages": [{"role": "system", "content": system}] + list(messages),
+            "stream": True,
+            "keep_alive": "30m",
+            "options": {"temperature": self.temperature, "num_predict": self.max_tokens, "num_ctx": self.context},
+        }
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=None, connect=10, sock_read=self.patience)) as session:
+            try:
+                async with session.post(self.base_url + "/api/chat", json=body) as r:
+                    if r.status == 404:
+                        raise ProviderError("Ollama has no model called %s. On that computer, run: ollama pull %s"
+                                            % (self.model, self.model))
+                    if r.status != 200:
+                        raise _status_error(self.service, r.status, await r.text())
+                    thinking = ThinkFilter()
+                    async for line in r.content:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            event = json.loads(line)
+                        except ValueError:
+                            continue
+                        if event.get("error"):
+                            raise ProviderError("%s: %s" % (self.service, event["error"]), retry=True)
+                        piece = (event.get("message") or {}).get("content") or ""
+                        piece = thinking.feed(piece) if piece else ""
+                        if piece:
+                            yield piece
+                        if event.get("done"):
+                            break
+                    rest = thinking.flush()
+                    if rest:
+                        yield rest
+            except aiohttp.ClientError as error:
+                raise ProviderError("%s could not be reached at %s (%s). Is the computer on, and Ollama "
+                                    "open to the network (OLLAMA_HOST=0.0.0.0)?" % (self.service, self.base_url,
+                                                                                     type(error).__name__), retry=True)
+
+    async def models(self):
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.get(self.base_url + "/api/tags") as r:
+                    if r.status != 200:
+                        raise _status_error(self.service, r.status, await r.text())
+                    data = await r.json(content_type=None)
+            except aiohttp.ClientError as error:
+                raise ProviderError("%s could not be reached (%s)" % (self.service, type(error).__name__), retry=True)
+        return sorted(m.get("name", "") for m in data.get("models", []) if m.get("name"))
+
+    async def test(self):
+        reply = ""
+        async for piece in self.stream("Reply with the single word: ready", [{"role": "user", "content": "Are you there?"}]):
+            reply += piece
+        return "replied: %s" % reply.strip()[:60]
+
+
+def _own_addresses():
+    """This device's addresses on its home network (IPv4), found without sending anything."""
+    found = set()
+    for probe in ("10.255.255.255", "172.31.255.255", "192.168.255.255", "8.8.8.8"):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((probe, 9))
+                found.add(s.getsockname()[0])
+        except OSError:
+            continue
+    return sorted(a for a in found if ipaddress.ip_address(a).is_private and not ipaddress.ip_address(a).is_loopback)
+
+
+def neighbours():
+    """The addresses to look at for servers: this computer, and the others on the same home network
+    (the 254 addresses around each of this device's own; private networks only)."""
+    hosts = ["127.0.0.1"]
+    for own in _own_addresses():
+        net = ipaddress.ip_network(own + "/24", strict=False)
+        hosts += [str(h) for h in net.hosts() if str(h) != own]
+    return hosts
+
+
+async def _port_open(host, port, timeout):
+    try:
+        _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+    except (OSError, asyncio.TimeoutError):
+        return False
+    writer.close()
+    return True
+
+
+async def _identify(session, host, port):
+    """What answers on a host's port: an Ollama server, or another OpenAI-compatible one, with its models."""
+    base = "http://%s:%d" % (host, port)
+    try:
+        async with session.get(base + "/api/tags") as r:
+            if r.status == 200:
+                data = await r.json(content_type=None)
+                models = sorted(m.get("name", "") for m in (data or {}).get("models", []) if m.get("name"))
+                return {"kind": "ollama", "label": "Ollama", "address": base, "models": models}
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, AttributeError):
+        pass
+    try:
+        async with session.get(base + "/v1/models") as r:
+            if r.status in (200, 401):
+                data = await r.json(content_type=None) if r.status == 200 else {}
+                models = sorted(m.get("id", "") for m in (data or {}).get("data", []) if m.get("id"))
+                kind = next((k for k, v in LOCAL_SERVERS.items() if v["port"] == port and k != "ollama"), "openai")
+                return {"kind": kind, "label": LOCAL_SERVERS[kind]["label"], "address": base + "/v1", "models": models,
+                        "needs_key": r.status == 401}
+    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, AttributeError):
+        pass
+    return None
+
+
+async def find_servers(hosts=None, ports=None, timeout=0.6, limit=128):
+    """Language-model servers on the home network (or on the given hosts): each one's kind, address and
+    models. Only private addresses are looked at."""
+    ports = ports or sorted({v["port"] for v in LOCAL_SERVERS.values() if v["port"]})
+    if hosts is None:
+        hosts = neighbours()
+    allowed = []
+    for h in hosts:
+        try:
+            infos = await asyncio.get_running_loop().getaddrinfo(h, None, family=socket.AF_INET)
+            address = infos[0][4][0]
+        except (OSError, IndexError):
+            continue
+        if ipaddress.ip_address(address).is_private:
+            allowed.append(address)
+    gate = asyncio.Semaphore(limit)
+
+    async def check(host, port):
+        async with gate:
+            return (host, port) if await _port_open(host, port, timeout) else None
+
+    open_ports = [hp for hp in await asyncio.gather(*(check(h, p) for h in dict.fromkeys(allowed) for p in ports)) if hp]
+    found = []
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=4)) as session:
+        for result in await asyncio.gather(*(_identify(session, h, p) for h, p in open_ports)):
+            if result:
+                found.append(result)
+    return found
 
 
 def pcm_to_wav(pcm, rate):
@@ -425,10 +703,26 @@ def build_llm(settings, store):
         return AnthropicLLM(store.secret("anthropic"), llm.get("model", ""), llm.get("max_tokens", 400),
                             llm.get("effort", "low"),
                             web_search=bool(settings.get("conversation", {}).get("web_search", True)))
+    if provider == "selfhosted":
+        kind = llm.get("server") or "ollama"
+        if kind not in LOCAL_SERVERS:
+            raise ProviderError("unknown kind of server: %s" % kind)
+        base = local_address(llm.get("base_url", ""), kind)
+        context = int(llm.get("context") or LOCAL_CONTEXT)
+        if kind == "ollama":
+            return OllamaLLM(base, llm.get("model", ""), llm.get("temperature", 0.8), llm.get("max_tokens", 400), context)
+        adapter = OpenAICompatibleLLM(base, store.secret("local_llm"), llm.get("model", ""), llm.get("temperature", 0.8),
+                                      llm.get("max_tokens", 400), service="The model on your computer")
+        adapter.patience = LOCAL_PATIENCE
+        adapter.context = context
+        return adapter
     if provider in OPENAI_COMPATIBLE:
         known = OPENAI_COMPATIBLE[provider]
-        return OpenAICompatibleLLM(llm.get("base_url") or known["base_url"], store.secret(known["secret"]),
-                                   llm.get("model", ""), llm.get("temperature", 0.8), llm.get("max_tokens", 400))
+        adapter = OpenAICompatibleLLM(llm.get("base_url") or known["base_url"], store.secret(known["secret"]),
+                                      llm.get("model", ""), llm.get("temperature", 0.8), llm.get("max_tokens", 400))
+        if llm.get("context"):
+            adapter.context = int(llm["context"])
+        return adapter
     raise ProviderError("no language model is chosen yet")
 
 

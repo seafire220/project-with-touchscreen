@@ -55,7 +55,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
     cage python3 python3-venv python3-numpy python3-aiohttp python3-pil \
-    alsa-utils network-manager polkitd fonts-dejavu-core python3-qrcode avahi-daemon \
+    alsa-utils network-manager polkitd fonts-dejavu-core python3-qrcode avahi-daemon libnss-mdns \
     libegl1 libgles2 libgl1-mesa-dri libwayland-client0 libwayland-egl1 libxkbcommon0 \
     espeak-ng-data espeak-ng ca-certificates curl
 

@@ -5,6 +5,7 @@ const $ = (id) => document.getElementById(id);
 const KEY_NAMES = {
   openai: "OpenAI", anthropic: "Anthropic", groq: "Groq", openrouter: "OpenRouter",
   openai_compatible: "Gemini / other", elevenlabs: "ElevenLabs", deepgram: "Deepgram", search: "Web search",
+  local_llm: "Your own model server",
 };
 let state = { active: "", characters: [], settings: null, editing: "" };
 
@@ -846,7 +847,7 @@ $("btn-clear-memory").addEventListener("click", () => confirm("Forget the whole 
   api("DELETE", "/api/memory/" + state.active).then(loadMemory));
 
 // ----- services and keys
-const FIELDS = { llm: ["provider", "model", "base_url", "effort", "max_tokens"], stt: ["provider", "model", "base_url"],
+const FIELDS = { llm: ["provider", "model", "base_url", "effort", "max_tokens", "server", "context"], stt: ["provider", "model", "base_url"],
                  tts: ["provider", "model", "voice", "base_url"] };
 // For each service: which saved key it uses, where to get one, and a typical model.
 const SERVICES = {
@@ -858,6 +859,7 @@ const SERVICES = {
   custom: { key: "openai_compatible", hint: "The key for the service at the address below, if it needs one.", llm: "", stt: "", tts: "" },
   elevenlabs: { key: "elevenlabs", hint: "Get a key at elevenlabs.io → Developers → API keys.", tts: "eleven_flash_v2_5" },
   local: { key: "", hint: "Runs on the device: no key and no cost." },
+  selfhosted: { key: "local_llm", hint: "Free, and private: the model runs on your own computer. A key only if your server asks for one.", llm: "press Find on my network, or List models" },
 };
 let keyStatus = {};
 
@@ -885,6 +887,10 @@ function shapeGroup(group) {
   const info = SERVICES[provider] || {};
   const box = document.querySelector('fieldset[data-group="' + group + '"]');
   for (const el of box.querySelectorAll(".for-custom")) el.hidden = provider !== "custom";
+  for (const el of box.querySelectorAll(".for-selfhosted")) el.hidden = provider !== "selfhosted";
+  for (const el of box.querySelectorAll(".for-address")) el.hidden = provider !== "custom" && provider !== "selfhosted";
+  const address = box.querySelector(".for-address input");
+  if (address) address.placeholder = provider === "selfhosted" ? "e.g. 192.168.1.20 or my-laptop.local" : "https://…/v1";
   for (const el of box.querySelectorAll(".for-anthropic")) el.hidden = provider !== "anthropic";
   for (const el of box.querySelectorAll(".for-elevenlabs")) el.hidden = provider !== "elevenlabs";
   for (const el of box.querySelectorAll(".for-cloud")) el.hidden = provider === "local";
@@ -974,6 +980,34 @@ $("btn-models").addEventListener("click", async () => {
   list.replaceChildren();
   for (const m of r.models) { const o = document.createElement("option"); o.value = m; list.append(o); }
   text($("test-llm"), r.ok ? r.models.length + " models found: click the Model box to choose" : "Could not list models: " + r.message);
+});
+
+// A model on the owner's own computer: look for servers on the home network (or at the address typed).
+$("btn-find-llm").addEventListener("click", async () => {
+  const list = $("find-llm-list");
+  list.replaceChildren();
+  text($("find-llm-msg"), "Looking on your home network… (up to 20 seconds)");
+  try {
+    const r = await api("POST", "/api/llm/find", { host: $("llm-base_url").value.trim() });
+    text($("find-llm-msg"), r.servers.length ? "Found " + r.servers.length + ". Choose one:" :
+      "None found. Is the computer on, and its model server open to the network (OLLAMA_HOST=0.0.0.0, or LM Studio's Serve on Local Network)?");
+    for (const s of r.servers) {
+      const li = document.createElement("li");
+      const b = document.createElement("button"); b.type = "button"; b.className = "secondary";
+      text(b, s.label + " at " + s.address + (s.models.length ? " (" + s.models.length + " models)" : "") + (s.needs_key ? ", needs a key" : ""));
+      b.addEventListener("click", () => {
+        $("llm-server").value = s.kind;
+        $("llm-base_url").value = s.address;
+        const models = $("llm-models");
+        models.replaceChildren();
+        for (const m of s.models) { const o = document.createElement("option"); o.value = m; models.append(o); }
+        if (s.models.length && !s.models.includes($("llm-model").value)) $("llm-model").value = s.models[0];
+        text($("find-llm-msg"), "Chosen. Check the model, then Save and test.");
+      });
+      li.append(b);
+      list.append(li);
+    }
+  } catch (e) { text($("find-llm-msg"), e.message); }
 });
 
 $("btn-voices").addEventListener("click", async () => {
