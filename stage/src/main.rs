@@ -456,6 +456,16 @@ impl App for StageApp {
 		}
 
 		let direction = self.director.update(dt);
+		self.react(&direction.reactions);
+		for (name, strength) in &direction.responses {
+			match self.motion.suggest(name, *strength) {
+				Ok(Start::Now) => self.events.emit(json!({"event": "gesture", "name": name, "cause": "listening"})),
+				Ok(Start::Skipped(why)) => {
+					self.events.emit(json!({"event": "gesture_skipped", "name": name, "cause": "listening", "why": why}))
+				}
+				_ => {}
+			}
+		}
 		let smooth_eyelids = matches!(self.puppet, Puppet::Live2d(_));
 		self.behaviour.set_smooth_eyelids(smooth_eyelids);
 		self.motion.set_smooth_eyelids(smooth_eyelids);

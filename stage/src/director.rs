@@ -29,6 +29,22 @@ const DOZE_SLEEPINESS: f32 = 0.6;
 /// Assumed hour without a clock.
 const DEFAULT_HOUR: f32 = 14.0;
 
+/// Listening: the person's voice level (0 to 1) that counts as speech, and the level it must fall
+/// below to count as a pause.
+const VOICE_ON: f32 = 0.15;
+const VOICE_OFF: f32 = 0.08;
+/// A nod (or raised brows, or a tilt) may come in a pause this long, after this much speech, and no
+/// sooner than this after the last.
+const NOD_PAUSE: f32 = 0.25;
+const NOD_AFTER: f32 = 0.8;
+const NOD_GAP: f32 = 2.5;
+/// How likely a pause brings a response (scaled by how expressive the character is).
+const NOD_CHANCE: f32 = 0.55;
+/// The person starting to speak after this much quiet makes it look up at them.
+const ONSET_QUIET: f32 = 1.5;
+/// Without a level for this long, the person is taken as quiet (no microphone, or it stopped).
+const HEARD_STALE: f32 = 0.5;
+
 /// How sleepy the hour makes the character, by hour of the day (straight lines between these points).
 const SLEEPY_BY_HOUR: [(f32, f32); 8] =
 	[(0.0, 0.85), (5.0, 0.75), (7.0, 0.3), (8.5, 0.0), (21.0, 0.0), (22.5, 0.45), (23.5, 0.75), (24.0, 0.85)];
@@ -60,12 +76,16 @@ pub struct Direction {
 	pub liveliness: f32,
 	/// Gaps between its own gestures, against usual (2 is half as often).
 	pub pace: f32,
-	/// Asleep: no gestures of its own.
+	/// No gestures of its own: asleep, or responding to the person in their pauses instead.
 	pub resting: bool,
 	/// Idle actions to choose from while nobody is talking, and their weights.
 	pub idle: Vec<(&'static str, f32)>,
 	/// How much the mood's own gestures count among them.
 	pub mood_share: f32,
+	/// Reactions to play now (looking up as the person starts to speak).
+	pub reactions: Vec<&'static str>,
+	/// Responses to the person as they speak (a nod in their pause), with a strength.
+	pub responses: Vec<(&'static str, f32)>,
 }
 
 pub struct Director {
@@ -84,8 +104,18 @@ pub struct Director {
 	/// The character's temperament: how lively and how expressive (1 usual), from its settings.
 	temper_energy: f32,
 	temper_expression: f32,
-	/// The person's voice, while listening.
+	/// The person's voice, while listening: its level, when last heard, and how they are speaking.
 	heard: f32,
+	heard_at: f32,
+	talking: bool,
+	talk_run: f32,
+	quiet_run: f32,
+	responded: bool,
+	last_response: f32,
+	last_look_up: f32,
+	/// How animated the person sounds, from their loudness while they speak.
+	their_energy: f32,
+	rng: u64,
 }
 
 impl Default for Director {
@@ -110,7 +140,23 @@ impl Director {
 			temper_energy: 1.0,
 			temper_expression: 1.0,
 			heard: 0.0,
+			heard_at: f32::NEG_INFINITY,
+			talking: false,
+			talk_run: 0.0,
+			quiet_run: 0.0,
+			responded: true,
+			last_response: f32::NEG_INFINITY,
+			last_look_up: f32::NEG_INFINITY,
+			their_energy: 0.3,
+			rng: 0x9E37_79B9_7F4A_7C15,
 		}
+	}
+
+	fn random(&mut self) -> f32 {
+		self.rng ^= self.rng << 13;
+		self.rng ^= self.rng >> 7;
+		self.rng ^= self.rng << 17;
+		((self.rng >> 40) as f32) / ((1u64 << 24) as f32)
 	}
 
 	/// The local time of day, in hours.
@@ -150,6 +196,12 @@ impl Director {
 		// Spoken to: it looks up at you.
 		if state == State::Listening && before != State::Listening && reactions.is_empty() {
 			reactions.push("look_up");
+			self.last_look_up = self.t;
+		}
+		if state == State::Listening {
+			self.talking = false;
+			self.quiet_run = 0.0;
+			self.responded = true;
 		}
 		reactions
 	}
@@ -157,6 +209,59 @@ impl Director {
 	/// How loud the person speaking is (while listening), 0 to 1.
 	pub fn hear(&mut self, level: f32) {
 		self.heard = level.clamp(0.0, 1.0);
+		self.heard_at = self.t;
+	}
+
+	/// Follow the person's voice while listening: look up as they start after a quiet spell, and
+	/// respond in their pauses, now and then.
+	fn listen(&mut self, dt: f32, reactions: &mut Vec<&'static str>, responses: &mut Vec<(&'static str, f32)>) {
+		let fresh = self.t - self.heard_at < HEARD_STALE;
+		let level = if fresh { self.heard } else { 0.0 };
+		if self.talking {
+			if level < VOICE_OFF {
+				self.quiet_run += dt;
+				if self.quiet_run >= 0.15 {
+					self.talking = false;
+				}
+			} else {
+				self.quiet_run = 0.0;
+				self.talk_run += dt;
+				ease(&mut self.their_energy, level, dt, 2.0);
+			}
+		} else if level > VOICE_ON {
+			if self.quiet_run >= ONSET_QUIET && self.t - self.last_look_up > 3.0 {
+				reactions.push("look_up");
+				self.last_look_up = self.t;
+			}
+			self.talking = true;
+			self.talk_run = 0.0;
+			self.quiet_run = 0.0;
+			self.responded = false;
+			self.attention = 1.0;
+		} else {
+			self.quiet_run += dt;
+		}
+		let pause = !self.talking && self.quiet_run >= NOD_PAUSE;
+		if pause && !self.responded && self.talk_run >= NOD_AFTER && self.t - self.last_response > NOD_GAP {
+			self.responded = true;
+			if self.random() < NOD_CHANCE * self.temper_expression {
+				self.last_response = self.t;
+				let pick = self.random();
+				let strength = 0.35 + 0.3 * self.their_energy;
+				responses.push(if pick < 0.6 {
+					("nod", strength)
+				} else if pick < 0.8 {
+					("brow_flash", strength * 0.8)
+				} else {
+					("tilt", strength)
+				});
+			}
+		}
+	}
+
+	/// Whether the person's voice is reaching the character (a microphone is listening).
+	fn hearing(&self) -> bool {
+		self.state == State::Listening && self.t - self.heard_at < 2.0
 	}
 
 	/// Someone is there (the button was pressed, or they spoke). Returns reactions to play now.
@@ -187,6 +292,10 @@ impl Director {
 			self.last_contact = self.t;
 		}
 		let quiet = self.t - self.last_contact;
+		let (mut reactions, mut responses) = (Vec::new(), Vec::new());
+		if self.state == State::Listening {
+			self.listen(dt, &mut reactions, &mut responses);
+		}
 
 		// Attention: up quickly when talking, down slowly when alone.
 		match self.state {
@@ -240,15 +349,26 @@ impl Director {
 				("nod_off", 5.0 * (s - 0.45).max(0.0)),
 			]
 		};
-		// Bored: idle actions come more often; low energy or reserved: less often.
-		let pace = (1.2 - 0.4 * b) / (e * self.temper_expression).clamp(0.4, 1.5);
+		// Bored: idle actions come more often; low energy or reserved: less often. While it hears the
+		// person, its responses come in their pauses, not by chance.
+		let pace = if alone {
+			(1.2 - 0.4 * b) / (e * self.temper_expression).clamp(0.4, 1.5)
+		} else if self.hearing() {
+			4.0
+		} else {
+			1.0 / (e * self.temper_expression).clamp(0.5, 1.5)
+		};
+		// Listening, it matches the person's energy a little: livelier when they sound animated.
+		let matching = if self.hearing() { 0.8 + 0.6 * self.their_energy } else { 1.0 };
 		Direction {
 			drowsy: self.drowsy,
-			liveliness: e * (1.0 - 0.8 * self.drowsy),
-			pace: if alone { pace } else { 1.0 / (e * self.temper_expression).clamp(0.5, 1.5) },
-			resting: self.dozing,
+			liveliness: e * (1.0 - 0.8 * self.drowsy) * matching,
+			pace,
+			resting: self.dozing || self.hearing(),
 			idle,
 			mood_share: 0.5 * alert,
+			reactions,
+			responses,
 		}
 	}
 }
@@ -407,5 +527,58 @@ mod tests {
 			assert!(last < 900.0, "nothing more once it sleeps (last at {last} s)");
 		}
 		assert!(sleepy * 4 >= all, "a quarter or more of what it does first is yawning and nodding off: {sleepy} of {all}");
+	}
+
+	/// A person speaking in stretches with pauses, `level` loud, for `seconds`: the responses (and when).
+	fn listen_to(d: &mut Director, level: f32, talk: f32, pause: f32, seconds: f32) -> (Vec<(f32, String)>, Vec<f32>) {
+		let (mut responses, mut looks) = (Vec::new(), Vec::new());
+		let mut t = 0.0;
+		while t < seconds {
+			let speaking = (t % (talk + pause)) < talk;
+			d.hear(if speaking { level } else { 0.02 });
+			let dir = d.update(DT);
+			for (name, _) in dir.responses {
+				// A response comes in a pause, never while they speak.
+				assert!(!speaking, "{name} at {t} while they speak");
+				responses.push((t, name.to_string()));
+			}
+			looks.extend(dir.reactions.iter().filter(|r| **r == "look_up").map(|_| t));
+			t += DT;
+		}
+		(responses, looks)
+	}
+
+	#[test]
+	fn it_nods_in_the_persons_pauses_now_and_then() {
+		let mut d = Director::new();
+		assert_eq!(d.on_state(State::Listening), vec!["look_up"], "it looks up as listening starts");
+		pass(&mut d, 4.0);
+		let (responses, looks) = listen_to(&mut d, 0.5, 2.0, 0.6, 60.0);
+		assert!((5..=16).contains(&responses.len()), "{responses:?}");
+		assert!(responses.windows(2).all(|w| w[1].0 - w[0].0 >= NOD_GAP), "spaced out: {responses:?}");
+		assert!(responses.iter().filter(|r| r.1 == "nod").count() * 2 >= responses.len(), "mostly nods");
+		assert_eq!(looks.len(), 1, "it looked up as they started after the quiet: {looks:?}");
+		// Silence brings nothing.
+		let mut quiet = Director::new();
+		quiet.on_state(State::Listening);
+		let (none, no_looks) = listen_to(&mut quiet, 0.02, 2.0, 0.6, 30.0);
+		assert!(none.is_empty() && no_looks.is_empty());
+	}
+
+	#[test]
+	fn listening_matches_the_persons_energy_and_quiets_its_own_gestures() {
+		let lively = |level: f32| {
+			let mut d = Director::new();
+			d.on_state(State::Listening);
+			listen_to(&mut d, level, 3.0, 0.5, 20.0);
+			d.hear(level);
+			d.update(DT)
+		};
+		let (animated, calm) = (lively(0.9), lively(0.2));
+		assert!(animated.liveliness > calm.liveliness * 1.2, "{} against {}", animated.liveliness, calm.liveliness);
+		assert!(animated.resting, "its own random nods give way to responses in the pauses");
+		let mut deaf = Director::new();
+		deaf.on_state(State::Listening);
+		assert!(!pass(&mut deaf, 5.0).resting, "without a microphone, it still nods now and then by itself");
 	}
 }

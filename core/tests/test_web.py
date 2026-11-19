@@ -376,6 +376,29 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
             task.cancel()
             self.assertEqual(bool(calls), allowed)
 
+    async def test_the_character_hears_how_loud_the_person_is_while_listening(self):
+        import array
+
+        class Mic:
+            async def frames(self):
+                quiet = array.array("h", [30, -30] * 160).tobytes()
+                voice = array.array("h", [9000, -9000] * 160).tobytes()
+                for f in [quiet] * 30 + [voice] * 10 + [quiet] * 10:
+                    yield f
+                    await asyncio.sleep(0)
+                await asyncio.sleep(3600)
+
+        stage = FakeStage()
+        device = Device(self.dir.name, speaker=Speaker(command=None, realtime=False), stage=stage, microphone=Mic())
+        device.listening, device.state = True, "listening"
+        task = asyncio.ensure_future(device.listen_loop())
+        await asyncio.sleep(0.3)
+        task.cancel()
+        levels = [c["heard"] for c in stage.commands if "heard" in c]
+        self.assertEqual(len(levels), 50, "every 20 ms frame, while listening")
+        self.assertLess(max(levels[:30]), 0.05, "the room's noise is quiet")
+        self.assertGreater(max(levels[30:40]), 0.8, "speech is loud")
+
     def test_only_local_addresses_are_served(self):
         for ok in ("192.168.1.20", "10.0.0.5", "127.0.0.1", "fe80::1", "172.16.4.4"):
             self.assertTrue(local_address(ok), ok)

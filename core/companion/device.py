@@ -433,6 +433,7 @@ class Device:
                 async for frame in self.microphone.frames():
                     if self.recording is not None:
                         self.recording.append(frame)
+                        self._heard(detector.loudness(frame))
                         continue
                     busy = self.state in ("thinking", "speaking")
                     barge_in = self.store.settings()["listening"].get("voice_interrupt", False)
@@ -441,6 +442,9 @@ class Device:
                         continue
                     was_speaking = detector.speaking
                     pcm = detector.feed(frame)
+                    if self.state == "listening":
+                        # The character hears the person: it looks up as they start, and nods in their pauses.
+                        self._heard(detector.loudness(frame))
                     if busy and detector.speaking and not was_speaking:
                         # The person started talking over the character: stop it and keep listening.
                         self.interrupt()
@@ -450,6 +454,10 @@ class Device:
             except Exception as error:
                 self.emit("error", {"message": "microphone: %s" % error})
             await asyncio.sleep(2.0)
+
+    def _heard(self, level):
+        if hasattr(self.stage, "heard"):
+            self.stage.heard(level)
 
     # ----- timers and alarms
     def action(self, action):

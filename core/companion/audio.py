@@ -217,6 +217,10 @@ class Detector:
         self.noise = -60.0
         self.reset()
 
+    def loudness(self, frame):
+        """How loud a frame is against the room's noise, 0 (the noise) to 1 (loud speech)."""
+        return max(0.0, min(1.0, (self._db(frame) - (self.noise + 6.0)) / 30.0))
+
     def reset(self):
         self.speaking = False
         self.voiced_run = 0
