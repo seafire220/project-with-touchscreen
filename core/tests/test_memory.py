@@ -165,7 +165,7 @@ class ContextTest(Base):
         self.assertNotIn("Plans whose day has come", text, "not before its day")
         for day in (21, 22):
             text, _ = m.context("hello", now=at(day, 10))
-            self.assertIn("Plans whose day has come; ask how they went if it fits (just once):\n- how the driving test went", text)
+            self.assertIn("Plans whose day has come; ask how they went, once, early in this conversation:\n- how the driving test went", text)
             self.assertEqual(text.count("how the driving test went"), 1, "a question to ask, not a memory")
         text, _ = m.context("hello", now=at(23, 10))
         self.assertNotIn("Plans whose day has come", text, "asked about twice: enough")
@@ -177,7 +177,7 @@ class ContextTest(Base):
         self.assertNotIn("Plans whose day has come", text, "not on the day itself: it may not have happened yet")
         self.assertIn("- [plans and events] They have a job interview at the library (Friday 20 November 2026, today)", text)
         text, _ = m.context("hello", now=at(21, 9))
-        self.assertIn("Plans whose day has come; ask how they went if it fits (just once):\n"
+        self.assertIn("Plans whose day has come; ask how they went, once, early in this conversation:\n"
                       "- They have a job interview at the library \u2014 Friday 20 November 2026, yesterday", text)
         self.assertEqual(text.count("job interview"), 1, "asked about, not listed twice")
         m.edit_memory(plan["id"], text="They got the job at the library", now=at(21, 18))

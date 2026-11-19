@@ -104,7 +104,7 @@ A failed call is reported on the settings page and tried again 15 minutes later.
 
 Pinned memories are always in mind. When 600 are kept, the least important and longest unchanged go first; pinned ones stay.
 
-**Plans come back.** A plan or event with a date comes up by itself once its day has passed. The next conversation's first reply is told: "Plans whose day has come; ask how they went if it fits (just once)". It keeps coming up until the person says how it went, which changes the memory after that day. It comes up at most twice, and within a fortnight.
+**Plans come back.** A plan or event with a date comes up by itself once its day has passed. The next conversation's first reply is told: "Plans whose day has come; ask how they went, once, early in this conversation". It keeps coming up until the person says how it went, which changes the memory after that day. It comes up at most twice, and within a fortnight.
 
 The model can also ask to follow something up from a date. In the real run, Mika's first words on the Saturday after the driving test were "Good morning, Sam! How did your driving test go yesterday, and how is it having Kim here from Perth?"
 
@@ -165,7 +165,7 @@ What you remember about them (bring things up only when they fit):
 Earlier conversations that may matter now:
 - on Wednesday evening (4 days ago), "Cooking for Kim": Kim is visiting on Saturday; Sam plans to cook her a vegetarian lasagne.
 
-Plans whose day has come; ask how they went if it fits (just once):
+Plans whose day has come; ask how they went, once, early in this conversation:
 - how Kim's visit went
 
 Your last conversation with them was on Thursday evening (3 days ago), "Shopping list": Sam found a lasagne recipe for Kim's visit; it needs ricotta, so I gave them a shopping list.

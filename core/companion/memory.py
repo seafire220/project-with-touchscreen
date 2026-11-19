@@ -698,7 +698,7 @@ class Memory:
         # Plans to ask about, on a conversation's first reply.
         asked = [m["id"] for m in due]
         if due:
-            parts.append(("follow", "Plans whose day has come; ask how they went if it fits (just once):\n" + "\n".join(
+            parts.append(("follow", "Plans whose day has come; ask how they went, once, early in this conversation:\n" + "\n".join(
                 ("- " + m["text"]) if m.get("follow_up") else ("- %s \u2014 %s" % (m["text"], date_words(m.get("when"), now)))
                 for m in due)))
 
