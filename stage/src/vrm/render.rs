@@ -200,6 +200,8 @@ pub struct VrmRenderer {
 	pub shot: Shot,
 	/// How far the camera has pulled back for raised arms (1 = not at all), eased.
 	zoom: f32,
+	/// How far the view has grown upwards for hands raised above the head, in metres (eased).
+	lift: f32,
 	/// Bytes of texture uploaded, for the memory budget.
 	pub texture_bytes: usize,
 	/// Bits of depth the screen has (24 wanted; 0 would draw insides over faces).
@@ -390,6 +392,7 @@ impl VrmRenderer {
 				background: [0.06, 0.06, 0.08],
 				shot: Shot::Upper,
 				zoom: 1.0,
+				lift: 0.0,
 				texture_bytes,
 				depth_bits,
 			})
@@ -423,19 +426,26 @@ impl VrmRenderer {
 			Shot::Full => 0.16,
 		};
 		let mut reach: f32 = f.half_width + room;
+		// And taller while hands are raised above the head (a stretch).
+		let mut high = top;
 		for hand in ["leftHand", "rightHand", "leftLowerArm", "rightLowerArm"] {
 			if let Some(n) = puppet.model.bone(hand) {
 				let p = puppet.rig.world_position(n);
 				if p.y > bottom {
 					reach = reach.max(p.x.abs() + 0.08);
 				}
+				high = high.max(p.y + 0.12);
 			}
 		}
 		// At most a third further back (a waving hand may then reach the edge), and gently.
-		let needed = ((reach / aspect).max(half_h) / half_h).clamp(1.0, 1.3);
+		let taller = (high - bottom) / (top - bottom).max(0.1);
+		let needed = ((reach / aspect).max(half_h) / half_h).max(taller).clamp(1.0, 1.3);
 		self.zoom += (needed - self.zoom) * 0.04;
+		// The head keeps its place on the screen unless hands rise above it; then the view grows upwards.
+		let lift = (high - top).max(0.0).min((self.zoom - 1.0) * 2.0 * half_h);
+		self.lift += (lift - self.lift) * 0.04;
 		half_h *= self.zoom;
-		let centre = Vec3::new(0.0, top - half_h, 0.0);
+		let centre = Vec3::new(0.0, top + self.lift - half_h, 0.0);
 		let distance = half_h / (fov * 0.5).tan();
 		let eye = centre + Vec3::new(0.0, 0.0, distance);
 		let view = Mat4::look_at_rh(eye, centre, Vec3::Y);

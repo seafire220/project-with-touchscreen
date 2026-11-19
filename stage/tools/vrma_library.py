@@ -150,7 +150,7 @@ def idle_listen(t):
     return pose.add(**breathing(t, 3.0, 0.8))
 
 
-CHIN = Hand((-0.02, 1.275, 0.125), "world", pole=(-0.2, -1.0, 0.1), palm=(0.4, 0.2, -1.0), flex=-20.0)
+CHIN = Hand((-0.02, 1.255, 0.13), "world", pole=(-0.2, -1.0, 0.1), palm=(0.4, 0.2, -1.0), flex=-20.0)
 ELBOW_REST = Hand((-0.07, 1.04, 0.135), "world", pole=(1.0, -0.5, -0.3), palm=(0.0, 1.0, 0.0))
 THINK = REST.but(torso=(-4.0, 1.5, -1.5), head=(-4.0, -3.0, 7.0), hands=(ELBOW_REST, CHIN),
                  fingers=((0.4, 0.35, 0.4, 0.45, 0.5), (0.5, 0.45, 0.65, 0.7, 0.75)))
@@ -305,8 +305,8 @@ def lean_back(t):
 def surprise(t):
     """A start: shoulders jump, hands come up in front of the chest, the body pulls back."""
     jolt = REST.but(torso=(0.0, -4.0, 0.0), head=(0.0, -6.0, 0.0), shoulders=((8.0, 0.0), (8.0, 0.0)),
-                    hands=(Hand((0.10, -0.13, 0.17), "chest", pole=(1.0, -0.8, -0.2), palm=(0.0, 0.0, 1.0)),
-                           Hand((-0.10, -0.13, 0.17), "chest", pole=(-1.0, -0.8, -0.2), palm=(0.0, 0.0, 1.0))),
+                    hands=(Hand((0.11, 0.0, 0.19), "chest", pole=(1.0, -0.8, -0.2), palm=(0.0, 0.0, 1.0)),
+                           Hand((-0.11, 0.0, 0.19), "chest", pole=(-1.0, -0.8, -0.2), palm=(0.0, 0.0, 1.0))),
                     fingers=both(OPEN_FINGERS), spread=(1.0, 1.0), hips=(0.0, -0.016, 0.006))
     held = jolt.add(shoulders=((-2.0, 0.0), (-2.0, 0.0)), hands=((0.0, -0.01, 0.0), (0.0, -0.01, 0.0)))
     return Keys([(0.0, REST), (0.13, jolt, "out"), (0.65, held), (1.4, REST)])(t)
@@ -353,8 +353,8 @@ def shrug(t):
 @clip("stretch", 3.6)
 def stretch(t):
     """Arms up over the head, a lean to one side, then the arms down wide."""
-    up = REST.but(hands=(Hand((0.035, 1.70, 0.02), "world", pole=(1.0, 0.0, -0.3), palm=(0.0, 1.0, 0.0)),
-                         Hand((-0.035, 1.70, 0.02), "world", pole=(-1.0, 0.0, -0.3), palm=(0.0, 1.0, 0.0))),
+    up = REST.but(hands=(Hand((0.06, 1.68, -0.07), "world", pole=(1.0, 0.2, -0.7), palm=(0.0, 1.0, 0.0)),
+                         Hand((-0.06, 1.68, -0.07), "world", pole=(-1.0, 0.2, -0.7), palm=(0.0, 1.0, 0.0))),
                   fingers=both(LOOSE_FIST), hips=(0.0, 0.002, 0.0), torso=(0.0, -4.0, 0.0), head=(0.0, -8.0, 0.0),
                   shoulders=((8.0, -1.0), (8.0, -1.0)))
     lean = up.add(torso=(0.0, 0.0, 9.0), pelvis=(0.0, 0.0, -2.0), hips=(-0.015, -0.01, 0.0), head=(0.0, 0.0, 6.0))
