@@ -80,6 +80,9 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 24. [Motion: a generic skeleton every character is fitted to](docs/24-motion.md)
 25. [Does the whole product fit together?](docs/25-product-review.md)
 26. [Animation: how the character moves (the director: idle life, listening, speech, gestures, temperament, the Animation tab)](docs/26-animation-director.md)
+27. [Animation tested on all eleven test characters](docs/27-character-tests.md)
+28. [User guide: your character device (for buyers)](docs/28-user-guide.md)
+29. [Setting up the first device, once the parts arrive](docs/29-hardware-setup.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner

@@ -594,3 +594,19 @@ rejected. Settled entries are not reopened without new evidence.
   control with filters and springs, and fit both our own characters and
   buyers' models to it, with a calibration step for models whose ranges or
   directions differ.
+
+## D-046 — An arm moves on its own only when the picture shows it whole
+
+- Date: 2026-11-19. Status: decided (from testing all eleven test characters,
+  `27-character-tests.md`).
+- Played on the real stage, six of the nine arms the studio had cut to move
+  came apart or swung wrongly: forearm stubs under armour, a cape or hair,
+  sleeves whose hands were folded up or in pockets, bell sleeves. A broken
+  arm looks far worse than a still one, and every arm gesture has a stand-in
+  (a greeting for a wave, leaning back for hands on hips, a tilt for a
+  shrug).
+- So the studio errs towards still: an arm moves only if it starts near the
+  shoulder, is long enough and no wider than the face, and shows a hand at
+  its end (`studio/partsplit.py`). Cases the rules miss (hands in pockets,
+  a bent arm with the hand on the hip) are switched off by the buyer in
+  Character Studio's review, which shows the wave before sending.

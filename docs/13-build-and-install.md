@@ -11,7 +11,10 @@ The prototype parts are in the hardware document (`05-hardware-and-bom.md`,
 configuration B, about A$239): Raspberry Pi 4 Model B 1 GB, Raspberry Pi
 Touch Display 2 (5"), Seeed ReSpeaker Lite with a 4 Ω 5 W speaker, a 32 GB
 microSD card, the official 5 V 3 A USB-C supply, two push buttons and four
-female jumper leads.
+female jumper leads. A Raspberry Pi 5 1GB is now the recommended board
+(`22-board-options.md`); `29-hardware-setup.md` is the step-by-step guide for
+the first unit, with the Pi 5's differences (27 W supply, its own power
+button, its display connectors).
 
 ## 2. Wiring
 
