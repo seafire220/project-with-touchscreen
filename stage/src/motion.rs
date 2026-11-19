@@ -226,6 +226,8 @@ pub struct Clip {
 	pub big: bool,
 	/// Played from the avatar's own clip, if it has one.
 	pub ext: Option<External>,
+	/// Only an avatar with a clip of its name can make it (a full turn, which a picture cannot show).
+	pub clip_only: bool,
 }
 
 impl Clip {
@@ -278,7 +280,7 @@ impl Clip {
 			let more: Vec<Value> = self.takes[1..].iter().map(|t| serde_json::json!({"tracks": take(t)})).collect();
 			out.insert("takes".into(), Value::Array(more));
 		}
-		for (flag, on) in [("big", self.big), ("mirror", self.mirror), ("exact", self.exact)] {
+		for (flag, on) in [("big", self.big), ("mirror", self.mirror), ("exact", self.exact), ("clip_only", self.clip_only)] {
 			if on {
 				out.insert(flag.into(), true.into());
 			}
@@ -447,6 +449,7 @@ fn parse_clip(name: &String, g: &Value, section: Kind) -> Result<Clip, String> {
 			kind,
 			big,
 			ext: None,
+			clip_only: g.get("clip_only").and_then(Value::as_bool).unwrap_or(false),
 		})
 }
 
@@ -684,7 +687,8 @@ impl Motion {
 
 	/// Whether the character can make a clip, as written or mirrored.
 	fn playable(&self, i: usize) -> bool {
-		!self.removed[i] && (self.available[i] || self.available_mirrored[i])
+		let clip = &self.lib.clips[i];
+		!self.removed[i] && (self.available[i] || self.available_mirrored[i]) && (!clip.clip_only || clip.ext.is_some())
 	}
 
 	/// Add a clip, or change one, from its library entry with its "name" and "kind" ("gesture", "idle" or
@@ -1356,6 +1360,19 @@ mod tests {
 	}
 
 	#[test]
+	fn a_gesture_only_a_clip_can_show_is_offered_only_with_its_clip() {
+		let mut m = Motion::new(Library::builtin(), all, 1);
+		m.set_random(false);
+		assert!(!m.gestures().contains(&"turn_around".to_string()), "a picture cannot turn round");
+		assert!(m.play("turn_around", 1.0).is_err());
+		m.set_external(&[("turn_around".into(), ext(4.6, 0b1100011, 0b1100011))]);
+		assert!(m.gestures().contains(&"turn_around".to_string()));
+		assert_eq!(m.play("turn_around", 1.0).unwrap(), Start::Now);
+		let (poses, _) = run(&mut m, 1.0, State::Speaking);
+		assert!(poses.iter().any(|p| p.smile > 0.1), "its face track plays");
+	}
+
+	#[test]
 	fn arms_held_by_gestures_without_clips_are_told_apart() {
 		let mut m = Motion::new(Library::builtin(), all, 1);
 		m.set_random(false);
@@ -1549,7 +1566,7 @@ mod tests {
 		// The steepest any gesture moves by itself, frame to frame.
 		let lib = Library::builtin();
 		let mut steepest = 0.0f32;
-		for clip in &lib.clips {
+		for clip in lib.clips.iter().filter(|c| !c.clip_only) {
 			let mut m = Motion::new(Library::builtin(), all, 1);
 			m.set_random(false);
 			m.play(&clip.name, 1.0).unwrap();

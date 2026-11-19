@@ -14,7 +14,7 @@ animator thinks of it:
          torso=(turn, bend, side), head=(turn, down, tilt),
          shoulders=((up, forward), (up, forward)),           avatar's left then right
          hands=(Hand(...), Hand(...)), fingers=((thumb, index, middle, ring, little), (...)),
-         feet=((x, z, turn, toes up), (x, z, turn, toes up)))
+         feet=((x, z, turn, toes up, lift), (x, z, turn, toes up, lift)))
 
 Angles are in degrees. A turn is towards the avatar's left (the viewer's right), a bend is forward,
 a side lean is towards the avatar's left; the head's "down" looks down and its tilt leans its top
@@ -284,12 +284,20 @@ class HandMix:
         return vlerp(ta, tb, t), vlerp(pa, pb, t), palm, fa + (fb - fa) * t, ia + (ib - ia) * t
 
 
+def heading(world_rot):
+    """Which way the body faces, as a turn about the vertical (the hips' facing, level)."""
+    f = qrot(world_rot["hips"], (0.0, 0.0, 1.0))
+    return ry(math.degrees(math.atan2(f[0], f[2])))
+
+
 def _in_world(frame, v, s, world_rot, world_pos, direction=False):
     """A point (or a direction) given in a frame, in the world."""
     if frame == "world":
         return tuple(v)
     if frame == "hang":
-        return tuple(v) if direction else vadd(world_pos[("left" if s > 0 else "right") + "UpperArm"], v)
+        # Down is the world's down; out and forward turn with the way the body faces.
+        r = qrot(heading(world_rot), v)
+        return r if direction else vadd(world_pos[("left" if s > 0 else "right") + "UpperArm"], r)
     bone = {"chest": "upperChest", "hips": "hips"}[frame]
     r = qrot(world_rot[bone], v)
     return r if direction else vadd(world_pos[bone], r)
@@ -314,7 +322,7 @@ class Pose:
 
     def __init__(self, hips=(0.0, -0.012, 0.0), pelvis=(0.0, 0.0, 0.0), torso=(0.0, 0.0, 0.0), head=(0.0, 0.0, 0.0),
                  shoulders=((0.0, 0.0), (0.0, 0.0)), hands=None, fingers=(RELAXED_FINGERS, RELAXED_FINGERS),
-                 spread=(0.0, 0.0), feet=((0.085, 0.0, 8.0, 0.0), (-0.085, 0.0, -8.0, 0.0)), knees=(0.0, 0.0)):
+                 spread=(0.0, 0.0), feet=((0.085, 0.0, 8.0, 0.0, 0.0), (-0.085, 0.0, -8.0, 0.0, 0.0)), knees=(0.0, 0.0)):
         self.hips, self.pelvis, self.torso, self.head = tuple(hips), tuple(pelvis), tuple(torso), tuple(head)
         self.shoulders = tuple(tuple(s) for s in shoulders)
         self.hands = tuple(hands or (relaxed_hand(1.0), relaxed_hand(-1.0)))
@@ -434,13 +442,16 @@ def solve(pose):
         rot[side + "ThumbProximal"] = ry(-s * thumb * 35.0)
         rot[side + "ThumbDistal"] = ry(-s * thumb * 40.0)
 
-    # Legs: each foot stays where it is put, flat on the ground, the knee bending forward. At rest a
-    # leg points down, its knee's hinge along +x.
+    # Legs: each foot goes where it is put (on the ground, or lifted in a step), the knee bending the
+    # way the body faces. At rest a leg points down, its knee's hinge along +x.
     world_rot, world_pos = forward(rot, pose.hips)
-    for (side, s), (fx, fz, foot_turn, toes_up), knee_out in zip(SIDES, pose.feet, pose.knees):
+    facing = heading(world_rot)
+    for (side, s), foot, knee_out in zip(SIDES, pose.feet, pose.knees):
+        fx, fz, foot_turn, toes_up = foot[:4]
+        lift = foot[4] if len(foot) > 4 else 0.0
         out = math.radians(s * (8.0 + knee_out))
-        pole = (math.sin(out), 0.0, math.cos(out))
-        g_upper, bend, _ = _limb(world_pos[side + "UpperLeg"], (fx, ANKLE, fz), UPPER_LEG, LOWER_LEG, pole,
+        pole = qrot(facing, (math.sin(out), 0.0, math.cos(out)))
+        g_upper, bend, _ = _limb(world_pos[side + "UpperLeg"], (fx, ANKLE + lift, fz), UPPER_LEG, LOWER_LEG, pole,
                                  (0.0, -1.0, 0.0), (1.0, 0.0, 0.0))
         rot[side + "UpperLeg"] = qnorm(qmul(qinv(world_rot["hips"]), g_upper))
         rot[side + "LowerLeg"] = rx(bend)

@@ -430,6 +430,110 @@ def wake(t):
     return Keys([(0.0, REST), (0.12, jolt, "out"), (0.6, jolt.add(shoulders=((-4.0, 0.0), (-4.0, 0.0)))), (1.4, REST)])(t)
 
 
+# ---------------------------------------------------------------- turning
+
+
+def foot_at(s, angle, lift=0.0, spread=0.085, toe_out=8.0):
+    """A foot (s: 1 left, -1 right) placed for a body turned `angle` degrees towards its left, about its
+    middle: (x, z, turn, toes up, lift)."""
+    a = math.radians(angle)
+    x = s * spread
+    return (x * math.cos(a), -x * math.sin(a), angle + s * toe_out, -12.0 * (lift / 0.05), lift)
+
+
+def stepping(t, start, end, frm, to, count, first=L):
+    """Turning on the spot from `frm` to `to` degrees between `start` and `end`, in `count` steps, the
+    `first` foot first: the body's turn, both feet, and how far the hips sink and shift in each step."""
+    feet = {L: frm, R: frm}
+    if t <= start or count < 1:
+        return frm, (foot_at(L, frm), foot_at(R, frm)), (0.0, 0.0, 0.0)
+    span = (end - start) / count
+    targets = [frm + (to - frm) * min(1.0, (k + 1) / max(1, count - 1)) for k in range(count)]
+    targets[-1] = to
+    order = [first if k % 2 == 0 else -first for k in range(count)]
+    lifted = {L: 0.0, R: 0.0}
+    sink = shift = 0.0
+    for k in range(count):
+        a, b = start + k * span, start + (k + 1) * span
+        side = order[k]
+        if t >= b:
+            feet[side] = targets[k]
+        elif t > a:
+            u = (t - a) / span
+            feet[side] = feet[side] + (targets[k] - feet[side]) * smooth(u)
+            lifted[side] = 0.05 * math.sin(math.pi * u)
+            sink = 0.008 * math.sin(math.pi * u)
+            shift = -side * 0.012 * math.sin(math.pi * u)        # the weight onto the foot that stays
+            break
+    body = frm + (to - frm) * smooth((t - start) / (end - start))
+    a = math.radians(body)
+    hips = (shift * math.cos(a), -sink, -shift * math.sin(a))
+    return body, (foot_at(L, feet[L], lifted[L]), foot_at(R, feet[R], lifted[R])), hips
+
+
+def turned(base, t, start, end, frm, to, count, first=L, arms_out=0.0):
+    """`base` turned on the spot (see stepping), the arms swinging out a little with the turn."""
+    body, feet, hips = stepping(t, start, end, frm, to, count, first)
+    swing = arms_out * math.sin(math.pi * min(1.0, max(0.0, (t - start) / (end - start))))
+    pose = base.but(feet=feet, pelvis=(body, base.pelvis[1], base.pelvis[2]))
+    return pose.add(hips=hips, hands=((swing, swing * 0.5, 0.0), (-swing, swing * 0.5, 0.0)))
+
+
+@clip("turn_around", 4.6)
+def turn_around(t):
+    """Turning round on the spot to show the back, a peek back over the shoulder, and round again."""
+    if t < 0.3:
+        return REST.add(hips=(0.0, -0.012 * bump(t, 0.0, 0.6), 0.0))
+    if t < 1.75:
+        return turned(REST, t, 0.3, 1.75, 0.0, 180.0, 4, L, arms_out=0.03)
+    if t < 3.05:
+        peek = bump(t, 1.75, 3.05) ** 0.5
+        pose = turned(REST, t, 0.3, 1.75, 0.0, 180.0, 4, L)
+        return pose.add(torso=(28.0 * peek, 0.0, 0.0), head=(55.0 * peek, -3.0 * peek, 6.0 * peek))
+    if t < 4.4:
+        return turned(REST, t, 3.05, 4.4, 180.0, 0.0, 4, R, arms_out=0.03)
+    return REST
+
+
+@clip("twirl", 2.3)
+def twirl(t):
+    """A happy spin, all the way round, arms flaring out."""
+    if t < 0.25:
+        k = smooth(t / 0.25)
+        return REST.add(pelvis=(-12.0 * k, 0.0, 0.0), hips=(0.0, -0.02 * k, 0.0), torso=(-6.0 * k, 0.0, 0.0))
+    if t < 1.65:
+        pose = turned(REST, t, 0.25, 1.65, -12.0, 360.0, 4, L, arms_out=0.10)
+        lift = bump(t, 0.25, 1.65)
+        return pose.add(torso=(0.0, -3.0 * lift, 0.0), head=(0.0, -4.0 * lift, 6.0 * lift),
+                        shoulders=((3.0 * lift, 0.0), (3.0 * lift, 0.0)))
+    k = smooth((t - 1.65) / 0.65)
+    settle = REST.add(hips=(0.0, -0.01 * math.sin(math.pi * k), 0.0))
+    return settle.but(pelvis=(360.0, 0.0, 0.0), feet=(foot_at(L, 360.0), foot_at(R, 360.0)))
+
+
+@clip("turn_aside", 3.4)
+def turn_aside(t):
+    """Turning to stand side-on a while (as if to show an outfit, or face something), then back."""
+    if t < 0.95:
+        pose = turned(REST, t, 0.1, 0.95, 0.0, 70.0, 2, L)
+    elif t < 2.35:
+        pose = turned(REST, t, 0.1, 0.95, 0.0, 70.0, 2, L)
+        pose = pose.add(head=(-20.0 * bump(t, 0.95, 2.35) ** 0.5, 0.0, 3.0 * bump(t, 0.95, 2.35)), **breathing(t, 2.8, 0.6))
+    else:
+        pose = turned(REST, t, 2.35, 3.2, 70.0, 0.0, 2, R)
+    return pose
+
+
+@clip("look_back", 2.6)
+def look_back(t):
+    """Looking back over the shoulder, as if someone called from behind: the head first, then the body."""
+    head = smooth(t / 0.45) * smooth((2.5 - t) / 0.7)
+    body = smooth((t - 0.15) / 0.55) * smooth((2.35 - t) / 0.7)
+    return REST.add(head=(62.0 * head, -4.0 * head, 5.0 * head), torso=(34.0 * body, 0.0, -2.0 * body),
+                    pelvis=(12.0 * body, 0.0, 0.0), hips=(-0.012 * body, 0.0, 0.0),
+                    hands=((0.0, 0.0, -0.02 * body), (0.02 * body, 0.0, 0.03 * body)))
+
+
 def main(names):
     os.makedirs(OUT, exist_ok=True)
     for name, (fn, duration) in sorted(CLIPS.items()):

@@ -12,7 +12,8 @@ EMOTIONS = ("neutral", "happy", "sad", "angry", "surprised", "embarrassed", "thi
 # Every gesture in the stage's library (stage/motions/library.json; a test keeps the
 # two in step). The model is told only those its character can make.
 GESTURES = ("bounce", "bow", "brow_flash", "emphatic_nod", "hands_on_hips", "laugh", "lean_back", "lean_in", "look_away",
-            "look_down", "nod", "shake", "shrug", "sigh", "surprise", "sway", "think", "tilt", "wave")
+            "look_back", "look_down", "nod", "shake", "shrug", "sigh", "surprise", "sway", "think", "tilt", "turn_around",
+            "turn_aside", "twirl", "wave")
 
 # Gestures added on the device's settings page, with what each means (set by the device).
 CUSTOM_WORDS = {}
@@ -31,6 +32,9 @@ GESTURE_WORDS = {
     "lean_back": "lean back", "surprise": "start in surprise", "think": "look up, thinking",
     "hands_on_hips": "put your hands on your hips", "wave": "wave", "shrug": "shrug",
     "brow_flash": "raise your eyebrows",
+    # 3D avatars only (the stage offers them only to an avatar with their clips).
+    "turn_around": "turn around (to show your back)", "turn_aside": "turn to the side",
+    "twirl": "twirl around happily", "look_back": "look back over your shoulder",
 }
 
 TAG = re.compile(r"\[([^\[\]]{1,80})\]")
