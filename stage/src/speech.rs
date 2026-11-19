@@ -47,7 +47,11 @@ pub struct Speech {
 	since_mark: f32,
 	open: f32,
 	form: f32,
+	/// How much the mouth is shaped for each vowel (a, i, u, e, o), eased between syllables.
+	vowels: [f32; 5],
 }
+
+const VOWELS: &[u8; 5] = b"aiueo";
 
 impl Default for Speech {
 	fn default() -> Self {
@@ -57,7 +61,7 @@ impl Default for Speech {
 
 impl Speech {
 	pub fn new() -> Self {
-		Self { perf: None, fired: 0, current: None, since_mark: 0.0, open: 1.0, form: 0.0 }
+		Self { perf: None, fired: 0, current: None, since_mark: 0.0, open: 1.0, form: 0.0, vowels: [0.0; 5] }
 	}
 
 	/// A new sentence starts.
@@ -105,6 +109,17 @@ impl Speech {
 		// The shape shows while the mouth is open; a closed mouth keeps the mood's smile.
 		let showing = (pose.mouth_open * 2.5).min(1.0);
 		pose.smile = (pose.smile + FORM_WEIGHT * self.form * showing).clamp(-1.0, 1.0);
+		// Characters with a parameter for each vowel: the one being said, as far as the mouth is open.
+		for (i, v) in VOWELS.iter().enumerate() {
+			let target = if self.current == Some(*v) { 1.0 } else { 0.0 };
+			self.vowels[i] += (target - self.vowels[i]) * k;
+		}
+		let open = (pose.mouth_open * 1.4).min(1.0);
+		pose.vowel_a = self.vowels[0] * open;
+		pose.vowel_i = self.vowels[1] * open;
+		pose.vowel_u = self.vowels[2] * open;
+		pose.vowel_e = self.vowels[3] * open;
+		pose.vowel_o = self.vowels[4] * open;
 	}
 }
 
@@ -154,6 +169,11 @@ mod tests {
 		assert!(i.smile > a.smile && u.smile < a.smile, "an i widens, a u rounds");
 		let shut = settle(&mut s, true, 0.0);
 		assert!((shut.smile - 0.1).abs() < 0.02, "a closed mouth keeps the mood's smile");
+		// Per-vowel parameters: the vowel being said, as open as the mouth.
+		s.syllable(1);
+		let i = settle(&mut s, true, 0.5);
+		assert!(i.vowel_i > 0.4 && i.vowel_a < 0.02 && i.vowel_u < 0.02, "{i:?}");
+		assert!(settle(&mut s, true, 0.0).vowel_i < 0.01, "shut between syllables");
 	}
 
 	#[test]

@@ -36,10 +36,15 @@ pub enum Control {
 	Cheek,
 	BrowFormLeft,
 	BrowFormRight,
+	VowelA,
+	VowelI,
+	VowelU,
+	VowelE,
+	VowelO,
 }
 
 impl Control {
-	pub const ALL: [Control; 25] = [
+	pub const ALL: [Control; 30] = [
 		Control::MouthOpen,
 		Control::BlinkLeft,
 		Control::BlinkRight,
@@ -65,6 +70,11 @@ impl Control {
 		Control::Cheek,
 		Control::BrowFormLeft,
 		Control::BrowFormRight,
+		Control::VowelA,
+		Control::VowelI,
+		Control::VowelU,
+		Control::VowelE,
+		Control::VowelO,
 	];
 
 	pub fn key(self) -> &'static str {
@@ -94,6 +104,11 @@ impl Control {
 			Control::Cheek => "cheek",
 			Control::BrowFormLeft => "brow_form_left",
 			Control::BrowFormRight => "brow_form_right",
+			Control::VowelA => "vowel_a",
+			Control::VowelI => "vowel_i",
+			Control::VowelU => "vowel_u",
+			Control::VowelE => "vowel_e",
+			Control::VowelO => "vowel_o",
 		}
 	}
 
@@ -121,6 +136,11 @@ impl Control {
 				| Control::EyeSmileLeft
 				| Control::EyeSmileRight
 				| Control::Cheek
+				| Control::VowelA
+				| Control::VowelI
+				| Control::VowelU
+				| Control::VowelE
+				| Control::VowelO
 		)
 	}
 
@@ -147,6 +167,11 @@ impl Control {
 			Control::EyeSmileLeft | Control::EyeSmileRight => pose.eye_smile,
 			Control::Cheek => pose.cheek,
 			Control::BrowFormLeft | Control::BrowFormRight => pose.brow_form,
+			Control::VowelA => pose.vowel_a,
+			Control::VowelI => pose.vowel_i,
+			Control::VowelU => pose.vowel_u,
+			Control::VowelE => pose.vowel_e,
+			Control::VowelO => pose.vowel_o,
 		}
 	}
 
@@ -181,6 +206,12 @@ impl Control {
 			Control::Cheek => &[("ParamCheek", 0, false)],
 			Control::BrowFormLeft => &[("ParamBrowLForm", 0, false)],
 			Control::BrowFormRight => &[("ParamBrowRForm", 0, false)],
+			// Models made for lip sync by vowel often have one parameter for each.
+			Control::VowelA => &[("ParamA", 0, false), ("ParamMouthA", 0, false)],
+			Control::VowelI => &[("ParamI", 0, false), ("ParamMouthI", 0, false)],
+			Control::VowelU => &[("ParamU", 0, false), ("ParamMouthU", 0, false)],
+			Control::VowelE => &[("ParamE", 0, false), ("ParamMouthE", 0, false)],
+			Control::VowelO => &[("ParamO", 0, false), ("ParamMouthO", 0, false)],
 		}
 	}
 }
@@ -390,6 +421,22 @@ mod tests {
 		assert_eq!(value(&out, "ParamMouthForm").x, 2.0);
 		let down = m.resolve(&Pose { smile: -0.5, ..Default::default() });
 		assert_eq!(value(&down, "ParamMouthForm").x, 0.0, "halfway from neutral to the lowest value");
+	}
+
+	#[test]
+	fn a_model_with_a_parameter_for_each_vowel_has_them_driven() {
+		let info = PuppetInfo {
+			params: ["ParamA", "ParamI", "ParamU", "ParamE", "ParamO", "ParamMouthOpenY"]
+				.iter()
+				.map(|n| param(n, false, [0.0, 0.0], [1.0, 0.0], [0.0, 0.0]))
+				.collect(),
+			..Default::default()
+		};
+		let mut m = Mapper::auto(&info);
+		let out = m.resolve(&Pose { vowel_o: 0.7, mouth_open: 0.6, ..Default::default() });
+		assert_eq!(value(&out, "ParamO").x, 0.7);
+		assert_eq!(value(&out, "ParamA").x, 0.0);
+		assert_eq!(value(&out, "ParamMouthOpenY").x, 0.6, "the mouth's opening is driven as well");
 	}
 
 	#[test]

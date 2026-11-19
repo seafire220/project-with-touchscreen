@@ -81,6 +81,13 @@ pub struct Pose {
 	pub cheek: f32,
 	/// -1 angry to 1 worried: the brows' shape.
 	pub brow_form: f32,
+	/// 0 to 1 each: the mouth shaped for a, i, u, e or o, for characters with a parameter for each
+	/// vowel (set while speaking, by speech.rs).
+	pub vowel_a: f32,
+	pub vowel_i: f32,
+	pub vowel_u: f32,
+	pub vowel_e: f32,
+	pub vowel_o: f32,
 }
 
 const BLINK_CLOSE: f32 = 0.07;
@@ -491,6 +498,12 @@ impl Behaviour {
 			eye_smile: 0.0,
 			cheek: 0.0,
 			brow_form: 0.0,
+			// The speech module (speech.rs) shapes these while speaking.
+			vowel_a: 0.0,
+			vowel_i: 0.0,
+			vowel_u: 0.0,
+			vowel_e: 0.0,
+			vowel_o: 0.0,
 		}
 	}
 }

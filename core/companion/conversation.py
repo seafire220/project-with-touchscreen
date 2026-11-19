@@ -15,13 +15,17 @@ import functools
 import logging
 import random
 
-from .audio import tone
+from .audio import FRAME, tone
 from .characters import split_persona
 from .performance import Planner, SyllableMarks, even_timing, guess_feeling, syllable_offsets
 from .memory import when
 from .providers import ProviderError
 from .search import results_for_model
 from .speech_text import SEARCH_RULE, Splitter, speech_rules
+
+# A later sentence's sound is held back (to place its syllables over all of it) only while there is more
+# than this many seconds of earlier sound still to be heard.
+HOLD_MARGIN = 0.4
 
 log = logging.getLogger("companion.conversation")
 
@@ -193,6 +197,9 @@ class Conversation:
         except asyncio.TimeoutError:
             raise ProviderError("the language model did not answer in time", retry=True)
         audio_queue = asyncio.Queue(maxsize=64)
+        # Seconds of sound queued, and heard: what is still to be heard is how long a later sentence's
+        # sound may be held back to place its syllables over all of it (see _queue_sound).
+        self._queued, self._played = 0.0, 0.0
 
         async def fetch_all(first_item):
             try:
@@ -264,7 +271,11 @@ class Conversation:
                     self.stage.state("speaking")
 
         try:
-            await self.speaker.play(audio(), self.tts.rate, self.stage.mouth, self.on_audio)
+            def heard(level):
+                self._played += FRAME
+                self.stage.mouth(level)
+
+            await self.speaker.play(audio(), self.tts.rate, heard, self.on_audio)
         finally:
             fetcher.cancel()
 
@@ -279,44 +290,103 @@ class Conversation:
             log.exception("could not plan a sentence's performance")
             return None
 
+    async def _put_audio(self, audio_queue, data):
+        self._queued += len(data) / 2 / self.tts.rate
+        await audio_queue.put(("audio", data))
+
+    async def _queue_whole(self, text, pcm, timing, audio_queue):
+        """Queue a whole sentence's sound, its syllables placed over all of it."""
+        await audio_queue.put(("text", text))
+        try:
+            offsets = [o * 2 for o in syllable_offsets(pcm, self.tts.rate, timing)] if timing else []
+        except Exception:
+            log.exception("could not place a sentence's syllables")
+            offsets = []
+        step = int(self.tts.rate * 0.2) * 2
+        cuts = sorted(set([0] + [o for o in offsets if 0 <= o < len(pcm)]))
+        marks = {o: k for k, o in enumerate(offsets)}
+        for i, cut in enumerate(cuts):
+            end = cuts[i + 1] if i + 1 < len(cuts) else len(pcm)
+            if cut in marks:
+                await audio_queue.put(("syllable", marks[cut]))
+            for piece in range(cut, end, step):
+                await self._put_audio(audio_queue, pcm[piece:min(end, piece + step)])
+
+    async def _pump(self, text, incoming):
+        """The voice's sound for a sentence, chunk by chunk, into a queue (then None, or the error)."""
+        try:
+            async for chunk in self.tts.stream(text):
+                await incoming.put(chunk)
+            await incoming.put(None)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            await incoming.put(error)
+
     async def _queue_sound(self, text, plan, audio_queue):
-        """Queue a sentence's sound, with a mark where each of its syllables is heard."""
+        """Queue a sentence's sound, with a mark where each of its syllables is heard.
+
+        Syllables are placed best over a sentence's whole sound. The device's own voice makes it whole
+        anyway. A voice that streams has its later sentences held back until all of their sound has
+        come, as long as the sound before them is still being heard (so the voice never waits for it);
+        otherwise its syllables are marked as the sound streams in."""
         count = len(plan["syllables"]) if plan else 0
         timing = (plan.get("timing") or even_timing(count)) if count else None
         whole = getattr(self.tts, "full", None)
         if whole and count:
-            # Made whole anyway (the device's own voice): place the syllables over the whole sound.
-            pcm = await whole(text)
-            await audio_queue.put(("text", text))
-            try:
-                offsets = [o * 2 for o in syllable_offsets(pcm, self.tts.rate, timing)]
-            except Exception:
-                log.exception("could not place a sentence's syllables")
-                offsets = []
-            step, pos = int(self.tts.rate * 0.2) * 2, 0
-            cuts = sorted(set([0] + [o for o in offsets if 0 <= o < len(pcm)]))
-            marks = {o: k for k, o in enumerate(offsets)}
-            for i, cut in enumerate(cuts):
-                end = cuts[i + 1] if i + 1 < len(cuts) else len(pcm)
-                if cut in marks:
-                    await audio_queue.put(("syllable", marks[cut]))
-                for piece in range(cut, end, step):
-                    await audio_queue.put(("audio", pcm[piece:min(end, piece + step)]))
+            await self._queue_whole(text, await whole(text), timing, audio_queue)
             return
+        incoming = asyncio.Queue()
+        pump = asyncio.ensure_future(self._pump(text, incoming))
         try:
-            marks = SyllableMarks(self.tts.rate, timing) if count else None
-        except Exception:
-            log.exception("could not follow a sentence's syllables")
-            marks = None
-        started = False
-        async for chunk in self.tts.stream(text):
-            if not started:                      # counted as said only once its sound exists
-                await audio_queue.put(("text", text))
-                started = True
-            for out in (marks.feed(chunk) if marks else [chunk]):
-                await audio_queue.put(("audio", out) if isinstance(out, bytes) else out)
-        for out in (marks.flush() if marks else []):
-            await audio_queue.put(("audio", out))
+            held = []
+            waiting = self._queued - self._played - HOLD_MARGIN
+            if count and waiting > 0:
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + waiting
+                while loop.time() < deadline:
+                    try:
+                        item = await asyncio.wait_for(incoming.get(), deadline - loop.time())
+                    except asyncio.TimeoutError:
+                        break
+                    if isinstance(item, Exception):
+                        raise item
+                    if item is None:
+                        await self._queue_whole(text, b"".join(held), timing, audio_queue)
+                        return
+                    held.append(item)
+            # It streams on: marks as the sound comes (what was held back goes first).
+            try:
+                marks = SyllableMarks(self.tts.rate, timing) if count else None
+            except Exception:
+                log.exception("could not follow a sentence's syllables")
+                marks = None
+            started = False
+
+            async def out(chunk):
+                nonlocal started
+                if not started:                      # counted as said only once its sound exists
+                    await audio_queue.put(("text", text))
+                    started = True
+                for piece in (marks.feed(chunk) if marks else [chunk]):
+                    if isinstance(piece, bytes):
+                        await self._put_audio(audio_queue, piece)
+                    else:
+                        await audio_queue.put(piece)
+
+            for chunk in held:
+                await out(chunk)
+            while True:
+                item = await incoming.get()
+                if isinstance(item, Exception):
+                    raise item
+                if item is None:
+                    break
+                await out(item)
+            for piece in (marks.flush() if marks else []):
+                await self._put_audio(audio_queue, piece)
+        finally:
+            pump.cancel()
 
     async def _notice(self):
         """A short tone when something failed, so a silent device is never a mystery."""

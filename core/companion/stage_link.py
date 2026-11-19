@@ -189,5 +189,7 @@ CONTROLS = (
     ("eye_smile_left", "Left eye smile"), ("eye_smile_right", "Right eye smile"), ("cheek", "Blush"),
     ("mouth_open", "Mouth open"), ("blink_left", "Left eye open"), ("blink_right", "Right eye open"),
     ("breath", "Breathing"),
+    ("vowel_a", "Mouth shaped \"a\""), ("vowel_i", "Mouth shaped \"i\""), ("vowel_u", "Mouth shaped \"u\""),
+    ("vowel_e", "Mouth shaped \"e\""), ("vowel_o", "Mouth shaped \"o\""),
 )
 CONTROL_NAMES = dict(CONTROLS)

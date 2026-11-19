@@ -133,6 +133,54 @@ class ConversationTest(unittest.TestCase):
             memory=self.memory, persona=PERSONA,
             on_event=lambda k, d: self.events.append((k, d)), on_action=self.actions.append)
 
+    def test_a_streamed_voices_later_sentences_are_held_back_to_place_their_syllables(self):
+        placed = []
+        original = conversation.syllable_offsets
+        conversation.syllable_offsets = lambda pcm, rate, timing: placed.append(len(pcm)) or original(pcm, rate, timing)
+        try:
+            tts = FakeTTS(seconds_per_char=0.03)
+            conv = conversation.Conversation(
+                llm=FakeLLM("This first sentence plays while the next one comes. And this second one is held back."),
+                tts=tts, speaker=Speaker(command=None, realtime=True, latency=0.0), stage=self.stage,
+                memory=self.memory, persona=PERSONA)
+            reply = run(conv.respond("hi"))
+        finally:
+            conversation.syllable_offsets = original
+        self.assertIsNone(reply.error)
+        self.assertEqual(len(placed), 1, "the first sentence streams; the second was all there in time, so placed whole")
+        second = int(tts.rate * tts.seconds_per_char * len("And this second one is held back.")) * 2
+        self.assertEqual(placed[0], second)
+        marks = [c["syllable"] for c in self.stage.commands if "syllable" in c]
+        self.assertGreater(len(marks), 10, "both sentences' syllables were marked")
+
+    def test_a_voice_too_slow_to_wait_for_streams_on_and_nothing_is_lost(self):
+        class SlowSecondTTS(FakeTTS):
+            async def stream(self, text):
+                slow = bool(self.texts)              # the first sentence comes at once, the second slowly
+                async for chunk in super().stream(text):
+                    if slow:
+                        await asyncio.sleep(0.15)
+                    yield chunk
+
+        heard, placed = [], []
+        original = conversation.syllable_offsets
+        conversation.syllable_offsets = lambda pcm, rate, timing: placed.append(len(pcm)) or original(pcm, rate, timing)
+        tts = SlowSecondTTS(seconds_per_char=0.01)
+        conv = conversation.Conversation(
+            llm=FakeLLM("A first sentence that is long enough to keep the voice busy for a while. "
+                        "Then a much longer second sentence that the voice is very slow to make, chunk by chunk."),
+            tts=tts, speaker=Speaker(command=None, realtime=True, latency=0.0), stage=self.stage,
+            memory=self.memory, persona=PERSONA, on_audio=heard.append)
+        try:
+            reply = run(conv.respond("hi"))
+        finally:
+            conversation.syllable_offsets = original
+        self.assertIsNone(reply.error)
+        self.assertEqual(placed, [], "it waited, the sound was not all there in time, so it streamed on")
+        expected = sum(int(tts.rate * tts.seconds_per_char * len(t)) * 2 for t in tts.texts)
+        played = sum(len(f) for f in heard)
+        self.assertLess(abs(played - expected), 2 * int(tts.rate * 0.02) * 2, "every bit of sound was played")
+
     def test_a_reply_is_spoken_sentence_by_sentence_with_mouth_movement(self):
         conv = self.make()
         reply = run(conv.respond("hi"))
