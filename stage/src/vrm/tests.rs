@@ -195,8 +195,8 @@ fn at(p: &VrmPuppet, node: usize) -> Vec3 {
 
 /// Where a point of the head's triangle is drawn (skinned).
 fn nose(p: &VrmPuppet) -> Vec3 {
-	let prim = &p.model.meshes[0].primitives[0];
-	p.rig.skins[0][0].transform_point3(prim.positions[0])
+	let points = &p.model.meshes[0].points[p.model.meshes[0].primitives[0].points];
+	p.rig.skins[0][0].transform_point3(points.positions[0])
 }
 
 #[test]
@@ -348,8 +348,30 @@ fn print_rest_weights_of_a_model() {
 	}
 	for (m, mesh) in p.model.meshes.iter().enumerate() {
 		for (pi, prim) in mesh.primitives.iter().enumerate() {
-			let moved: usize = prim.targets.iter().map(|t| t.indices.len()).sum();
-			println!("mesh {m} {} prim {pi}: {} points, {} targets, {} moved points, material {:?}", mesh.name, prim.positions.len(), prim.targets.len(), moved, prim.material);
+			let set = &mesh.points[prim.points];
+			let moved: usize = set.targets.iter().map(|t| t.indices.len()).sum();
+			println!("mesh {m} {} prim {pi}: points set {} ({} points), {} targets, {} moved points, material {:?}", mesh.name, prim.points, set.positions.len(), set.targets.len(), moved, prim.material);
 		}
 	}
+}
+
+#[test]
+fn parts_that_share_points_share_them_on_the_device_too() {
+	// VRoid Studio's exports give one set of points to many parts (each with its own material): the
+	// set is read once, and its face shapes move every part.
+	let glb = crate::vrm::gltf::Glb::parse(stick_figure(1)).unwrap();
+	let mut doc = glb.json.clone();
+	let first = doc["meshes"][0]["primitives"][0].clone();
+	let mut second = first.clone();
+	second["material"] = json!(0);
+	doc["meshes"][0]["primitives"] = json!([first, second]);
+	let file = crate::vrm::gltf::tests::build(&doc, glb.bin());
+	let mut p = VrmPuppet::from_bytes(file, Profile::L1).unwrap();
+	let mesh = &p.model.meshes[0];
+	assert_eq!((mesh.points.len(), mesh.primitives.len()), (1, 2));
+	assert_eq!(mesh.primitives[0].points, mesh.primitives[1].points);
+	assert_eq!(p.size.0, mesh.points[0].positions.len(), "points counted once");
+	assert_eq!(p.size.1, 2 * (mesh.primitives[0].indices.len() / 3), "triangles counted per part");
+	p.update(&values(&[("ParamA", 1.0)]), 1.0 / 30.0);
+	assert!(p.morphs[0][0] > 0.5, "the shared face shape moves");
 }

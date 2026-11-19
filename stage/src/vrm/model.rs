@@ -87,24 +87,40 @@ pub struct Target {
 	pub deltas: Vec<Vec3>,
 }
 
-#[derive(Clone, Debug)]
-pub struct Primitive {
+/// A set of points (with their normals, texture places, bone weights and face shapes). The parts of a
+/// mesh that use the same data share one: VRoid Studio's exports give one set to dozens of parts.
+#[derive(Clone, Debug, Default)]
+pub struct Points {
 	pub positions: Vec<Vec3>,
 	pub normals: Vec<Vec3>,
 	pub uvs: Vec<Vec2>,
 	pub joints: Vec<[u16; 4]>,
 	pub weights: Vec<[f32; 4]>,
+	pub targets: Vec<Target>,
+}
+
+/// One part of a mesh: its triangles (into one of the mesh's sets of points) and its material.
+#[derive(Clone, Debug)]
+pub struct Primitive {
+	pub points: usize,
 	pub indices: Vec<u32>,
 	pub material: Option<usize>,
-	pub targets: Vec<Target>,
 }
 
 #[derive(Clone, Debug)]
 pub struct Mesh {
 	#[allow(dead_code)]
 	pub name: String,
+	pub points: Vec<Points>,
 	pub primitives: Vec<Primitive>,
 	pub target_names: Vec<String>,
+}
+
+impl Mesh {
+	/// How many face shapes its parts have, at most.
+	pub fn target_count(&self) -> usize {
+		self.points.iter().map(|p| p.targets.len()).max().unwrap_or(0)
+	}
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -552,6 +568,10 @@ fn read_meshes(glb: &Glb) -> Result<(Vec<Mesh>, Vec<String>), String> {
 	let mut total_points = 0usize;
 	for (mi, m) in glb.get("meshes").iter().enumerate() {
 		let mut primitives = Vec::new();
+		let mut points: Vec<Points> = Vec::new();
+		// The data each set of points was read from: parts naming the same data share the set.
+		let mut sources: HashMap<Vec<Option<usize>>, usize> = HashMap::new();
+		let mut missing_normals: Vec<bool> = Vec::new();
 		let mut target_names: Vec<String> = m
 			.get("extras")
 			.and_then(|e| e.get("targetNames"))
@@ -567,45 +587,85 @@ fn read_meshes(glb: &Glb) -> Result<(Vec<Mesh>, Vec<String>), String> {
 			let Some(pos) = idx(attrs.get("POSITION")) else {
 				continue;
 			};
-			let (pdata, _) = glb.floats(pos)?;
-			let positions = vec3s(&pdata);
-			let n = positions.len();
-			total_points += n;
-			if total_points > 4_000_000 {
-				return Err("the avatar has far too many points to draw".into());
-			}
-			let normals = match idx(attrs.get("NORMAL")) {
-				Some(a) => vec3s(&glb.floats(a)?.0),
-				None => Vec::new(),
-			};
-			let uvs = match idx(attrs.get("TEXCOORD_0")) {
-				Some(a) => glb.floats(a)?.0.chunks(2).map(|c| Vec2::new(c[0], c[1])).collect(),
-				None => vec![Vec2::ZERO; n],
-			};
-			let (joints, weights) = match (idx(attrs.get("JOINTS_0")), idx(attrs.get("WEIGHTS_0"))) {
-				(Some(j), Some(w)) => {
-					let (jd, jn) = glb.uints(j)?;
-					let (wd, wn) = glb.floats(w)?;
-					if jn != 4 || wn != 4 {
-						return Err(format!("mesh {mi} part {pi}: joints and weights must come in fours"));
+			let targets_json = p.get("targets").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]);
+			let mut key: Vec<Option<usize>> = ["POSITION", "NORMAL", "TEXCOORD_0", "JOINTS_0", "WEIGHTS_0"]
+				.iter()
+				.map(|a| idx(attrs.get(*a)))
+				.collect();
+			key.extend(targets_json.iter().map(|t| idx(t.get("POSITION"))));
+			let set = match sources.get(&key) {
+				Some(&set) => set,
+				None => {
+					let (pdata, _) = glb.floats(pos)?;
+					let positions = vec3s(&pdata);
+					let n = positions.len();
+					total_points += n;
+					if total_points > 4_000_000 {
+						return Err("the avatar has far too many points to draw".into());
 					}
-					let joints: Vec<[u16; 4]> =
-						jd.chunks(4).map(|c| [c[0] as u16, c[1] as u16, c[2] as u16, c[3] as u16]).collect();
-					let weights: Vec<[f32; 4]> = wd
-						.chunks(4)
-						.map(|c| {
-							let sum = c[0] + c[1] + c[2] + c[3];
-							if sum > 1e-6 {
-								[c[0] / sum, c[1] / sum, c[2] / sum, c[3] / sum]
-							} else {
-								[1.0, 0.0, 0.0, 0.0]
+					let normals = match idx(attrs.get("NORMAL")) {
+						Some(a) => vec3s(&glb.floats(a)?.0),
+						None => Vec::new(),
+					};
+					let uvs = match idx(attrs.get("TEXCOORD_0")) {
+						Some(a) => glb.floats(a)?.0.chunks(2).map(|c| Vec2::new(c[0], c[1])).collect(),
+						None => vec![Vec2::ZERO; n],
+					};
+					let (joints, weights) = match (idx(attrs.get("JOINTS_0")), idx(attrs.get("WEIGHTS_0"))) {
+						(Some(j), Some(w)) => {
+							let (jd, jn) = glb.uints(j)?;
+							let (wd, wn) = glb.floats(w)?;
+							if jn != 4 || wn != 4 {
+								return Err(format!("mesh {mi} part {pi}: joints and weights must come in fours"));
 							}
-						})
-						.collect();
-					(joints, weights)
+							let joints: Vec<[u16; 4]> =
+								jd.chunks(4).map(|c| [c[0] as u16, c[1] as u16, c[2] as u16, c[3] as u16]).collect();
+							let weights: Vec<[f32; 4]> = wd
+								.chunks(4)
+								.map(|c| {
+									let sum = c[0] + c[1] + c[2] + c[3];
+									if sum > 1e-6 {
+										[c[0] / sum, c[1] / sum, c[2] / sum, c[3] / sum]
+									} else {
+										[1.0, 0.0, 0.0, 0.0]
+									}
+								})
+								.collect();
+							(joints, weights)
+						}
+						_ => (Vec::new(), Vec::new()),
+					};
+					if uvs.len() != n || (!normals.is_empty() && normals.len() != n) || (!joints.is_empty() && joints.len() != n) {
+						return Err(format!("mesh {mi} part {pi}: its point data do not line up"));
+					}
+					let mut targets = Vec::new();
+					for t in targets_json {
+						let target = match idx(t.get("POSITION")) {
+							Some(a) => match glb.sparse_vec3(a)? {
+								Some((indices, values)) => Target { indices, deltas: values.into_iter().map(Vec3::from).collect() },
+								None => {
+									let (d, _) = glb.floats(a)?;
+									let mut target = Target::default();
+									for (i, c) in d.chunks(3).enumerate() {
+										if c[0] != 0.0 || c[1] != 0.0 || c[2] != 0.0 {
+											target.indices.push(i as u32);
+											target.deltas.push(Vec3::new(c[0], c[1], c[2]));
+										}
+									}
+									target
+								}
+							},
+							None => Target::default(),
+						};
+						targets.push(target);
+					}
+					missing_normals.push(normals.is_empty());
+					points.push(Points { positions, normals, uvs, joints, weights, targets });
+					sources.insert(key, points.len() - 1);
+					points.len() - 1
 				}
-				_ => (Vec::new(), Vec::new()),
 			};
+			let n = points[set].positions.len();
 			let indices = match idx(p.get("indices")) {
 				Some(a) => glb.uints(a)?.0,
 				None => (0..n as u32).collect(),
@@ -613,47 +673,27 @@ fn read_meshes(glb: &Glb) -> Result<(Vec<Mesh>, Vec<String>), String> {
 			if indices.iter().any(|&i| i as usize >= n) {
 				return Err(format!("mesh {mi} part {pi} names a point that does not exist"));
 			}
-			if uvs.len() != n || (!normals.is_empty() && normals.len() != n) || (!joints.is_empty() && joints.len() != n) {
-				return Err(format!("mesh {mi} part {pi}: its point data do not line up"));
-			}
-			let mut targets = Vec::new();
-			for t in p.get("targets").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]) {
-				let target = match idx(t.get("POSITION")) {
-					Some(a) => match glb.sparse_vec3(a)? {
-						Some((indices, values)) => Target { indices, deltas: values.into_iter().map(Vec3::from).collect() },
-						None => {
-							let (d, _) = glb.floats(a)?;
-							let mut target = Target::default();
-							for (i, c) in d.chunks(3).enumerate() {
-								if c[0] != 0.0 || c[1] != 0.0 || c[2] != 0.0 {
-									target.indices.push(i as u32);
-									target.deltas.push(Vec3::new(c[0], c[1], c[2]));
-								}
-							}
-							target
-						}
-					},
-					None => Target::default(),
-				};
-				targets.push(target);
-			}
 			if target_names.is_empty() {
 				if let Some(names) = p.get("extras").and_then(|e| e.get("targetNames")).and_then(Value::as_array) {
 					target_names = names.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect();
 				}
 			}
-			primitives.push(Primitive {
-				normals: if normals.is_empty() { flat_normals(&positions, &indices) } else { normals },
-				positions,
-				uvs,
-				joints,
-				weights,
-				indices,
-				material: idx(p.get("material")),
-				targets,
-			});
+			primitives.push(Primitive { points: set, indices, material: idx(p.get("material")) });
 		}
-		meshes.push(Mesh { name: m.get("name").and_then(Value::as_str).unwrap_or("").to_string(), primitives, target_names });
+		// Normals worked out from every part's triangles, for sets that came without them.
+		for (set, missing) in missing_normals.iter().enumerate() {
+			if *missing {
+				let triangles: Vec<u32> =
+					primitives.iter().filter(|p| p.points == set).flat_map(|p| p.indices.iter().copied()).collect();
+				points[set].normals = flat_normals(&points[set].positions, &triangles);
+			}
+		}
+		meshes.push(Mesh {
+			name: m.get("name").and_then(Value::as_str).unwrap_or("").to_string(),
+			points,
+			primitives,
+			target_names,
+		});
 	}
 	Ok((meshes, warnings))
 }

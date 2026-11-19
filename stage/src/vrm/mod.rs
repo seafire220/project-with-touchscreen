@@ -159,6 +159,8 @@ pub struct VrmPuppet {
 	pub material_uv: Vec<(Vec2, Vec2)>,
 	/// Where the avatar's head and hips are at rest, for framing it.
 	pub framing: Framing,
+	/// Its points (each shared set once) and triangles, counted when it was read.
+	pub size: (usize, usize),
 	/// Full-body animation (clips on the whole skeleton), when the avatar is set to it.
 	animator: Option<Animator>,
 	/// The springs move every this many frames (2 at half rate, to save time), and the time since.
@@ -223,7 +225,7 @@ impl VrmPuppet {
 			expressions: model.expressions.iter().map(|e| e.name.clone()).collect(),
 		};
 		let face = find_face(&model);
-		let morphs: Vec<Vec<f32>> = model.meshes.iter().map(|m| vec![0.0; m.primitives.iter().map(|p| p.targets.len()).max().unwrap_or(0)]).collect();
+		let morphs: Vec<Vec<f32>> = model.meshes.iter().map(|m| vec![0.0; m.target_count()]).collect();
 		let morph_dirty = vec![true; morphs.len()];
 		let material_colors = model.materials.iter().map(base_colors).collect();
 		let material_uv = vec![(Vec2::ONE, Vec2::ZERO); model.materials.len()];
@@ -243,6 +245,10 @@ impl VrmPuppet {
 			material_colors,
 			material_uv,
 			framing: Framing::default(),
+			size: (
+				model.meshes.iter().map(|x| x.points.iter().map(|p| p.positions.len()).sum::<usize>()).sum(),
+				model.meshes.iter().map(|x| x.primitives.iter().map(|p| p.indices.len() / 3).sum::<usize>()).sum(),
+			),
 			animator: None,
 			spring_every: 1,
 			spring_wait: 0,
@@ -313,7 +319,9 @@ impl VrmPuppet {
 			"nodes": m.nodes.len(),
 			"meshes": m.meshes.len(),
 			"materials": m.materials.len(),
-			"morph_targets": m.meshes.iter().map(|x| x.primitives.iter().map(|p| p.targets.len()).sum::<usize>()).sum::<usize>(),
+			"morph_targets": m.meshes.iter().map(|x| x.points.iter().map(|p| p.targets.len()).sum::<usize>()).sum::<usize>(),
+			"points": self.size.0,
+			"triangles": self.size.1,
 			"expressions": m.expressions.iter().map(|e| e.name.clone()).collect::<Vec<_>>(),
 			"look_at": m.look_at.as_ref().map(|l| if l.bones { "bones" } else { "expressions" }),
 			"spring_joints": self.springs.as_ref().map(|s| s.joint_count()).unwrap_or(0),
@@ -349,7 +357,7 @@ impl VrmPuppet {
 			let _ = skin;
 			for mesh_node in m.nodes.iter().filter(|n| n.skin == Some(s)) {
 				let Some(mesh) = mesh_node.mesh.and_then(|i| m.meshes.get(i)) else { continue };
-				for p in &mesh.primitives {
+				for p in &mesh.points {
 					for (k, pos) in p.positions.iter().enumerate().step_by(7) {
 						let Some(w) = p.weights.get(k) else { continue };
 						let j = p.joints[k];

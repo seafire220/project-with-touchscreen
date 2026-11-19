@@ -278,7 +278,7 @@ def shrink_textures(doc, binary, side=TEXTURE_SIDE):
 # estimate below keeps 40 MB of that in hand. About 95 MB of the estimate is the stage program itself,
 # its drawing buffers and the graphics driver; the rest is the avatar's.
 BUDGET_MB = 260
-BASE_MB = 95
+BASE_MB = 110
 # Textures are made this small, if need be, before an avatar is refused.
 LITE_TEXTURE_SIDE = 512
 # More than this is too much to draw smoothly, whatever the memory (most avatars have under 100,000
@@ -287,7 +287,7 @@ MAX_POINTS = 300_000
 MAX_TRIANGLES = 400_000
 # Above these, the avatar starts out with the drawing kept light (no outlines, small textures).
 HEAVY_TRIANGLES = 120_000
-HEAVY_MB = 200
+HEAVY_MB = 240
 ADVICE = ("In VRoid Studio, export it again with fewer polygons and smaller textures (the export settings' "
           "polygon reduction, a texture atlas of 2048 or less, fewer materials); in Blender with the VRM "
           "add-on, a Decimate modifier reduces polygons.")
@@ -305,6 +305,37 @@ def _image_size(doc, binary, index):
         return (0, 0)
 
 
+def _drawn_images(doc):
+    """The images the stage draws with: each material's base colour, emission and shade textures (not
+    normal maps, matcaps or outline widths, which it leaves out)."""
+    textures = doc.get("textures") or []
+    wanted = set()
+
+    def add(ref):
+        i = ref.get("index") if isinstance(ref, dict) else ref
+        if isinstance(i, int) and 0 <= i < len(textures) and isinstance(textures[i], dict):
+            source = textures[i].get("source")
+            if isinstance(source, int):
+                wanted.add(source)
+
+    for m in doc.get("materials") or []:
+        if not isinstance(m, dict):
+            continue
+        add((m.get("pbrMetallicRoughness") or {}).get("baseColorTexture"))
+        add(m.get("emissiveTexture"))
+        add(((m.get("extensions") or {}).get("VRMC_materials_mtoon") or {}).get("shadeMultiplyTexture"))
+    vrm0 = (doc.get("extensions") or {}).get("VRM") or {}
+    for props in vrm0.get("materialProperties") or []:
+        tex = (props or {}).get("textureProperties") or {}
+        for key in ("_MainTex", "_ShadeTexture", "_EmissionMap"):
+            add(tex.get(key))
+    if not wanted:          # no materials say: count every texture
+        for t in textures:
+            if isinstance(t, dict) and isinstance(t.get("source"), int):
+                wanted.add(t["source"])
+    return wanted
+
+
 def cost(doc, binary, file_bytes, texture_side=TEXTURE_SIDE):
     """What showing the avatar costs on the device: its points, triangles, textures (MB, as drawn at
     most `texture_side` a side, with mipmaps) and an estimate of the stage's memory for it at most
@@ -320,24 +351,31 @@ def cost(doc, binary, file_bytes, texture_side=TEXTURE_SIDE):
 
     points = triangles = indices = morph_points = 0
     for mesh in doc.get("meshes") or []:
+        # Parts that name the same data share one set of points (VRoid Studio's exports give one set to
+        # dozens of parts); the stage loads each set once.
+        seen = set()
         for p in (mesh or {}).get("primitives") or []:
             if not isinstance(p, dict) or p.get("mode", 4) != 4:
                 continue
-            n = count((p.get("attributes") or {}).get("POSITION", -1))
-            points += n
+            attrs = p.get("attributes") or {}
+            n = count(attrs.get("POSITION", -1))
             k = count(p["indices"]) if "indices" in p else n
             indices += k
             triangles += k // 3
-            for t in p.get("targets") or []:
-                a = accessors[t["POSITION"]] if isinstance(t, dict) and isinstance(t.get("POSITION"), int) \
-                    and t["POSITION"] < len(accessors) else {}
+            targets = [t.get("POSITION") if isinstance(t, dict) else None for t in p.get("targets") or []]
+            key = tuple(attrs.get(a) for a in ("POSITION", "NORMAL", "TEXCOORD_0", "JOINTS_0", "WEIGHTS_0")) + tuple(targets)
+            if key in seen:
+                continue
+            seen.add(key)
+            points += n
+            for t in targets:
+                a = accessors[t] if isinstance(t, int) and t < len(accessors) else {}
                 if "sparse" in a and "bufferView" not in a:
                     morph_points += int((a.get("sparse") or {}).get("count", 0))
                 else:
                     morph_points += int(a.get("count", 0)) // 4      # a face shape moves about a quarter of its mesh
     texture_bytes = 0
-    used = {t.get("source") for t in doc.get("textures") or [] if isinstance(t, dict) and isinstance(t.get("source"), int)}
-    for index in used:
+    for index in _drawn_images(doc):
         w, h = _image_size(doc, binary, index)
         k = min(1.0, texture_side / float(max(w, h, 1)))
         texture_bytes += int(w * k) * int(h * k) * 4 * 4 // 3

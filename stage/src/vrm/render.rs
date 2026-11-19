@@ -5,6 +5,8 @@
 //! inverted-hull outlines. Textures are cut down to the memory profile's size as they are uploaded,
 //! and the processor's copies are dropped once the graphics chip has them.
 
+use std::collections::HashMap;
+
 use glam::{Mat4, Vec3};
 use glow::HasContext;
 
@@ -148,20 +150,27 @@ impl Program {
 	}
 }
 
-/// One primitive on the graphics chip.
+/// A mesh's set of points on the graphics chip, shared by the parts that use it.
+struct PointsGl {
+	mesh: usize,
+	set: usize,
+	positions: glow::Buffer,
+	normals: glow::Buffer,
+	uvs: glow::Buffer,
+	/// Bone numbers and weights, if the points have them.
+	skinning: Option<(glow::Buffer, glow::Buffer)>,
+	/// The points as modelled, kept only for sets whose face shapes change.
+	base: Option<Vec<Vec3>>,
+}
+
+/// One primitive on the graphics chip: its own triangles, over a shared set of points.
 struct Part {
 	vao: glow::VertexArray,
-	positions: glow::Buffer,
-	buffers: Vec<glow::Buffer>,
 	indices: glow::Buffer,
 	count: i32,
-	mesh: usize,
-	prim: usize,
 	material: Option<usize>,
 	skin: Option<usize>,
 	node: usize,
-	/// The points as modelled, kept only for parts whose face shapes change.
-	base: Option<Vec<Vec3>>,
 }
 
 /// How much of the avatar the screen shows.
@@ -194,6 +203,7 @@ pub struct VrmRenderer {
 	joint_textures: Vec<glow::Texture>,
 	identity_joints: glow::Texture,
 	parts: Vec<Part>,
+	points: Vec<PointsGl>,
 	width: u32,
 	height: u32,
 	pub background: [f32; 3],
@@ -356,70 +366,86 @@ impl VrmRenderer {
 			let joint_textures = model.skins.iter().map(|s| joint_texture(&gl, s.joints.len())).collect::<Result<Vec<_>, _>>()?;
 			let identity_joints = joint_texture(&gl, 1)?;
 			let mut parts = Vec::new();
+			let mut points: Vec<PointsGl> = Vec::new();
+			let mut uploaded: HashMap<(usize, usize), usize> = HashMap::new();
 			for (n, node) in model.nodes.iter().enumerate() {
-				let Some(mesh) = node.mesh.and_then(|m| model.meshes.get(m).map(|x| (m, x))) else { continue };
-				for (pi, p) in mesh.1.primitives.iter().enumerate() {
+				let Some((mi, mesh)) = node.mesh.and_then(|m| model.meshes.get(m).map(|x| (m, x))) else { continue };
+				for p in &mesh.primitives {
 					if p.indices.is_empty() {
 						continue;
 					}
+					// Each set of points goes to the graphics chip once, however many parts use it.
+					let set = match uploaded.get(&(mi, p.points)) {
+						Some(&k) => k,
+						None => {
+							let src = &mesh.points[p.points];
+							let morphed = !src.targets.is_empty();
+							let upload = |data: &[f32], usage: u32| -> Result<glow::Buffer, String> {
+								let b = gl.create_buffer()?;
+								gl.bind_buffer(glow::ARRAY_BUFFER, Some(b));
+								gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes_of(data), usage);
+								Ok(b)
+							};
+							let flat: Vec<f32> = src.positions.iter().flat_map(|v| v.to_array()).collect();
+							let positions = upload(&flat, if morphed { glow::DYNAMIC_DRAW } else { glow::STATIC_DRAW })?;
+							let normals = upload(&src.normals.iter().flat_map(|v| v.to_array()).collect::<Vec<f32>>(), glow::STATIC_DRAW)?;
+							let uvs = upload(&src.uvs.iter().flat_map(|v| v.to_array()).collect::<Vec<f32>>(), glow::STATIC_DRAW)?;
+							let skinning = if src.joints.is_empty() {
+								None
+							} else {
+								let joints: Vec<u16> = src.joints.iter().flat_map(|j| *j).collect();
+								let jb = gl.create_buffer()?;
+								gl.bind_buffer(glow::ARRAY_BUFFER, Some(jb));
+								gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes_of(&joints), glow::STATIC_DRAW);
+								let wb = upload(&src.weights.iter().flat_map(|w| *w).collect::<Vec<f32>>(), glow::STATIC_DRAW)?;
+								Some((jb, wb))
+							};
+							points.push(PointsGl {
+								mesh: mi,
+								set: p.points,
+								positions,
+								normals,
+								uvs,
+								skinning,
+								base: if morphed { Some(src.positions.clone()) } else { None },
+							});
+							uploaded.insert((mi, p.points), points.len() - 1);
+							points.len() - 1
+						}
+					};
+					let gp = &points[set];
 					let vao = gl.create_vertex_array()?;
 					gl.bind_vertex_array(Some(vao));
-					let morphed = !p.targets.is_empty();
-					let positions = gl.create_buffer()?;
-					gl.bind_buffer(glow::ARRAY_BUFFER, Some(positions));
-					let flat: Vec<f32> = p.positions.iter().flat_map(|v| v.to_array()).collect();
-					gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes_of(&flat), if morphed { glow::DYNAMIC_DRAW } else { glow::STATIC_DRAW });
+					gl.bind_buffer(glow::ARRAY_BUFFER, Some(gp.positions));
 					gl.enable_vertex_attrib_array(0);
 					gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 12, 0);
-					let mut buffers = Vec::new();
-					let normals: Vec<f32> = p.normals.iter().flat_map(|v| v.to_array()).collect();
-					let uvs: Vec<f32> = p.uvs.iter().flat_map(|v| v.to_array()).collect();
-					for (loc, data, size) in [(1u32, &normals, 3), (2, &uvs, 2)] {
-						let b = gl.create_buffer()?;
-						gl.bind_buffer(glow::ARRAY_BUFFER, Some(b));
-						gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes_of(data), glow::STATIC_DRAW);
-						gl.enable_vertex_attrib_array(loc);
-						gl.vertex_attrib_pointer_f32(loc, size, glow::FLOAT, false, size * 4, 0);
-						buffers.push(b);
-					}
-					let skin = node.skin.filter(|s| *s < model.skins.len() && !p.joints.is_empty());
-					if skin.is_some() {
-						let joints: Vec<u16> = p.joints.iter().flat_map(|j| *j).collect();
-						let b = gl.create_buffer()?;
-						gl.bind_buffer(glow::ARRAY_BUFFER, Some(b));
-						gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes_of(&joints), glow::STATIC_DRAW);
-						gl.enable_vertex_attrib_array(3);
-						gl.vertex_attrib_pointer_i32(3, 4, glow::UNSIGNED_SHORT, 8, 0);
-						buffers.push(b);
-						let weights: Vec<f32> = p.weights.iter().flat_map(|w| *w).collect();
-						let b = gl.create_buffer()?;
-						gl.bind_buffer(glow::ARRAY_BUFFER, Some(b));
-						gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, bytes_of(&weights), glow::STATIC_DRAW);
-						gl.enable_vertex_attrib_array(4);
-						gl.vertex_attrib_pointer_f32(4, 4, glow::FLOAT, false, 16, 0);
-						buffers.push(b);
-					} else {
-						// Not skinned: the shader uses the node's matrix and never reads these.
-						gl.disable_vertex_attrib_array(3);
-						gl.disable_vertex_attrib_array(4);
+					gl.bind_buffer(glow::ARRAY_BUFFER, Some(gp.normals));
+					gl.enable_vertex_attrib_array(1);
+					gl.vertex_attrib_pointer_f32(1, 3, glow::FLOAT, false, 12, 0);
+					gl.bind_buffer(glow::ARRAY_BUFFER, Some(gp.uvs));
+					gl.enable_vertex_attrib_array(2);
+					gl.vertex_attrib_pointer_f32(2, 2, glow::FLOAT, false, 8, 0);
+					let skin = node.skin.filter(|s| *s < model.skins.len()).filter(|_| gp.skinning.is_some());
+					match (skin, gp.skinning) {
+						(Some(_), Some((jb, wb))) => {
+							gl.bind_buffer(glow::ARRAY_BUFFER, Some(jb));
+							gl.enable_vertex_attrib_array(3);
+							gl.vertex_attrib_pointer_i32(3, 4, glow::UNSIGNED_SHORT, 8, 0);
+							gl.bind_buffer(glow::ARRAY_BUFFER, Some(wb));
+							gl.enable_vertex_attrib_array(4);
+							gl.vertex_attrib_pointer_f32(4, 4, glow::FLOAT, false, 16, 0);
+						}
+						_ => {
+							// Not skinned: the shader uses the node's matrix and never reads these.
+							gl.disable_vertex_attrib_array(3);
+							gl.disable_vertex_attrib_array(4);
+						}
 					}
 					let indices = gl.create_buffer()?;
 					gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(indices));
 					gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, bytes_of(&p.indices), glow::STATIC_DRAW);
 					gl.bind_vertex_array(None);
-					parts.push(Part {
-						vao,
-						positions,
-						buffers,
-						indices,
-						count: p.indices.len() as i32,
-						mesh: mesh.0,
-						prim: pi,
-						material: p.material,
-						skin,
-						node: n,
-						base: if morphed { Some(p.positions.clone()) } else { None },
-					});
+					parts.push(Part { vao, indices, count: p.indices.len() as i32, material: p.material, skin, node: n });
 				}
 			}
 			puppet.warnings.extend(warnings);
@@ -436,6 +462,7 @@ impl VrmRenderer {
 				joint_textures,
 				identity_joints,
 				parts,
+				points,
 				width,
 				height,
 				background: [0.06, 0.06, 0.08],
@@ -576,16 +603,16 @@ impl VrmRenderer {
 			gl.disable(glow::STENCIL_TEST);
 			gl.disable(glow::SCISSOR_TEST);
 
-			// Face shapes: mix them on the processor for the meshes whose weights changed.
-			for part in &self.parts {
-				let Some(base) = &part.base else { continue };
-				if !puppet.morph_dirty.get(part.mesh).copied().unwrap_or(false) {
+			// Face shapes: mix them on the processor, once per set of points, for the meshes whose weights changed.
+			for set in &self.points {
+				let Some(base) = &set.base else { continue };
+				if !puppet.morph_dirty.get(set.mesh).copied().unwrap_or(false) {
 					continue;
 				}
-				let weights = &puppet.morphs[part.mesh];
-				let prim = &model.meshes[part.mesh].primitives[part.prim];
+				let weights = &puppet.morphs[set.mesh];
+				let source = &model.meshes[set.mesh].points[set.set];
 				let mut points = base.clone();
-				for (t, target) in prim.targets.iter().enumerate() {
+				for (t, target) in source.targets.iter().enumerate() {
 					let w = weights.get(t).copied().unwrap_or(0.0);
 					if w <= 0.0 {
 						continue;
@@ -597,7 +624,7 @@ impl VrmRenderer {
 					}
 				}
 				let flat: Vec<f32> = points.iter().flat_map(|v| v.to_array()).collect();
-				gl.bind_buffer(glow::ARRAY_BUFFER, Some(part.positions));
+				gl.bind_buffer(glow::ARRAY_BUFFER, Some(set.positions));
 				gl.buffer_sub_data_u8_slice(glow::ARRAY_BUFFER, 0, bytes_of(&flat));
 			}
 			for d in puppet.morph_dirty.iter_mut() {
@@ -774,11 +801,21 @@ impl Drop for VrmRenderer {
 		unsafe {
 			for part in &self.parts {
 				self.gl.delete_vertex_array(part.vao);
-				self.gl.delete_buffer(part.positions);
 				self.gl.delete_buffer(part.indices);
-				for b in &part.buffers {
-					self.gl.delete_buffer(*b);
+			}
+			for set in &self.points {
+				for b in [set.positions, set.normals, set.uvs] {
+					self.gl.delete_buffer(b);
 				}
+				if let Some((j, w)) = set.skinning {
+					self.gl.delete_buffer(j);
+					self.gl.delete_buffer(w);
+				}
+			}
+			if let Some(o) = self.offscreen.take() {
+				self.gl.delete_framebuffer(o.fbo);
+				self.gl.delete_renderbuffer(o.color);
+				self.gl.delete_renderbuffer(o.depth);
 			}
 			for t in self.textures.iter().flatten().chain(self.joint_textures.iter()) {
 				self.gl.delete_texture(*t);
@@ -812,14 +849,16 @@ fn decode(glb: &super::gltf::Glb, image: usize, side: u32) -> Result<(u32, u32, 
 /// After upload the processor keeps the points only of parts whose face shapes change.
 fn release_static_data(puppet: &mut VrmPuppet) {
 	for mesh in &mut puppet.model.meshes {
-		for p in &mut mesh.primitives {
-			// The renderer keeps its own copy of the points of parts whose shapes change.
+		// The renderer keeps its own copy of the points of sets whose shapes change; the face shapes stay.
+		for p in &mut mesh.points {
 			p.normals = Vec::new();
 			p.uvs = Vec::new();
-			p.indices = Vec::new();
 			p.positions = Vec::new();
 			p.joints = Vec::new();
 			p.weights = Vec::new();
+		}
+		for p in &mut mesh.primitives {
+			p.indices = Vec::new();
 		}
 	}
 }

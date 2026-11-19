@@ -52,7 +52,9 @@ def sample_vrm(version=1, texture_side=2048, meta=None, drop_bone=None, external
         "nodes": nodes,
         "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "material": 0}]}],
         "accessors": [{"bufferView": pos_view, "componentType": 5126, "count": points, "type": "VEC3"}],
-        "materials": [{"name": "Skin", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
+        "materials": [{"name": "Skin", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}]
+        + [{"name": "Cloth%d" % k, "pbrMetallicRoughness": {"baseColorTexture": {"index": 2 + k}}}
+           for k in range(len(extra_views))],
         "textures": [{"source": 0}, {"source": 1}] + [{"source": 2 + k} for k in range(len(extra_views))],
         "images": [{"bufferView": texture_view, "mimeType": "image/png"},
                    {"bufferView": thumb_view, "mimeType": "image/png"}]
