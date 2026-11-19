@@ -15,6 +15,7 @@
     <button data-tab="characters">Characters</button>
     <button data-tab="memory">Memory</button>
     <button data-tab="services">AI services</button>
+    <button data-tab="animation">Animation</button>
     <button data-tab="device">Device</button>
   </nav>
 </header>
@@ -199,6 +200,55 @@
       <summary>All saved keys</summary>
       <div id="keys"></div>
     </details>
+  </section>
+
+  <section id="animation" class="tab" hidden>
+    <h2>What the character is doing</h2>
+    <p class="muted">Live from the screen: how it feels, which parts of its body are busy, and what it did lately
+      and why. Useful when a movement looks wrong or happens too often.</p>
+    <div class="anim-grid">
+      <div>
+        <p>State: <b id="an-state">-</b> &middot; Feeling: <b id="an-mood">-</b> &middot; Its time: <b id="an-hour">-</b>
+          <b id="an-dozing" hidden>&middot; dozing</b></p>
+        <div id="an-drives" class="drives"></div>
+        <h3>Its body</h3>
+        <div id="an-channels" class="channels"></div>
+        <h3>This minute</h3>
+        <p id="an-budget"></p>
+        <p id="an-speed" class="muted"></p>
+      </div>
+      <div>
+        <h3>Lately</h3>
+        <ol id="an-log" class="log"></ol>
+      </div>
+    </div>
+
+    <h2>Change or add a gesture</h2>
+    <p class="muted">Each gesture and idle action is a few tracks: a control (a head nod, the left arm, a smile) and
+      its value over time, from -1 to 1, starting and ending at 0. Try a change on the device's screen before saving
+      it. Saved changes stay on this device, for every character.</p>
+    <p id="ed-missing" class="muted" hidden>Show a character on the device first: the gestures come from its screen.</p>
+    <div id="ed-body" hidden>
+      <p><label class="inline">Gesture <select id="ed-pick"></select></label>
+        <button id="btn-ed-new" class="secondary small">New gesture</button> <span id="ed-origin" class="muted"></span></p>
+      <div class="form">
+        <label>Name <input id="ed-name" maxlength="40" readonly></label>
+        <label>Kind <select id="ed-kind">
+          <option value="gesture">Gesture: the conversation can ask for it</option>
+          <option value="idle">Idle action: by itself, when nobody is talking</option>
+          <option value="reaction">Reaction</option></select></label>
+        <label id="ed-words-row">What it means, for the conversation
+          <input id="ed-words" maxlength="80" placeholder="do a little dance"></label>
+        <p><label class="inline"><input type="checkbox" id="ed-big"> Big (kept to a couple a minute)</label>
+          <label class="inline"><input type="checkbox" id="ed-mirror"> May play mirrored</label></p>
+      </div>
+      <svg id="ed-graph" viewBox="0 0 600 170" class="graph" role="img" aria-label="The tracks over time"></svg>
+      <table class="tracks"><thead><tr><th>Control</th><th>Keys (seconds:value, ...)</th><th></th></tr></thead>
+        <tbody id="ed-tracks"></tbody></table>
+      <p><button id="btn-ed-add" class="secondary small">Add a track</button></p>
+      <p><button id="btn-ed-try">Try it on the device</button> <button id="btn-ed-save">Save</button>
+        <button id="btn-ed-reset" class="danger">Put back as built</button> <span id="ed-msg"></span></p>
+    </div>
   </section>
 
   <section id="device" class="tab" hidden>

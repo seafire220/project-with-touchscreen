@@ -52,3 +52,16 @@ summary { cursor: pointer; color: var(--muted); }
 .sliders input[type=range] { flex: 1; }
 .switches { display: flex; flex-wrap: wrap; gap: 0.3em 1.2em; margin: 0.5em 0; }
 .switches label { white-space: nowrap; }
+
+.anim-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1.5em; }
+@media (max-width: 760px) { .anim-grid { grid-template-columns: 1fr; } }
+.drives label { display: flex; align-items: center; justify-content: space-between; max-width: 22em; margin: 0.2em 0; }
+.drives meter { width: 12em; }
+.channels { display: flex; flex-wrap: wrap; gap: 0.4em; }
+.channels span { border: 1px solid #ccc; border-radius: 1em; padding: 0.15em 0.7em; font-size: 0.9em; }
+.channels span.busy { background: #3a5bd9; border-color: #3a5bd9; color: #fff; }
+
+svg.graph { width: 100%; max-width: 600px; height: auto; background: #fff; border: 1px solid #ddd; border-radius: 6px; margin: 0.5em 0; }
+table.tracks { border-collapse: collapse; width: 100%; max-width: 760px; }
+table.tracks td, table.tracks th { padding: 0.2em 0.4em; text-align: left; }
+table.tracks td:nth-child(2) input { width: 100%; box-sizing: border-box; }

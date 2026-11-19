@@ -14,7 +14,7 @@ from .audio import Detector, Microphone, Speaker, tone
 from .characters import Characters, split_persona
 from .conversation import Conversation
 from .memory import Memory
-from . import screen, temperament
+from . import motions, screen, speech_text, temperament
 from .network import NetworkError, WiFi
 from .providers import ProviderError
 from .stage_link import StageLink
@@ -25,6 +25,10 @@ log = logging.getLogger("companion")
 NOTES_EVERY = 6          # update the memory notes, and sum the conversation up, after this many turns
 QUIET_SUMMARY = 600.0    # or once it has been quiet this many seconds, however short it was
 
+
+
+# What the settings page shows of the stage's heartbeat.
+ANIMATION_FIELDS = ("fps", "state", "mood", "playing", "channels", "budget", "drives", "update_ms", "draw_ms")
 
 class Device:
     def __init__(self, data_dir, stage_socket=None, speaker=None, microphone=None, stage=None,
@@ -37,11 +41,16 @@ class Device:
         self.tts_model_dir = os.path.join(data_dir, "models", "tts")
         self.current_puppet = os.path.join(data_dir, "current.inp")
         self.movement_map = os.path.join(data_dir, "current-map.json")   # read by the stage at start
+        # Gestures and idle actions changed or added on the settings page, for every character.
+        self.custom_motions = motions.CustomMotions(os.path.join(data_dir, "config", "custom-motions.json"))
+        speech_text.set_custom_gestures(self.custom_motions.words())
         self.speaker = speaker or Speaker()
         self.microphone = microphone
         self.stage = stage or StageLink(stage_socket or "/run/companion/stage.sock", self._stage_event)
         self.provider_factory = provider_factory
         self.subscribers = set()
+        self.animation = {}                 # the stage's latest report of what the character is doing
+        self.gesture_log = []               # its latest gestures, moods and skipped gestures
         self.state = "idle"
         self.listening = False
         self.recording = None
@@ -71,14 +80,33 @@ class Device:
             if queue.qsize() < 500:
                 queue.put_nowait(event)
 
+    def publish(self, kind, data=None):
+        """A live event for open settings pages that is not kept in the log (frequent ones)."""
+        event = {"t": round(time.time(), 2), "kind": kind}
+        event.update(data or {})
+        for queue in list(self.subscribers):
+            if queue.qsize() < 500:
+                queue.put_nowait(event)
+
     def _stage_event(self, event):
         self.stage_seen = time.time()
+        kind = event.get("event")
+        if kind == "heartbeat":
+            # What the character is doing, for the settings page's live view.
+            self.animation = {k: event.get(k) for k in ANIMATION_FIELDS}
+            self.publish("animation", {"status": self.animation})
+        elif kind in ("gesture", "gesture_skipped", "gesture_waiting", "emotion"):
+            entry = {"t": round(time.time(), 2), "event": kind, "name": event.get("name") or event.get("emotion")}
+            entry.update({k: event[k] for k in ("cause", "played", "why") if event.get(k)})
+            self.gesture_log = (self.gesture_log + [entry])[-60:]
+            self.publish("animation", {"gesture": entry})
         if event.get("event") in ("error", "fatal"):
             self.emit("stage_error", {"message": event.get("message", "")})
         elif event.get("event") == "ready":
             if hasattr(self.stage, "random_gestures"):
                 self.stage.random_gestures(self.store.settings()["conversation"].get("random_gestures", True))
             self.use_emotion_map()
+            self.use_custom_motions()
             self.use_character_motion()
             self.tell_the_time()
 
@@ -233,6 +261,13 @@ class Device:
         cid = cid or self.active_id()
         if cid and hasattr(self.stage, "emotion_map"):
             self.stage.emotion_map = self.characters.emotion_map(cid)
+
+    def use_custom_motions(self):
+        """Give the stage the gestures and idle actions changed or added on this device."""
+        speech_text.set_custom_gestures(self.custom_motions.words())
+        if hasattr(self.stage, "define"):
+            for name, entry in self.custom_motions.all().items():
+                self.stage.define(name, entry)
 
     def use_character_motion(self, cid=None):
         """Tell the stage the character's temperament, and the gestures it never makes by itself."""

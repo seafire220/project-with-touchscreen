@@ -192,6 +192,9 @@ pub struct Clip {
 	pub instead: Option<String>,
 	/// When it lands (seconds in): the speech planner starts it this long before its word.
 	pub stroke: f32,
+	/// Whether the library gave its channels and stroke, rather than their being worked out.
+	holds_given: bool,
+	stroke_given: bool,
 	/// Channels it holds while it plays, and all it moves (one bit per channel).
 	pub holds: u16,
 	pub touches: u16,
@@ -218,6 +221,50 @@ impl Clip {
 			let (key, sign) = if mirrored { mirrored_key(*key) } else { (*key, 1.0) };
 			out[key] += sign * value * weights[channel_of(key)];
 		}
+	}
+
+	/// The clip as the library writes it (for the settings page's editor).
+	pub fn to_json(&self) -> Value {
+		let take = |t: &Take| {
+			let mut tracks = serde_json::Map::new();
+			for (key, points) in &t.tracks {
+				let round = |x: f32| ((x as f64) * 1000.0).round() / 1000.0;
+				let keys: Vec<[f64; 2]> = points.iter().map(|p| [round(p.0), round(p.1)]).collect();
+				tracks.insert(KEYS[*key].to_string(), serde_json::json!(keys));
+			}
+			Value::Object(tracks)
+		};
+		let mut out = serde_json::Map::new();
+		let kind = match self.kind {
+			Kind::Gesture => "gesture",
+			Kind::Idle => "idle",
+			Kind::Reaction => "reaction",
+		};
+		out.insert("kind".into(), kind.into());
+		let needs: Vec<String> =
+			self.needs.iter().map(|any| any.iter().map(|k| KEYS[*k]).collect::<Vec<_>>().join("|")).collect();
+		out.insert("needs".into(), serde_json::json!(needs));
+		out.insert("tracks".into(), take(&self.takes[0]));
+		if self.takes.len() > 1 {
+			let more: Vec<Value> = self.takes[1..].iter().map(|t| serde_json::json!({"tracks": take(t)})).collect();
+			out.insert("takes".into(), Value::Array(more));
+		}
+		for (flag, on) in [("big", self.big), ("mirror", self.mirror), ("exact", self.exact)] {
+			if on {
+				out.insert(flag.into(), true.into());
+			}
+		}
+		if let Some(other) = &self.instead {
+			out.insert("instead".into(), other.clone().into());
+		}
+		if self.holds_given {
+			let names: Vec<&str> = (0..CHANNELS.len()).filter(|c| self.holds & (1 << c) != 0).map(|c| CHANNELS[c]).collect();
+			out.insert("holds".into(), serde_json::json!(names));
+		}
+		if self.stroke_given {
+			out.insert("stroke".into(), serde_json::json!(self.stroke));
+		}
+		Value::Object(out)
 	}
 
 	/// The channels it holds, mirrored or not.
@@ -273,6 +320,84 @@ fn number(v: &Value, what: &str) -> Result<f32, String> {
 	v.as_f64().map(|x| x as f32).ok_or(format!("{what} must be a number"))
 }
 
+/// One clip of the library: a gesture (in "gestures"), or an idle action or reaction (in "actions", with
+/// its "kind").
+fn parse_clip(name: &String, g: &Value, section: Kind) -> Result<Clip, String> {
+		let kind = match (section, g.get("kind").and_then(Value::as_str)) {
+			(Kind::Gesture, _) => Kind::Gesture,
+			(_, Some("idle")) => Kind::Idle,
+			(_, Some("reaction")) => Kind::Reaction,
+			_ => return Err(format!("action {name}: 'kind' must be idle or reaction")),
+		};
+		let needs = g
+			.get("needs")
+			.and_then(Value::as_array)
+			.ok_or(format!("gesture {name}: no 'needs'"))?
+			.iter()
+			.map(|k| k.as_str().unwrap_or("").split('|').map(key_index).collect::<Result<Vec<_>, _>>())
+			.collect::<Result<Vec<_>, _>>()?;
+		let mut takes = vec![parse_take(name, g.get("tracks").unwrap_or(&Value::Null))?];
+		for extra in g.get("takes").and_then(Value::as_array).map(|a| a.as_slice()).unwrap_or(&[]) {
+			takes.push(parse_take(name, extra.get("tracks").unwrap_or(&Value::Null))?);
+		}
+		let duration = takes.iter().map(|t| t.duration).fold(0.0, f32::max);
+		// The channels it holds: as listed, or those it moves far.
+		let mut peak = [0.0f32; CHANNELS.len()];
+		for (key, pts) in takes.iter().flat_map(|t| t.tracks.iter()) {
+			let c = channel_of(*key);
+			peak[c] = pts.iter().fold(peak[c], |m, p| m.max(p.1.abs()));
+		}
+		let touches = (0..CHANNELS.len()).filter(|c| peak[*c] > 0.0).fold(0u16, |m, c| m | 1 << c);
+		let holds = match g.get("holds").and_then(Value::as_array) {
+			Some(list) => {
+				let mut m = 0u16;
+				for c in list {
+					let c = c.as_str().and_then(|n| CHANNELS.iter().position(|x| *x == n));
+					m |= 1 << c.ok_or(format!("gesture {name}: 'holds' names channels: {}", CHANNELS.join(", ")))?;
+				}
+				m
+			}
+			None => {
+				let strong = (0..CHANNELS.len()).filter(|c| peak[*c] >= HOLD_LEVEL).fold(0u16, |m, c| m | 1 << c);
+				// At least the channel it moves most.
+				let most = (0..CHANNELS.len()).max_by(|a, b| peak[*a].total_cmp(&peak[*b])).unwrap_or(0);
+				if strong == 0 && peak[most] > 0.0 { 1 << most } else { strong }
+			}
+		};
+		let big = g.get("big").and_then(Value::as_bool).unwrap_or(false);
+		let holds_given = g.get("holds").and_then(Value::as_array).is_some();
+		let stroke_given = g.get("stroke").is_some();
+		// When it lands: as given, or when its strongest held move first nears its height.
+		let stroke = match g.get("stroke") {
+			Some(v) => number(v, "a stroke")?,
+			None => {
+				let held: Vec<&(usize, Vec<(f32, f32)>)> =
+					takes[0].tracks.iter().filter(|(k, _)| holds & (1 << channel_of(*k)) != 0).collect();
+				let top = held.iter().flat_map(|(_, p)| p.iter()).fold(0.0f32, |m, p| m.max(p.1.abs()));
+				held.iter()
+					.filter_map(|(_, p)| p.iter().find(|q| q.1.abs() >= 0.9 * top && top > 0.0).map(|q| q.0))
+					.fold(f32::MAX, f32::min)
+					.min(duration)
+			}
+		};
+		Ok(Clip {
+			name: name.clone(),
+			needs,
+			takes,
+			duration,
+			mirror: g.get("mirror").and_then(Value::as_bool).unwrap_or(false),
+			exact: g.get("exact").and_then(Value::as_bool).unwrap_or(false),
+			instead: g.get("instead").and_then(Value::as_str).map(str::to_string),
+			stroke,
+			holds_given,
+			stroke_given,
+			holds,
+			touches,
+			kind,
+			big,
+		})
+}
+
 impl Library {
 	pub fn builtin() -> Self {
 		Self::parse(include_str!("../motions/library.json")).expect("the built-in motion library is valid")
@@ -286,75 +411,7 @@ impl Library {
 		let actions = root.get("actions").and_then(Value::as_object).unwrap_or(&empty);
 		let all = gestures.iter().map(|g| (g, Kind::Gesture)).chain(actions.iter().filter(|(n, _)| !n.starts_with('_')).map(|g| (g, Kind::Idle)));
 		for ((name, g), section) in all {
-			let kind = match (section, g.get("kind").and_then(Value::as_str)) {
-				(Kind::Gesture, _) => Kind::Gesture,
-				(_, Some("idle")) => Kind::Idle,
-				(_, Some("reaction")) => Kind::Reaction,
-				_ => return Err(format!("action {name}: 'kind' must be idle or reaction")),
-			};
-			let needs = g
-				.get("needs")
-				.and_then(Value::as_array)
-				.ok_or(format!("gesture {name}: no 'needs'"))?
-				.iter()
-				.map(|k| k.as_str().unwrap_or("").split('|').map(key_index).collect::<Result<Vec<_>, _>>())
-				.collect::<Result<Vec<_>, _>>()?;
-			let mut takes = vec![parse_take(name, g.get("tracks").unwrap_or(&Value::Null))?];
-			for extra in g.get("takes").and_then(Value::as_array).map(|a| a.as_slice()).unwrap_or(&[]) {
-				takes.push(parse_take(name, extra.get("tracks").unwrap_or(&Value::Null))?);
-			}
-			let duration = takes.iter().map(|t| t.duration).fold(0.0, f32::max);
-			// The channels it holds: as listed, or those it moves far.
-			let mut peak = [0.0f32; CHANNELS.len()];
-			for (key, pts) in takes.iter().flat_map(|t| t.tracks.iter()) {
-				let c = channel_of(*key);
-				peak[c] = pts.iter().fold(peak[c], |m, p| m.max(p.1.abs()));
-			}
-			let touches = (0..CHANNELS.len()).filter(|c| peak[*c] > 0.0).fold(0u16, |m, c| m | 1 << c);
-			let holds = match g.get("holds").and_then(Value::as_array) {
-				Some(list) => {
-					let mut m = 0u16;
-					for c in list {
-						let c = c.as_str().and_then(|n| CHANNELS.iter().position(|x| *x == n));
-						m |= 1 << c.ok_or(format!("gesture {name}: 'holds' names channels: {}", CHANNELS.join(", ")))?;
-					}
-					m
-				}
-				None => {
-					let strong = (0..CHANNELS.len()).filter(|c| peak[*c] >= HOLD_LEVEL).fold(0u16, |m, c| m | 1 << c);
-					// At least the channel it moves most.
-					let most = (0..CHANNELS.len()).max_by(|a, b| peak[*a].total_cmp(&peak[*b])).unwrap_or(0);
-					if strong == 0 && peak[most] > 0.0 { 1 << most } else { strong }
-				}
-			};
-			let big = g.get("big").and_then(Value::as_bool).unwrap_or(false);
-			// When it lands: as given, or when its strongest held move first nears its height.
-			let stroke = match g.get("stroke") {
-				Some(v) => number(v, "a stroke")?,
-				None => {
-					let held: Vec<&(usize, Vec<(f32, f32)>)> =
-						takes[0].tracks.iter().filter(|(k, _)| holds & (1 << channel_of(*k)) != 0).collect();
-					let top = held.iter().flat_map(|(_, p)| p.iter()).fold(0.0f32, |m, p| m.max(p.1.abs()));
-					held.iter()
-						.filter_map(|(_, p)| p.iter().find(|q| q.1.abs() >= 0.9 * top && top > 0.0).map(|q| q.0))
-						.fold(f32::MAX, f32::min)
-						.min(duration)
-				}
-			};
-			clips.push(Clip {
-				name: name.clone(),
-				needs,
-				takes,
-				duration,
-				mirror: g.get("mirror").and_then(Value::as_bool).unwrap_or(false),
-				exact: g.get("exact").and_then(Value::as_bool).unwrap_or(false),
-				instead: g.get("instead").and_then(Value::as_str).map(str::to_string),
-				stroke,
-				holds,
-				touches,
-				kind,
-				big,
-			});
+			clips.push(parse_clip(name, g, section)?);
 		}
 		let mut moods = Vec::new();
 		for (name, m) in root.get("moods").and_then(Value::as_object).ok_or("motion library has no moods")? {
@@ -447,6 +504,12 @@ pub struct Motion {
 	/// Whether the character has the controls for each clip as written, and mirrored.
 	available: Vec<bool>,
 	available_mirrored: Vec<bool>,
+	/// Which controls the character has (for clips defined later).
+	has: Vec<bool>,
+	/// The library as built, to go back to when a changed clip is restored.
+	builtin: Vec<Clip>,
+	/// Clips added on the device and since taken away.
+	removed: Vec<bool>,
 	/// Vary each gesture's speed, size, take and side (off in tests that check exact values).
 	vary: bool,
 	mood: usize,
@@ -505,10 +568,15 @@ impl Motion {
 			.map(|c| c.mirror && c.needs.iter().all(|any| any.iter().any(|k| has(KEYS[mirrored_key(*k).0]))))
 			.collect();
 		let mood = lib.moods.iter().position(|m| m.name == "neutral").unwrap_or(0);
+		let has: Vec<bool> = KEYS.iter().map(|k| has(k)).collect();
+		let builtin = lib.clips.clone();
 		let mut m = Self {
 			lib,
 			available,
 			available_mirrored,
+			has,
+			builtin,
+			removed: Vec::new(),
 			vary: false,
 			mood,
 			intensity: 1.0,
@@ -536,6 +604,7 @@ impl Motion {
 			expressiveness: 1.0,
 		};
 		m.disabled = vec![false; m.lib.clips.len()];
+		m.removed = vec![false; m.lib.clips.len()];
 		m.last_start = vec![f32::NEG_INFINITY; m.lib.clips.len()];
 		m.next_random = m.random_gap(1.0);
 		m
@@ -548,7 +617,96 @@ impl Motion {
 
 	/// Whether the character can make a clip, as written or mirrored.
 	fn playable(&self, i: usize) -> bool {
-		self.available[i] || self.available_mirrored[i]
+		!self.removed[i] && (self.available[i] || self.available_mirrored[i])
+	}
+
+	/// Add a clip, or change one, from its library entry with its "name" and "kind" ("gesture", "idle" or
+	/// "reaction"; a gesture by default). Returns its name.
+	pub fn define(&mut self, entry: &Value) -> Result<String, String> {
+		let name = entry.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+		if name.is_empty() || name.len() > 40 || !name.bytes().all(|b| b.is_ascii_lowercase() || b == b'_') {
+			return Err("a gesture's name is lower-case letters and _".into());
+		}
+		let section = match entry.get("kind").and_then(Value::as_str) {
+			None | Some("gesture") => Kind::Gesture,
+			Some(_) => Kind::Idle,
+		};
+		let clip = parse_clip(&name, entry, section)?;
+		if let Some(other) = &clip.instead {
+			if !self.lib.clips.iter().any(|c| &c.name == other) {
+				return Err(format!("gesture {name}: no gesture called {other} to play instead"));
+			}
+		}
+		let plain = clip.needs.iter().all(|any| any.iter().any(|k| self.has[*k]));
+		let mirrored = clip.mirror && clip.needs.iter().all(|any| any.iter().any(|k| self.has[mirrored_key(*k).0]));
+		match self.lib.clips.iter().position(|c| c.name == name) {
+			Some(i) => {
+				self.lib.clips[i] = clip;
+				self.available[i] = plain;
+				self.available_mirrored[i] = mirrored;
+				self.removed[i] = false;
+			}
+			None => {
+				self.lib.clips.push(clip);
+				self.available.push(plain);
+				self.available_mirrored.push(mirrored);
+				self.removed.push(false);
+				self.disabled.push(false);
+				self.last_start.push(f32::NEG_INFINITY);
+			}
+		}
+		Ok(name)
+	}
+
+	/// Undo a change: a built-in clip goes back to how it was built; one added on the device goes.
+	pub fn undefine(&mut self, name: &str) -> Result<(), String> {
+		let i = self.find(name)?;
+		match self.builtin.iter().find(|c| c.name == name) {
+			Some(original) => {
+				self.lib.clips[i] = original.clone();
+				let clip = &self.lib.clips[i];
+				self.available[i] = clip.needs.iter().all(|any| any.iter().any(|k| self.has[*k]));
+				self.available_mirrored[i] =
+					clip.mirror && clip.needs.iter().all(|any| any.iter().any(|k| self.has[mirrored_key(*k).0]));
+			}
+			None => {
+				self.removed[i] = true;
+				for p in &mut self.playing {
+					if p.clip == i {
+						p.cut.get_or_insert(self.t);
+					}
+				}
+				self.queued.retain(|q| q.0 != i);
+			}
+		}
+		Ok(())
+	}
+
+	/// Every clip, as the library writes it, and whether it was changed or added on the device.
+	pub fn describe(&self) -> Value {
+		let mut out = serde_json::Map::new();
+		for (i, clip) in self.lib.clips.iter().enumerate() {
+			if self.removed[i] || clip.name.starts_with('_') {
+				continue;
+			}
+			let mut entry = clip.to_json();
+			let origin = match self.builtin.iter().find(|c| c.name == clip.name) {
+				None => "added",
+				Some(b) if b.to_json() != entry => "changed",
+				Some(_) => "built in",
+			};
+			if let Value::Object(map) = &mut entry {
+				map.insert("origin".into(), origin.into());
+				// Whether this character can make it, itself or with a stand-in (and which).
+				let resolved = self.resolve(i);
+				map.insert("can".into(), resolved.is_some().into());
+				if let Some(j) = resolved.filter(|j| *j != i) {
+					map.insert("as".into(), self.lib.clips[j].name.clone().into());
+				}
+			}
+			out.insert(clip.name.clone(), entry);
+		}
+		Value::Object(out)
 	}
 
 	/// The clip to play for clip `i`: itself, or what plays instead on a character that cannot make it.
@@ -695,7 +853,12 @@ impl Motion {
 	}
 
 	fn find(&self, name: &str) -> Result<usize, String> {
-		self.lib.clips.iter().position(|c| c.name == name).ok_or(format!("unknown gesture '{name}'"))
+		self.lib
+			.clips
+			.iter()
+			.enumerate()
+			.position(|(i, c)| c.name == name && !self.removed[i])
+			.ok_or(format!("unknown gesture '{name}'"))
 	}
 
 	/// Play a gesture, as asked. It starts now, taking over the parts of the body it needs, unless
@@ -824,6 +987,36 @@ impl Motion {
 		self.recent.push_back((t, priority, self.lib.clips[i].big));
 		self.last_start[i] = t;
 		Start::Now
+	}
+
+	/// Which gesture holds each part of the body now (for the settings page's live view).
+	pub fn holders(&self) -> Vec<(&'static str, String)> {
+		let mut out = Vec::new();
+		for (c, channel) in CHANNELS.iter().enumerate() {
+			if let Some(p) = self.playing.iter().find(|p| p.holding(&self.lib.clips[p.clip]) & (1 << c) != 0) {
+				out.push((*channel, self.lib.clips[p.clip].name.clone()));
+			}
+		}
+		out
+	}
+
+	/// Gestures started in the last minute by the character itself, big ones among them, those the mood
+	/// started, and idle actions: what the budget counts.
+	pub fn budget_used(&self) -> (usize, usize, usize, usize) {
+		let (mut own, mut big, mut mood, mut idle) = (0, 0, 0, 0);
+		for &(at, p, b) in &self.recent {
+			if self.t - at >= MINUTE || p >= ASKED {
+				continue;
+			}
+			if p == IDLE {
+				idle += 1;
+			} else {
+				own += 1;
+				big += b as usize;
+				mood += (p == MOOD) as usize;
+			}
+		}
+		(own, big, mood, idle)
 	}
 
 	/// The gestures playing now (not cut short).
@@ -1414,5 +1607,52 @@ mod tests {
 		assert!(matches!(m.suggest("nod", 1.0).unwrap(), Start::Skipped(_)));
 		assert_eq!(m.play("nod", 1.0).unwrap(), Start::Now, "asked for, it still plays");
 		assert!(m.actions().contains(&"yawn".to_string()) && !m.actions().contains(&"nod".to_string()));
+	}
+
+	#[test]
+	fn clips_can_be_changed_added_and_put_back_on_the_device() {
+		let head_only = |k: &str| k.starts_with("head");
+		let mut m = Motion::new(Library::builtin(), head_only, 1);
+		m.set_random(false);
+		// A new gesture.
+		let wiggle = serde_json::json!({"name": "wiggle", "needs": ["head_roll"],
+			"tracks": {"head_roll": [[0, 0], [0.2, 0.4], [0.4, -0.4], [0.6, 0]]}});
+		assert_eq!(m.define(&wiggle).unwrap(), "wiggle");
+		assert!(m.gestures().contains(&"wiggle".to_string()));
+		assert_eq!(m.play("wiggle", 1.0).unwrap(), Start::Now);
+		let (poses, _) = run(&mut m, 0.7, State::Speaking);
+		assert!(poses.iter().any(|p| p.head_roll > 0.3) && poses.iter().any(|p| p.head_roll < -0.3));
+		// A changed nod, then back as built.
+		let deep = serde_json::json!({"name": "nod", "needs": ["head_pitch"],
+			"tracks": {"head_pitch": [[0, 0], [0.3, -0.9], [0.6, 0]]}});
+		m.define(&deep).unwrap();
+		assert_eq!(m.describe()["nod"]["origin"], "changed");
+		m.play("nod", 1.0).unwrap();
+		let deepest = run(&mut m, 0.7, State::Speaking).0.iter().map(|p| p.head_pitch).fold(0.0f32, f32::min);
+		assert!(deepest < -0.8, "{deepest}");
+		m.undefine("nod").unwrap();
+		assert_eq!(m.describe()["nod"]["origin"], "built in");
+		// The added one goes.
+		m.undefine("wiggle").unwrap();
+		assert!(!m.gestures().contains(&"wiggle".to_string()) && m.play("wiggle", 1.0).is_err());
+		assert!(m.describe().get("wiggle").is_none());
+		// Mistakes are refused, as in the library.
+		for bad in [
+			serde_json::json!({"name": "Bad Name", "needs": [], "tracks": {"head_roll": [[0, 0], [1, 0]]}}),
+			serde_json::json!({"name": "jump", "needs": [], "tracks": {"head_roll": [[0, 0], [1, 0.5]]}}),
+			serde_json::json!({"name": "jump", "needs": ["tail"], "tracks": {"head_roll": [[0, 0], [1, 0]]}}),
+			serde_json::json!({"name": "jump", "needs": [], "instead": "fly", "tracks": {"head_roll": [[0, 0], [1, 0]]}}),
+		] {
+			assert!(m.define(&bad).is_err(), "{bad}");
+		}
+		// The library as written: tracks, needs and flags, and whether the character can make each clip.
+		let all_clips = m.describe();
+		assert_eq!(all_clips["wave"]["kind"], "gesture");
+		assert_eq!(all_clips["wave"]["can"], true, "with its stand-in");
+		assert_eq!(all_clips["wave"]["as"], "greet");
+		assert_eq!(all_clips["yawn"]["kind"], "idle");
+		assert_eq!(all_clips["glance"]["holds"], serde_json::json!(["head", "eyes"]));
+		let reparsed = parse_clip(&"nod".to_string(), &all_clips["nod"], Kind::Gesture).unwrap();
+		assert_eq!(reparsed.to_json()["tracks"], all_clips["nod"]["tracks"], "written as read");
 	}
 }

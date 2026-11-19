@@ -66,6 +66,7 @@ function show(tab) {
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
   if (tab === "memory") loadMemory();
   if (tab === "device") loadWifi().catch((e) => text($("wifi-status"), e.message));
+  if (tab === "animation") loadAnimation().catch((e) => text($("an-speed"), e.message));
 }
 for (const b of document.querySelectorAll("#tabs button")) b.addEventListener("click", () => show(b.dataset.tab));
 
@@ -88,6 +89,11 @@ function addLog(who, words, cls) {
 }
 
 function onEvent(e) {
+  if (e.kind === "animation") {
+    if (e.status) showAnimation(e.status);
+    if (e.gesture) addAnimationLog(e.gesture);
+    return;
+  }
   if (e.kind === "state") text($("home-state"), e.state);
   else if (e.kind === "heard") addLog("You:", e.text);
   else if (e.kind === "replied" && e.text) addLog("Character:", e.text + (e.interrupted ? " (interrupted)" : ""));
@@ -97,6 +103,254 @@ function onEvent(e) {
   else if (e.kind === "memory" || e.kind === "replied") api("GET", "/api/status").then(setStatus).catch(() => {});
   else if (e.kind === "character") { refreshCharacters(); api("GET", "/api/status").then(setStatus).catch(() => {}); }
   else if (e.kind === "button") text($("btn-listen"), e.did === "listen on" ? "Stop listening" : "Start listening");
+}
+
+// ----- the live view of the character's movement
+const PARTS = { head: "Head", torso: "Body", eyes: "Eyes", brows: "Brows", expression: "Face", arm_left: "Left arm",
+  arm_right: "Right arm", mouth: "Mouth", eyelids: "Eyelids" };
+const DRIVES = [["energy", "Energy", 1.5], ["attention", "Attention", 1], ["boredom", "Boredom", 1],
+  ["sleepiness", "Sleepiness", 1]];
+const CAUSES = { command: "asked for", queued: "asked for, after another", speech: "the words", emotion: "a new feeling",
+  mood: "its mood", idle: "by itself", reaction: "a reaction", listening: "listening to you" };
+
+function clock(hour) {
+  if (typeof hour !== "number") return "-";
+  const h = Math.floor(hour), m = Math.floor((hour - h) * 60);
+  return ((h + 11) % 12 + 1) + ":" + String(m).padStart(2, "0") + (h < 12 ? " am" : " pm");
+}
+
+function showAnimation(st) {
+  if (!st || !st.state) return;
+  text($("an-state"), st.state);
+  text($("an-mood"), st.mood);
+  const d = st.drives || {};
+  text($("an-hour"), clock(d.hour));
+  $("an-dozing").hidden = !d.dozing;
+  const drives = $("an-drives");
+  drives.replaceChildren();
+  for (const [key, label, max] of DRIVES) {
+    const row = document.createElement("label");
+    const m = document.createElement("meter");
+    m.min = 0; m.max = max; m.value = d[key] || 0;
+    row.append(label + " ", m);
+    drives.append(row);
+  }
+  const parts = $("an-channels");
+  parts.replaceChildren();
+  for (const [key, label] of Object.entries(PARTS)) {
+    const chip = document.createElement("span");
+    const holder = (st.channels || {})[key];
+    chip.className = holder ? "busy" : "";
+    text(chip, label + ": " + (holder ? holder.replace(/_/g, " ") : "free"));
+    parts.append(chip);
+  }
+  const b = st.budget || {};
+  text($("an-budget"), "By itself: " + (b.own || 0) + " of 10 gestures, " + (b.big || 0) + " of 2 big ones, " +
+    (b.mood || 0) + " of 6 from its mood; " + (b.idle || 0) + " of 4 idle actions.");
+  text($("an-speed"), (st.fps || 0) + " frames a second; " + (st.update_ms || 0) + " ms a frame to move it, " +
+    (st.draw_ms || 0) + " ms to draw it.");
+}
+
+function addAnimationLog(g) {
+  const li = document.createElement("li");
+  const when = new Date(g.t * 1000).toLocaleTimeString();
+  const name = (g.name || "").replace(/_/g, " ");
+  let words;
+  if (g.event === "emotion") words = "feels " + name;
+  else if (g.event === "gesture_skipped") { words = name + " skipped: " + (g.why || ""); li.className = "muted"; }
+  else if (g.event === "gesture_waiting") words = name + " waits for the gesture before it";
+  else words = name + (g.played ? " (as " + g.played.replace(/_/g, " ") + ")" : "") + " - " + (CAUSES[g.cause] || g.cause || "");
+  const w = document.createElement("span"); w.className = "who"; text(w, when);
+  li.append(w, document.createTextNode(" " + words));
+  $("an-log").prepend(li);
+  while ($("an-log").children.length > 60) $("an-log").lastChild.remove();
+}
+
+// ----- the gesture editor
+const TRACK_COLOURS = ["#3a5bd9", "#d9663a", "#2e9e5b", "#a03ad9", "#c9a227", "#d93a7a", "#3ab3d9", "#666"];
+let library = null, editing = null;
+
+async function loadEditor() {
+  library = await api("GET", "/api/motions");
+  $("ed-missing").hidden = library.ready;
+  $("ed-body").hidden = !library.ready;
+  if (!library.ready) return;
+  const pick = $("ed-pick");
+  const keep = editing && library.clips[editing.name] ? editing.name : null;
+  pick.replaceChildren();
+  const order = { gesture: 0, idle: 1, reaction: 2 };
+  const names = Object.keys(library.clips).sort((a, b) =>
+    (order[library.clips[a].kind] - order[library.clips[b].kind]) || a.localeCompare(b));
+  for (const name of names) {
+    const c = library.clips[name];
+    const o = document.createElement("option");
+    o.value = name;
+    o.textContent = name.replace(/_/g, " ") + " (" + c.kind + (c.origin !== "built in" ? ", " + c.origin : "") +
+      (!c.can ? ", this character cannot" : c.as ? ", here as " + c.as.replace(/_/g, " ") : "") + ")";
+    pick.append(o);
+  }
+  pick.value = keep || names[0];
+  editClip(pick.value, false);
+}
+
+function editClip(name, isNew, from) {
+  // A new gesture starts from what the editor shows now.
+  const c = isNew ? JSON.parse(JSON.stringify(from || library.clips[$("ed-pick").value])) : library.clips[name];
+  editing = { name, isNew, entry: c };
+  $("ed-name").value = name;
+  $("ed-name").readOnly = !isNew;
+  $("ed-kind").value = isNew ? "gesture" : c.kind;
+  $("ed-kind").disabled = !isNew && c.origin !== "added";
+  $("ed-words").value = c.words || "";
+  $("ed-big").checked = !!c.big;
+  $("ed-mirror").checked = !!c.mirror;
+  text($("ed-origin"), isNew ? "new, not saved yet" : c.origin === "built in" ? "" : c.origin + " on this device");
+  $("btn-ed-reset").hidden = isNew || c.origin === "built in";
+  text($("btn-ed-reset"), c.origin === "added" ? "Delete" : "Put back as built");
+  showWordsRow();
+  const body = $("ed-tracks");
+  body.replaceChildren();
+  for (const [control, keys] of Object.entries(c.tracks)) addTrackRow(control, keys);
+  drawGraph();
+  text($("ed-msg"), "");
+}
+
+function showWordsRow() {
+  $("ed-words-row").hidden = $("ed-kind").value !== "gesture" || !(editing && (editing.isNew || editing.entry.origin === "added"));
+}
+
+function addTrackRow(control, keys) {
+  const tr = document.createElement("tr");
+  const select = document.createElement("select");
+  for (const k of library.controls) {
+    const o = document.createElement("option");
+    o.value = k; o.textContent = k.replace(/_/g, " ");
+    select.append(o);
+  }
+  select.value = control;
+  const input = document.createElement("input");
+  const short = (x) => String(Math.round(x * 1000) / 1000);
+  input.value = keys.map((k) => short(k[0]) + ":" + short(k[1])).join(", ");
+  const remove = document.createElement("button");
+  remove.className = "small danger";
+  text(remove, "Remove");
+  remove.addEventListener("click", () => { tr.remove(); drawGraph(); });
+  for (const el of [select, input]) el.addEventListener("input", drawGraph);
+  const cells = [select, input, remove].map((el) => { const td = document.createElement("td"); td.append(el); return td; });
+  tr.append(...cells);
+  $("ed-tracks").append(tr);
+}
+
+// The tracks as written in the table: {control: [[seconds, value], ...]}, or an error message.
+function readTracks() {
+  const tracks = {};
+  for (const tr of $("ed-tracks").children) {
+    const control = tr.querySelector("select").value;
+    const keys = [];
+    for (const part of tr.querySelector("input").value.split(",")) {
+      const m = part.trim().match(/^(-?[\d.]+)\s*:\s*(-?[\d.]+)$/);
+      if (!m) return { error: control.replace(/_/g, " ") + ": write keys as seconds:value, separated by commas" };
+      keys.push([Number(m[1]), Number(m[2])]);
+    }
+    if (tracks[control]) return { error: control.replace(/_/g, " ") + " has two tracks" };
+    tracks[control] = keys;
+  }
+  return { tracks };
+}
+
+function drawGraph() {
+  const svg = $("ed-graph");
+  svg.replaceChildren();
+  const { tracks } = readTracks();
+  const ns = "http://www.w3.org/2000/svg";
+  const line = (x1, y1, x2, y2, colour) => {
+    const l = document.createElementNS(ns, "line");
+    l.setAttribute("x1", x1); l.setAttribute("y1", y1); l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+    l.setAttribute("stroke", colour); l.setAttribute("stroke-width", "1");
+    svg.append(l);
+  };
+  const y = (v) => 85 - v * 70;
+  line(0, y(0), 600, y(0), "#999");
+  line(0, y(1), 600, y(1), "#ddd");
+  line(0, y(-1), 600, y(-1), "#ddd");
+  if (!tracks) return;
+  const end = Math.max(0.5, ...Object.values(tracks).map((k) => k.length ? k[k.length - 1][0] : 0));
+  Object.entries(tracks).forEach(([control, keys], i) => {
+    const p = document.createElementNS(ns, "polyline");
+    p.setAttribute("points", keys.map((k) => (k[0] / end * 590 + 5).toFixed(1) + "," + y(k[1]).toFixed(1)).join(" "));
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", TRACK_COLOURS[i % TRACK_COLOURS.length]);
+    p.setAttribute("stroke-width", "2");
+    const t = document.createElementNS(ns, "title");
+    t.textContent = control;
+    p.append(t);
+    svg.append(p);
+  });
+}
+
+// The clip as the editor shows it, ready to send.
+function editedClip() {
+  const read = readTracks();
+  if (read.error) throw new Error(read.error);
+  const base = editing.entry;
+  const clip = { kind: $("ed-kind").value, tracks: read.tracks, big: $("ed-big").checked, mirror: $("ed-mirror").checked };
+  for (const keep of ["takes", "exact", "instead", "holds", "stroke"]) if (base[keep] !== undefined) clip[keep] = base[keep];
+  // A new gesture needs the control it moves most; a changed one keeps what it needed.
+  if (editing.isNew || !base.needs) {
+    let most = null, size = -1;
+    for (const [control, keys] of Object.entries(read.tracks)) {
+      const peak = Math.max(...keys.map((k) => Math.abs(k[1])));
+      if (peak > size) { size = peak; most = control; }
+    }
+    clip.needs = most ? [most] : [];
+  } else clip.needs = base.needs;
+  if ($("ed-words").value.trim()) clip.words = $("ed-words").value.trim();
+  return clip;
+}
+
+$("ed-pick").addEventListener("change", () => editClip($("ed-pick").value, false));
+$("ed-kind").addEventListener("change", showWordsRow);
+$("btn-ed-add").addEventListener("click", () => { addTrackRow(library.controls[0], [[0, 0], [0.5, 0.3], [1, 0]]); drawGraph(); });
+$("btn-ed-new").addEventListener("click", () => {
+  const name = (prompt("A name for the new gesture (lower-case letters and _, such as little_dance)") || "").trim();
+  if (!name) return;
+  if (!/^[a-z_]{1,40}$/.test(name) || library.clips[name]) { alert("Choose another name: lower-case letters and _."); return; }
+  let now;
+  try { now = Object.assign({}, editing.entry, editedClip(), { origin: "added" }); }
+  catch (err) { text($("ed-msg"), err.message); return; }
+  editClip(name, true, now);
+});
+$("btn-ed-try").addEventListener("click", async () => {
+  try {
+    await api("POST", "/api/motions/try", editedClip());
+    text($("ed-msg"), "Playing on the device's screen.");
+  } catch (err) { text($("ed-msg"), err.message); }
+});
+$("btn-ed-save").addEventListener("click", async () => {
+  try {
+    await api("PUT", "/api/motions/" + editing.name, editedClip());
+    editing.isNew = false;
+    await loadEditor();
+    text($("ed-msg"), "Saved on this device.");
+  } catch (err) { text($("ed-msg"), err.message); }
+});
+$("btn-ed-reset").addEventListener("click", async () => {
+  const added = editing.entry.origin === "added";
+  if (!confirm(added ? "Delete this gesture from the device?" : "Put this gesture back as it was built?")) return;
+  try {
+    await api("DELETE", "/api/motions/" + editing.name);
+    await loadEditor();
+    text($("ed-msg"), added ? "Deleted." : "Put back as built.");
+  } catch (err) { text($("ed-msg"), err.message); }
+});
+
+async function loadAnimation() {
+  loadEditor().catch((e) => text($("ed-msg"), e.message));
+  const a = await api("GET", "/api/animation");
+  $("an-log").replaceChildren();
+  for (const g of a.log) addAnimationLog(g);
+  showAnimation(a.status);
+  if (!a.status || !a.status.state) text($("an-speed"), "The character's screen has not reported yet.");
 }
 
 function setStatus(s) {

@@ -14,6 +14,16 @@ EMOTIONS = ("neutral", "happy", "sad", "angry", "surprised", "embarrassed", "thi
 GESTURES = ("bounce", "bow", "brow_flash", "emphatic_nod", "hands_on_hips", "laugh", "lean_back", "lean_in", "look_away",
             "look_down", "nod", "shake", "shrug", "sigh", "surprise", "sway", "think", "tilt", "wave")
 
+# Gestures added on the device's settings page, with what each means (set by the device).
+CUSTOM_WORDS = {}
+
+
+def set_custom_gestures(words):
+    """The gestures added on this device that the language model may ask for: {name: what it means}."""
+    CUSTOM_WORDS.clear()
+    CUSTOM_WORDS.update({name: str(meaning) for name, meaning in (words or {}).items() if name not in GESTURES})
+
+
 GESTURE_WORDS = {
     "nod": "nod", "shake": "shake your head", "bow": "bow", "tilt": "tilt your head, curious",
     "bounce": "bounce with joy", "emphatic_nod": "nod firmly", "laugh": "laugh", "sigh": "sigh",
@@ -116,7 +126,7 @@ def parse_tag(body):
     rest = words[1] if len(words) > 1 else ""
     if head in EMOTIONS and not rest:
         return ("emotion", head)
-    if head in GESTURES and not rest:
+    if (head in GESTURES or head in CUSTOM_WORDS) and not rest:
         return ("action", {"kind": "gesture", "name": head})
     if head == "timer":
         m = re.match(r"((?:\d+(?:\.\d+)?\s*[a-z]*\s*)+)(.*)", rest.strip(), re.I)
@@ -336,10 +346,12 @@ def speech_rules(gestures=("nod", "shake", "bow", "tilt")):
         "  you move follow it until you change it:",
         "  [happy] [sad] [angry] [surprised] [embarrassed] [thinking] [neutral]",
     ]
-    known = [g for g in GESTURES if g in set(gestures or ())]
+    offered = set(gestures or ())
+    known = [g for g in GESTURES if g in offered] + sorted(g for g in CUSTOM_WORDS if g in offered)
     if known:
         lines.append("- You may move with these tags, sparingly, where a person would:")
-        lines.append("  " + "; ".join("[%s] %s" % (g, GESTURE_WORDS.get(g, g.replace("_", " "))) for g in known) + ".")
+        lines.append("  " + "; ".join("[%s] %s" % (g, GESTURE_WORDS.get(g) or CUSTOM_WORDS.get(g) or g.replace("_", " "))
+                                      for g in known) + ".")
     lines += [
         "- To set a timer, include a tag like [timer 5m tea]. For an alarm, [alarm 07:30 wake up].",
         "  To cancel one, [cancel tea]. Say in words what you did as well.",

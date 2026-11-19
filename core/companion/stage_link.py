@@ -32,6 +32,8 @@ class StageLink:
         self.strokes = {}           # gesture: seconds in that it lands
         self.actions = []           # idle actions it can make
         self.disabled = set()       # gestures and idle actions the owner switched off for this character
+        self.library = None         # the whole library, when asked for (describe_library)
+        self._library_ready = None
         # For a character with its own expressions: which one shows each emotion.
         self.emotion_map = {}
         self._task = None
@@ -68,6 +70,15 @@ class StageLink:
                         # When each gesture lands, so the speech planner starts it in time for its word.
                         self.strokes = dict(event.get("strokes") or {})
                         self.actions = list(event.get("actions") or [])
+                    if event.get("event") == "library":
+                        # The library changed (a gesture defined or put back), or was asked for.
+                        self.gestures = list(event.get("gestures") or [])
+                        self.actions = list(event.get("actions") or [])
+                        self.strokes = dict(event.get("strokes") or {})
+                        if "clips" in event:
+                            self.library = {"clips": event["clips"], "controls": event.get("controls") or []}
+                            if self._library_ready is not None:
+                                self._library_ready.set()
                     if self.on_event:
                         self.on_event(event)
             except (OSError, asyncio.IncompleteReadError):
@@ -130,6 +141,25 @@ class StageLink:
         """Gestures and idle actions the character never starts by itself."""
         self.disabled = set(names)
         self.send({"gestures_off": sorted(self.disabled)})
+
+    def define(self, name, entry):
+        """Add a gesture or idle action to the stage's library, or change one."""
+        return self.send({"define": dict(entry, name=name)})
+
+    def undefine(self, name):
+        """Put a changed gesture back as built, or take an added one away."""
+        return self.send({"undefine": name})
+
+    async def describe_library(self, timeout=3.0):
+        """The stage's whole library ({"clips", "controls"}), or None if the stage does not answer."""
+        self._library_ready = asyncio.Event()
+        if not self.send({"describe": True}):
+            return None
+        try:
+            await asyncio.wait_for(self._library_ready.wait(), timeout)
+        except asyncio.TimeoutError:
+            return None
+        return self.library
 
     def clock(self, hour):
         """The local time of day, in hours: the character is livelier in the morning and sleepy at night."""

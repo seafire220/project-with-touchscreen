@@ -22,6 +22,9 @@
 //! {"heard": 0.4}
 //! {"temperament": {"energy": 1.2, "expressiveness": 0.8}}
 //! {"gestures_off": ["wave", "stretch"]}
+//! {"define": {"name": "wiggle", "kind": "gesture", "needs": ["head_roll"], "tracks": {"head_roll": [[0, 0], [0.3, 0.4], [0.6, 0]]}}}
+//! {"undefine": "wiggle"}
+//! {"describe": true}
 //! {"quit": true}
 //! ```
 //!
@@ -29,6 +32,9 @@
 //! is there (the button was pressed); `heard` is the loudness of the person speaking, 0 to 1, sent
 //! while the character listens. `temperament` is how lively and how expressive the character is (1 is
 //! usual, 0.4 to 1.6); `gestures_off` names gestures and idle actions it never starts by itself.
+//! `define` adds a gesture or idle action, or changes one, as the library writes it (the settings page's
+//! editor); `undefine` puts a changed one back as built, or takes an added one away; `describe` asks for
+//! the whole library, sent back as a `library` event.
 //!
 //! `emotion` changes the mood (how the character moves, its face, and which
 //! gestures it makes by itself); `gesture` plays one of the library's
@@ -86,6 +92,12 @@ pub enum Command {
 	Temperament(f32, f32),
 	/// Gestures and idle actions it never starts by itself.
 	GesturesOff(Vec<String>),
+	/// Add or change a clip.
+	Define(Value),
+	/// Put a changed clip back, or take an added one away.
+	Undefine(String),
+	/// Send the whole library.
+	Describe,
 	Quit,
 }
 
@@ -175,6 +187,18 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 					val.get(key).and_then(Value::as_f64).map(|v| v.clamp(0.4, 1.6) as f32).ok_or(format!("\"temperament\" needs \"{key}\""))
 				};
 				out.push(Command::Temperament(number("energy")?, number("expressiveness")?));
+			}
+			"define" => {
+				if !val.is_object() {
+					return Err("\"define\" is a library entry with its \"name\"".into());
+				}
+				out.push(Command::Define(val.clone()));
+			}
+			"undefine" => out.push(Command::Undefine(val.as_str().ok_or("\"undefine\" names a gesture")?.to_string())),
+			"describe" => {
+				if val.as_bool() == Some(true) {
+					out.push(Command::Describe);
+				}
 			}
 			"gestures_off" => {
 				let names = val.as_array().ok_or("\"gestures_off\" must be a list of names")?;

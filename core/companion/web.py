@@ -18,7 +18,7 @@ import time
 
 from aiohttp import web
 
-from . import cards, package, persona, temperament
+from . import cards, motions, package, persona, speech_text, temperament
 from .memory import when
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
@@ -130,6 +130,11 @@ class Console:
     # ----- status and events
     async def status(self, request):
         return web.json_response(self.device.status())
+
+    async def animation(self, request):
+        """What the character is doing now: its state, mood, drives, gestures and budget, and its latest
+        gestures (with those skipped, and why)."""
+        return web.json_response({"status": self.device.animation, "log": self.device.gesture_log[-60:]})
 
     async def events(self, request):
         response = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-store"})
@@ -326,6 +331,68 @@ class Console:
         return {"temperament": temperament.clean(saved) if saved else None,
                 "suggested": temperament.suggest(self.device.characters.persona(cid)),
                 "gestures_off": list(settings.get("gestures_off") or [])}
+
+    # ----- the gesture editor
+    async def get_motions(self, request):
+        """Every gesture and idle action as the stage has it now, for the editor."""
+        link = self.device.stage
+        library = await link.describe_library() if hasattr(link, "describe_library") else None
+        if not library:
+            return web.json_response({"ready": False})
+        clips = library["clips"]
+        for name, entry in self.device.custom_motions.all().items():
+            if name in clips and entry.get("words"):
+                clips[name]["words"] = entry["words"]
+        return web.json_response({"ready": True, "clips": clips, "controls": library.get("controls") or list(motions.CONTROLS),
+                                  "channels": list(motions.CHANNELS)})
+
+    def _check_instead(self, entry):
+        library = getattr(self.device.stage, "library", None) or {}
+        other = entry.get("instead")
+        if other and library.get("clips") is not None and other not in library["clips"]:
+            raise web.HTTPBadRequest(text="there is no gesture called %s to play instead" % other)
+
+    async def put_motion(self, request):
+        """Save a changed or added gesture on the device, and give it to the stage."""
+        name = request.match_info["name"]
+        if name == motions.TRY:
+            raise web.HTTPBadRequest(text="choose another name")
+        body = await request.json()
+        try:
+            entry = motions.clean(name, body)
+        except ValueError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        self._check_instead(entry)
+        self.device.custom_motions.set(name, entry)
+        speech_text.set_custom_gestures(self.device.custom_motions.words())
+        if hasattr(self.device.stage, "define"):
+            self.device.stage.define(name, entry)
+        return web.json_response({"ok": True, "saved": entry})
+
+    async def delete_motion(self, request):
+        """Put a changed gesture back as built, or take an added one away."""
+        name = request.match_info["name"]
+        if not motions.NAME.fullmatch(name):
+            raise web.HTTPBadRequest(text="no such gesture")
+        self.device.custom_motions.remove(name)
+        speech_text.set_custom_gestures(self.device.custom_motions.words())
+        if hasattr(self.device.stage, "undefine"):
+            self.device.stage.undefine(name)
+        return web.json_response({"ok": True})
+
+    async def try_motion(self, request):
+        """Play a gesture as it is in the editor, on the device's screen, without keeping it."""
+        body = await request.json()
+        try:
+            entry = motions.clean(motions.TRY, body)
+        except ValueError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        self._check_instead(entry)
+        link = self.device.stage
+        if not hasattr(link, "define") or not link.define(motions.TRY, entry):
+            raise web.HTTPServiceUnavailable(text="the character's screen is not running")
+        link.send({"gesture": motions.TRY})
+        return web.json_response({"ok": True})
 
     async def put_temperament(self, request):
         """Save how lively and expressive the character is, and the gestures it never makes by itself."""
@@ -577,6 +644,7 @@ def make_app(device):
     r.add_post("/api/password", console.password)
     r.add_get("/api/status", console.status)
     r.add_get("/api/events", console.events)
+    r.add_get("/api/animation", console.animation)
     r.add_get("/api/settings", console.get_settings)
     r.add_put("/api/settings", console.put_settings)
     r.add_get("/api/keys", console.get_keys)
@@ -599,6 +667,10 @@ def make_app(device):
     r.add_put("/api/characters/{cid}/movement", console.put_movement)
     r.add_delete("/api/characters/{cid}/movement", console.reset_movement)
     r.add_put("/api/characters/{cid}/temperament", console.put_temperament)
+    r.add_get("/api/motions", console.get_motions)
+    r.add_post("/api/motions/try", console.try_motion)
+    r.add_put("/api/motions/{name}", console.put_motion)
+    r.add_delete("/api/motions/{name}", console.delete_motion)
     r.add_post("/api/stage/preview", console.stage_preview)
     r.add_post("/api/cards/read", console.read_card)
     r.add_get("/api/memory/{cid}", console.get_memory)

@@ -270,6 +270,55 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn({"gestures_off": ["wave", "yawn"]}, self.stage.commands)
         self.assertNotIn("temperament", json.dumps(self.device.characters.export("aria").hex()))
 
+    async def test_the_live_view_shows_what_the_character_is_doing(self):
+        await self.login()
+        logged = len(self.device.log)
+        self.device._stage_event({"event": "heartbeat", "fps": 59.8, "state": "idle", "mood": "happy",
+                                  "playing": ["wave"], "channels": {"arm_right": "wave"}, "drives": {"boredom": 0.4},
+                                  "budget": {"own": 3, "big": 1, "mood": 2, "idle": 0}, "secret": "x"})
+        self.device._stage_event({"event": "gesture", "name": "wave", "cause": "command", "played": "greet"})
+        self.device._stage_event({"event": "gesture_skipped", "name": "nod", "cause": "speech",
+                                  "why": "enough gestures this minute"})
+        a = await (await self.client.get("/api/animation")).json()
+        self.assertEqual(a["status"]["channels"], {"arm_right": "wave"})
+        self.assertNotIn("secret", a["status"], "only what the page shows")
+        self.assertEqual([(g["event"], g["name"]) for g in a["log"]], [("gesture", "wave"), ("gesture_skipped", "nod")])
+        self.assertEqual(a["log"][0]["played"], "greet")
+        self.assertEqual(len(self.device.log), logged, "frequent updates stay out of the device's log")
+
+    async def test_gestures_are_changed_tried_and_added_on_the_device(self):
+        from companion import speech_text
+        await self.login()
+        self.device.characters.install(package.build(good_files(), manifest()))
+        lib = await (await self.client.get("/api/motions")).json()
+        self.assertTrue(lib["ready"])
+        self.assertIn("nod", lib["clips"])
+        dance = {"kind": "gesture", "needs": ["head_roll"], "words": "do a little dance",
+                 "tracks": {"head_roll": [[0, 0], [0.3, 0.4], [0.6, -0.4], [0.9, 0]]}}
+        self.stage.commands.clear()
+        r = await self.client.post("/api/motions/try", json=dance, headers=H)
+        self.assertEqual(r.status, 200, await r.text())
+        self.assertEqual(self.stage.commands[-2]["define"]["name"], "_try")
+        self.assertEqual(self.stage.commands[-1], {"gesture": "_try"}, "played on the screen")
+        self.assertFalse(self.device.custom_motions.all(), "a try is not kept")
+        r = await self.client.put("/api/motions/little_dance", json=dance, headers=H)
+        self.assertEqual(r.status, 200, await r.text())
+        self.assertIn("little_dance", self.device.custom_motions.all())
+        self.assertEqual(speech_text.parse_tag("little_dance"), ("action", {"kind": "gesture", "name": "little_dance"}))
+        conversation = self.device.make_conversation()
+        self.assertIn("[little_dance] do a little dance", conversation_prompt(conversation))
+        for name, body in (("_try", dance), ("Dance", dance), ("dance", dict(dance, tracks={"tail": [[0, 0], [1, 0]]}))):
+            r = await self.client.put("/api/motions/%s" % name, json=body, headers=H)
+            self.assertEqual(r.status, 400, name)
+        # The stage gets the device's gestures again whenever it starts.
+        self.stage.commands.clear()
+        self.device._stage_event({"event": "ready", "gestures": ["nod"]})
+        self.assertIn("little_dance", [c["define"]["name"] for c in self.stage.commands if "define" in c])
+        r = await self.client.delete("/api/motions/little_dance", headers=H)
+        self.assertEqual(r.status, 200)
+        self.assertIn({"undefine": "little_dance"}, self.stage.commands)
+        self.assertIsNone(speech_text.parse_tag("little_dance"), "gone from the conversation too")
+
     async def test_a_personality_suggests_the_first_temperament(self):
         await self.login()
         self.device.characters.install(package.build(good_files(), manifest()))

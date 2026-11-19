@@ -264,6 +264,26 @@ impl StageApp {
 		}
 	}
 
+	/// What the character can do now (after the library changed), and with `clips` the whole library.
+	fn announce_library(&self, clips: bool) {
+		let mut event = json!({
+			"event": "library",
+			"gestures": self.motion.gestures(),
+			"actions": self.motion.actions(),
+			"strokes": self
+				.motion
+				.strokes()
+				.into_iter()
+				.map(|(name, at)| (name, json!(at)))
+				.collect::<serde_json::Map<String, serde_json::Value>>(),
+		});
+		if clips {
+			event["clips"] = self.motion.describe();
+			event["controls"] = json!(motion::KEYS);
+		}
+		self.events.emit(event);
+	}
+
 	/// Play the director's reactions (looking up, waking, greeting).
 	fn react(&mut self, reactions: &[&'static str]) {
 		for name in reactions {
@@ -298,6 +318,15 @@ impl StageApp {
 				self.motion.set_expressiveness(expressiveness);
 			}
 			Command::GesturesOff(names) => self.motion.set_disabled(&names),
+			Command::Define(entry) => match self.motion.define(&entry) {
+				Ok(_) => self.announce_library(false),
+				Err(e) => self.events.emit(json!({"event": "error", "message": e})),
+			},
+			Command::Undefine(name) => match self.motion.undefine(&name) {
+				Ok(()) => self.announce_library(false),
+				Err(e) => self.events.emit(json!({"event": "error", "message": e})),
+			},
+			Command::Describe => self.announce_library(true),
 			Command::Look(x, y) => self.behaviour.set_look(x, y),
 			Command::Blink => self.behaviour.blink_now(),
 			Command::Set(name, value, ease) => {
@@ -567,6 +596,18 @@ impl App for StageApp {
 				"state": self.behaviour.state().name(),
 				"mood": self.motion.mood(),
 				"playing": self.motion.playing(),
+				"channels": self
+					.motion
+					.holders()
+					.into_iter()
+					.map(|(channel, name)| (channel.to_string(), json!(name)))
+					.collect::<serde_json::Map<String, serde_json::Value>>(),
+				"budget": {
+					"own": self.motion.budget_used().0,
+					"big": self.motion.budget_used().1,
+					"mood": self.motion.budget_used().2,
+					"idle": self.motion.budget_used().3,
+				},
 				"drives": {
 					"hour": (self.director.hour() * 100.0).round() / 100.0,
 					"energy": (self.director.energy * 100.0).round() / 100.0,

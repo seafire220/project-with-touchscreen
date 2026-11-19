@@ -99,6 +99,21 @@ class FakeStage:
         self.disabled = set(names)
         self.commands.append({"gestures_off": sorted(self.disabled)})
 
+    def define(self, name, entry):
+        self.commands.append({"define": dict(entry, name=name)})
+        if entry.get("kind", "gesture") == "gesture" and name not in self.gestures and not name.startswith("_"):
+            self.gestures.append(name)
+        return True
+
+    def undefine(self, name):
+        self.commands.append({"undefine": name})
+        return True
+
+    async def describe_library(self, timeout=3.0):
+        clips = {g: {"kind": "gesture", "needs": [], "tracks": {"head_pitch": [[0, 0], [0.3, -0.4], [0.6, 0]]},
+                     "origin": "built in", "can": True} for g in self.gestures}
+        return {"clips": clips, "controls": ["head_pitch", "head_roll"]}
+
     def clock(self, hour):
         self.commands.append({"clock": round(hour, 3)})
 
