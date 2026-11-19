@@ -202,10 +202,30 @@ pub struct VrmRenderer {
 	zoom: f32,
 	/// How far the view has grown upwards for hands raised above the head, in metres (eased).
 	lift: f32,
-	/// Bytes of texture uploaded, for the memory budget.
+	/// Bytes of texture uploaded, for the memory budget, and the largest side they were kept at.
 	pub texture_bytes: usize,
+	pub texture_side: u32,
+	/// Outlines drawn (left out when the drawing is kept light).
+	pub outlines: bool,
+	/// Drawn at this fraction of the screen's resolution and scaled up (1: full), for a slow device.
+	scale: f32,
+	offscreen: Option<Offscreen>,
 	/// Bits of depth the screen has (24 wanted; 0 would draw insides over faces).
 	pub depth_bits: i32,
+}
+
+/// Texture memory an avatar may use, by profile: what fits beside everything else in the stage's
+/// share of a 1 GB board (L1) or a larger one (L2).
+const TEXTURE_BUDGET_L1: usize = 96 << 20;
+const TEXTURE_BUDGET_L2: usize = 160 << 20;
+
+/// A framebuffer drawn into at a lower resolution, then scaled up to the screen.
+struct Offscreen {
+	fbo: glow::Framebuffer,
+	color: glow::Renderbuffer,
+	depth: glow::Renderbuffer,
+	width: u32,
+	height: u32,
 }
 
 unsafe fn upload_rgba(gl: &glow::Context, w: u32, h: u32, data: &[u8], mipmaps: bool) -> Result<glow::Texture, String> {
@@ -285,11 +305,40 @@ impl VrmRenderer {
 					mark(&m.shade_texture);
 				}
 			}
-			let side = puppet.profile.texture_side();
 			let max_side = (gl.get_parameter_i32(glow::MAX_TEXTURE_SIZE) as u32).max(512);
+			let mut side = puppet.texture_side.min(max_side);
 			let mut textures = vec![None; wanted.len()];
 			let mut texture_bytes = 0;
 			let mut warnings = Vec::new();
+			// A guard on memory: if the textures would not fit the budget at this size, halve it until they do.
+			if let Some(glb) = &glb {
+				let sizes: Vec<(u32, u32)> = wanted
+					.iter()
+					.enumerate()
+					.filter(|(_, w)| **w)
+					.filter_map(|(t, _)| model.texture_images.get(t).copied().flatten())
+					.filter_map(|image| image_size(glb, image))
+					.collect();
+				let budget = if puppet.profile == super::Profile::L2 { TEXTURE_BUDGET_L2 } else { TEXTURE_BUDGET_L1 };
+				let bytes_at = |s: u32| -> usize {
+					sizes
+						.iter()
+						.map(|&(w, h)| {
+							let k = (s as f32 / w.max(h) as f32).min(1.0);
+							((w as f32 * k) as usize) * ((h as f32 * k) as usize) * 4 * 4 / 3
+						})
+						.sum()
+				};
+				let wanted_side = side;
+				while side > 256 && bytes_at(side) > budget {
+					side /= 2;
+				}
+				if side < wanted_side {
+					warnings.push(format!(
+						"the avatar's textures were drawn at {side} pixels a side, not {wanted_side}, to fit this device's memory"
+					));
+				}
+			}
 			if let Some(glb) = &glb {
 				for (t, want) in wanted.iter().enumerate() {
 					let Some(image) = model.texture_images.get(t).copied().flatten().filter(|_| *want) else { continue };
@@ -394,6 +443,10 @@ impl VrmRenderer {
 				zoom: 1.0,
 				lift: 0.0,
 				texture_bytes,
+				texture_side: side,
+				outlines: true,
+				scale: 1.0,
+				offscreen: None,
 				depth_bits,
 			})
 		}
@@ -453,12 +506,67 @@ impl VrmRenderer {
 		(proj * view, eye)
 	}
 
+	/// Draw at this fraction of the screen's resolution (1: full), scaled up to the screen.
+	pub fn set_scale(&mut self, scale: f32) {
+		self.scale = scale.clamp(0.25, 1.0);
+	}
+
+	pub fn scale(&self) -> f32 {
+		self.scale
+	}
+
+	/// The framebuffer to draw into: an offscreen one at the lower resolution, made (or remade) when
+	/// needed; None for the screen itself.
+	unsafe fn target(&mut self) -> Result<Option<(glow::Framebuffer, u32, u32)>, String> {
+		if self.scale >= 0.999 {
+			return Ok(None);
+		}
+		let (w, h) = (((self.width as f32 * self.scale) as u32).max(1), ((self.height as f32 * self.scale) as u32).max(1));
+		if self.offscreen.as_ref().map(|o| (o.width, o.height)) != Some((w, h)) {
+			let gl = &self.gl;
+			if let Some(old) = self.offscreen.take() {
+				gl.delete_framebuffer(old.fbo);
+				gl.delete_renderbuffer(old.color);
+				gl.delete_renderbuffer(old.depth);
+			}
+			let fbo = gl.create_framebuffer()?;
+			let color = gl.create_renderbuffer()?;
+			let depth = gl.create_renderbuffer()?;
+			gl.bind_renderbuffer(glow::RENDERBUFFER, Some(color));
+			gl.renderbuffer_storage(glow::RENDERBUFFER, glow::RGBA8, w as i32, h as i32);
+			gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth));
+			gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH_COMPONENT24, w as i32, h as i32);
+			gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
+			gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::COLOR_ATTACHMENT0, glow::RENDERBUFFER, Some(color));
+			gl.framebuffer_renderbuffer(glow::FRAMEBUFFER, glow::DEPTH_ATTACHMENT, glow::RENDERBUFFER, Some(depth));
+			let complete = gl.check_framebuffer_status(glow::FRAMEBUFFER) == glow::FRAMEBUFFER_COMPLETE;
+			gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+			if !complete {
+				gl.delete_framebuffer(fbo);
+				gl.delete_renderbuffer(color);
+				gl.delete_renderbuffer(depth);
+				self.scale = 1.0;
+				return Ok(None);
+			}
+			self.offscreen = Some(Offscreen { fbo, color, depth, width: w, height: h });
+		}
+		Ok(self.offscreen.as_ref().map(|o| (o.fbo, o.width, o.height)))
+	}
+
 	pub fn draw(&mut self, puppet: &mut VrmPuppet) -> Result<(), String> {
 		let (view_proj, eye) = self.camera(puppet);
+		let target = unsafe { self.target()? };
 		let gl = &self.gl;
 		let model = &puppet.model;
 		unsafe {
-			gl.viewport(0, 0, self.width as i32, self.height as i32);
+			let (vw, vh) = match target {
+				Some((fbo, w, h)) => {
+					gl.bind_framebuffer(glow::FRAMEBUFFER, Some(fbo));
+					(w, h)
+				}
+				None => (self.width, self.height),
+			};
+			gl.viewport(0, 0, vw as i32, vh as i32);
 			let [r, g, b] = self.background;
 			gl.clear_color(r, g, b, 1.0);
 			gl.depth_mask(true);
@@ -539,17 +647,28 @@ impl VrmRenderer {
 			for &i in &solid {
 				self.draw_part(puppet, &self.parts[i], false);
 			}
-			for &i in &solid {
-				self.draw_part(puppet, &self.parts[i], true);
+			if self.outlines {
+				for &i in &solid {
+					self.draw_part(puppet, &self.parts[i], true);
+				}
 			}
 			for &i in &clear {
 				self.draw_part(puppet, &self.parts[i], false);
-				self.draw_part(puppet, &self.parts[i], true);
+				if self.outlines {
+					self.draw_part(puppet, &self.parts[i], true);
+				}
 			}
 			gl.disable(glow::BLEND);
 			gl.disable(glow::CULL_FACE);
 			gl.depth_mask(true);
 			gl.bind_vertex_array(None);
+			// Drawn small: scale it up to the screen.
+			if let Some((fbo, w, h)) = target {
+				gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(fbo));
+				gl.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None);
+				gl.blit_framebuffer(0, 0, w as i32, h as i32, 0, 0, self.width as i32, self.height as i32, glow::COLOR_BUFFER_BIT, glow::LINEAR);
+				gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+			}
 		}
 		Ok(())
 	}
@@ -672,6 +791,12 @@ impl Drop for VrmRenderer {
 }
 
 /// Decode an image, cut down so neither side is over `side` pixels.
+/// A picture's size, from its header (without decoding it).
+fn image_size(glb: &super::gltf::Glb, image: usize) -> Option<(u32, u32)> {
+	let (bytes, _) = glb.image(image).ok()?;
+	image::ImageReader::new(std::io::Cursor::new(bytes)).with_guessed_format().ok()?.into_dimensions().ok()
+}
+
 fn decode(glb: &super::gltf::Glb, image: usize, side: u32) -> Result<(u32, u32, Vec<u8>), String> {
 	let (bytes, _) = glb.image(image)?;
 	let img = image::load_from_memory(bytes).map_err(|e| format!("cannot read the picture: {e}"))?;

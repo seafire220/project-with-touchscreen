@@ -102,5 +102,75 @@ class KeepingTest(unittest.TestCase):
         self.assertEqual(self.anims.settings(self.cid)["animation"], "light")
 
 
+class FailsafeTest(unittest.TestCase):
+    """A 3D avatar the stage cannot cope with: drawn lightly, then a card."""
+
+    def setUp(self):
+        from companion.audio import Speaker
+        from companion.device import Device
+        from fakes import FakeStage
+        self.dir = tempfile.TemporaryDirectory()
+        self.stage = FakeStage()
+        self.device = Device(self.dir.name, speaker=Speaker(command=None, realtime=False), stage=self.stage)
+        self.cid = self.device.characters.install(package.from_vrm(sample_vrm(1)))
+        self.device.activate(self.cid)
+        self.device.stage_restarted = 0.0          # long ago
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def settings_file(self):
+        with open(self.device.stage_settings) as f:
+            return json.load(f)
+
+    def test_a_crash_soon_after_starting_draws_it_lightly_then_shows_a_card(self):
+        d = self.device
+        self.assertEqual(self.settings_file()["quality"], "auto")
+        d._stage_event({"event": "ready"})
+        d._stage_event({"event": "lost"})
+        self.assertEqual(d.animations.settings(self.cid)["quality"], "lite")
+        self.assertEqual(self.settings_file()["quality"], "lite", "the stage reads it when it starts again")
+        self.assertIn("vrm_failsafe", d.characters.device_settings(self.cid))
+        self.assertTrue(os.path.realpath(d.current_puppet).endswith("model.vrm"), "still the avatar, drawn lightly")
+        d._stage_event({"event": "ready"})
+        d._stage_event({"event": "fatal", "message": "renderer could not start: out of memory"})
+        self.assertEqual(os.path.realpath(d.current_puppet), os.path.realpath(d.card), "then a card")
+        self.assertTrue(any("too much for this device" in e.get("message", "") for e in d.log))
+
+    def test_an_expected_restart_or_a_long_run_is_not_a_failure(self):
+        d = self.device
+        d._stage_event({"event": "ready"})
+        d.restart_stage()
+        d._stage_event({"event": "lost"})
+        d.stage_restarted = 0.0
+        d.stage_ready_at -= 3600
+        d._stage_event({"event": "lost"})
+        self.assertEqual(d.animations.settings(self.cid)["quality"], "auto")
+        # A 2D character is left to the service manager.
+        flat = d.characters.install(package.build(good_files(), manifest()))
+        d.activate(flat)
+        d.stage_restarted = 0.0
+        d._stage_event({"event": "ready"})
+        self.assertFalse(d._stage_failed("gone"))
+
+    def test_a_stage_that_never_starts_gets_a_light_try_first(self):
+        d = self.device
+        self.assertTrue(d._stage_failed("the screen program did not start"))
+        self.assertEqual(d.animations.settings(self.cid)["quality"], "lite")
+        self.assertTrue(d._stage_failed("the screen program did not start"))
+        self.assertEqual(os.path.realpath(d.current_puppet), os.path.realpath(d.card))
+
+    def test_slower_drawing_is_noted_for_the_settings_page(self):
+        d = self.device
+        d._stage_event({"event": "quality", "level": 1, "change": "outlines left out", "fps": 16.5})
+        seen = d.animations.describe(self.cid)["quality_seen"]
+        self.assertEqual((seen["level"], seen["change"]), (1, "outlines left out"))
+
+    def test_a_heavy_avatar_starts_drawn_lightly(self):
+        heavy = self.device.characters.install(package.from_vrm(sample_vrm(1, points=200_000, triangles=150_000), name="Big"))
+        self.assertEqual(self.device.animations.settings(heavy)["quality"], "lite")
+        self.assertEqual(self.device.animations.settings(self.cid)["quality"], "auto")
+
+
 if __name__ == "__main__":
     unittest.main()

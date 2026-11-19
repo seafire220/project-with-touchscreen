@@ -90,7 +90,9 @@ Testing:
   --capture-dir DIR     where captured frames are written
   --capture-at T,T,...  times at which to save a frame
   --exit-after SECONDS  stop after this much stage time
-  --no-physics          hair and clothes do not swing (Live2D-format models only)
+  --no-physics          hair and clothes do not swing (Live2D-format models and VRM avatars)
+  --draw-scale F        draw a VRM avatar at this fraction of the resolution, scaled up
+                        (what a slow device steps down to)
 ";
 
 struct Options {
@@ -114,6 +116,7 @@ struct Options {
 	clip_folders: Vec<PathBuf>,
 	quality: Option<Quality>,
 	settings: Option<PathBuf>,
+	draw_scale: Option<f32>,
 	script: Option<PathBuf>,
 	fixed_dt: Option<f32>,
 	capture_dir: Option<PathBuf>,
@@ -143,6 +146,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 		clip_folders: Vec::new(),
 		quality: None,
 		settings: None,
+		draw_scale: None,
 		script: None,
 		fixed_dt: None,
 		capture_dir: None,
@@ -209,6 +213,13 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 				o.quality = Some(Quality::parse(&v).ok_or(format!("--quality must be auto, normal or lite, not '{v}'"))?);
 			}
 			"--settings" => o.settings = Some(value("--settings")?.into()),
+			"--draw-scale" => {
+				let v: f32 = value("--draw-scale")?.parse().map_err(|_| "--draw-scale is not a number")?;
+				if !(0.25..=1.0).contains(&v) {
+					return Err("--draw-scale must be between 0.25 and 1".into());
+				}
+				o.draw_scale = Some(v);
+			}
 			"--profile" => {
 				o.profile = match value("--profile")?.as_str() {
 					"auto" => None,
@@ -352,6 +363,55 @@ fn builtin_clip_folder() -> Option<PathBuf> {
 	candidates.into_iter().find(|p| p.is_dir())
 }
 
+/// What a VRM avatar's drawing gives up, one step at a time, when frames come too slowly.
+const QUALITY_STEPS: [&str; 4] =
+	["outlines left out", "hair and clothes moved at half rate", "drawn at three-quarters resolution", "drawn at half resolution"];
+/// Lite starts with the first two steps taken.
+const LITE_LEVEL: usize = 2;
+
+/// Watches how fast frames come, in real time, and says when to take the next step down.
+struct Watchdog {
+	level: usize,
+	frames: u32,
+	window: f32,
+	slow: u32,
+}
+
+impl Watchdog {
+	/// Frames are judged over this many seconds, after the first few (loading, settling).
+	const WINDOW: f32 = 3.0;
+	const WARM_UP: f32 = 8.0;
+	/// Fewer frames a second than this, twice running, takes a step down.
+	const MIN_FPS: f32 = 20.0;
+
+	fn new(level: usize) -> Self {
+		Watchdog { level, frames: 0, window: 0.0, slow: 0 }
+	}
+
+	/// A frame was drawn, `real` seconds after the one before, `t` seconds into the stage's life.
+	/// Returns the step to take now, if any, and the frame rate that called for it.
+	fn frame(&mut self, real: f32, t: f32) -> Option<(usize, f32)> {
+		self.frames += 1;
+		self.window += real.max(0.0);
+		if self.window < Self::WINDOW {
+			return None;
+		}
+		let fps = self.frames as f32 / self.window;
+		self.frames = 0;
+		self.window = 0.0;
+		if t < Self::WARM_UP {
+			return None;
+		}
+		self.slow = if fps < Self::MIN_FPS { self.slow + 1 } else { 0 };
+		if self.slow >= 2 && self.level < QUALITY_STEPS.len() {
+			self.slow = 0;
+			self.level += 1;
+			return Some((self.level, fps));
+		}
+		None
+	}
+}
+
 /// The gestures an avatar plays from its own clips, for the motion system.
 fn clip_gestures(puppet: &VrmPuppet) -> Vec<(String, motion::External)> {
 	let Some(a) = puppet.animator() else { return Vec::new() };
@@ -425,6 +485,9 @@ struct StageApp {
 	map_warning: Option<String>,
 	/// Other problems to tell once the stage is ready (settings, animation clips).
 	warnings: Vec<String>,
+	/// A VRM avatar's drawing, stepping down if frames come too slowly (None: not watched).
+	watchdog: Option<Watchdog>,
+	last_real: Instant,
 }
 
 impl StageApp {
@@ -582,6 +645,21 @@ impl StageApp {
 		}
 	}
 
+	/// Take a step down in a VRM avatar's drawing (frames came too slowly), and tell the core.
+	fn step_down(&mut self, (level, fps): (usize, f32)) {
+		let (Puppet::Vrm(puppet), Some((Renderer::Vrm(r), _))) = (&mut self.puppet, &mut self.on_window) else { return };
+		match level {
+			1 => r.outlines = false,
+			2 => puppet.spring_every = 2,
+			3 => r.set_scale(0.75),
+			_ => r.set_scale(0.5),
+		}
+		self.events.emit(json!({
+			"event": "quality", "level": level, "change": QUALITY_STEPS[level - 1],
+			"fps": (fps * 10.0).round() / 10.0, "scale": r.scale(),
+		}));
+	}
+
 	/// Play an animation clip once, on a VRM avatar, as it is in the file (to try one before keeping it).
 	fn try_animation(&mut self, path: &std::path::Path) {
 		let Puppet::Vrm(puppet) = &mut self.puppet else {
@@ -618,6 +696,12 @@ impl App for StageApp {
 			Puppet::Vrm(puppet) => VrmRenderer::new(gl, puppet).map(|mut r| {
 				r.background = self.opts.background;
 				r.shot = self.opts.shot;
+				if self.opts.quality == Some(Quality::Lite) {
+					r.outlines = false;
+				}
+				if let Some(scale) = self.opts.draw_scale {
+					r.set_scale(scale);
+				}
 				Renderer::Vrm(Box::new(r))
 			}),
 		};
@@ -684,7 +768,13 @@ impl App for StageApp {
 				if let (Puppet::Vrm(puppet), Some((Renderer::Vrm(r), _))) = (&self.puppet, &self.on_window) {
 					let mut features = puppet.features();
 					features["texture_bytes"] = json!(r.texture_bytes);
+					features["texture_side"] = json!(r.texture_side);
 					features["depth_bits"] = json!(r.depth_bits);
+					features["quality"] = json!({
+						"setting": match self.opts.quality { Some(Quality::Lite) => "lite", Some(Quality::Normal) => "normal", _ => "auto" },
+						"outlines": r.outlines,
+						"spring_every": puppet.spring_every,
+					});
 					features["animation"] = match puppet.animator() {
 						Some(a) => json!({
 							"style": "full",
@@ -851,6 +941,12 @@ impl App for StageApp {
 			self.next_capture += 1;
 		}
 
+		// Too slow for this device: give something up, one step at a time, and say so.
+		let real = now.duration_since(self.last_real).as_secs_f32();
+		self.last_real = now;
+		if let Some(step) = self.watchdog.as_mut().and_then(|w| w.frame(real, self.t)) {
+			self.step_down(step);
+		}
 		self.frames_since_beat += 1;
 		let since = now.duration_since(self.last_beat).as_secs_f32();
 		if since >= 1.0 {
@@ -913,6 +1009,9 @@ fn run(mut opts: Options) -> Result<(), String> {
 		let mut puppet = VrmPuppet::from_bytes(bytes, profile)?;
 		if !opts.physics {
 			puppet.drop_physics();
+		}
+		if opts.quality == Some(Quality::Lite) {
+			puppet.lite();
 		}
 		// The full-body style: its clips are read only for an avatar set to it.
 		if opts.vrm_animation == Some(VrmStyle::Full) {
@@ -1021,6 +1120,14 @@ fn run(mut opts: Options) -> Result<(), String> {
 		Puppet::Inox(_) => Vec::new(),
 	};
 	let expression_weights = expressions.iter().map(|_| (smooth::Spring::new(0.0, 0.3), 0.0)).collect();
+	// A VRM avatar's drawing is watched in real time (not when time is stepped for tests), unless the
+	// owner asked for it as it is.
+	let watchdog = match (&puppet, opts.quality, opts.fixed_dt) {
+		(Puppet::Vrm(_), Some(Quality::Normal), _) | (Puppet::Vrm(_), _, Some(_)) => None,
+		(Puppet::Vrm(_), Some(Quality::Lite), None) => Some(Watchdog::new(LITE_LEVEL)),
+		(Puppet::Vrm(_), _, None) => Some(Watchdog::new(0)),
+		_ => None,
+	};
 	let app = StageApp {
 		overrides: Overrides::new(&info.params),
 		behaviour,
@@ -1049,6 +1156,8 @@ fn run(mut opts: Options) -> Result<(), String> {
 		quit: false,
 		map_warning,
 		warnings,
+		watchdog,
+		last_real: Instant::now(),
 	};
 	frame.run(app).map_err(|e| format!("stage stopped: {e}"))
 }
@@ -1093,6 +1202,31 @@ mod tests {
 		assert_eq!(o.capture_at, vec![1.0, 2.0, 3.0]);
 		assert_eq!(o.fixed_dt, Some(0.02));
 		assert!(!o.stdin);
+	}
+
+	#[test]
+	fn the_watchdog_steps_down_only_when_frames_stay_slow() {
+		// Whole three-second windows of frames: 16 a second is slow, 32 fast (exact steps in binary).
+		let mut w = Watchdog::new(0);
+		let mut t = 0.0;
+		let mut windows = |w: &mut Watchdog, fps: f32, count: usize| {
+			let mut steps = Vec::new();
+			for _ in 0..(fps * 3.0) as usize * count {
+				t += 1.0 / fps;
+				if let Some(s) = w.frame(1.0 / fps, t) {
+					steps.push(s.0);
+				}
+			}
+			steps
+		};
+		assert!(windows(&mut w, 16.0, 2).is_empty(), "nothing while warming up");
+		assert!(windows(&mut w, 32.0, 4).is_empty(), "fast enough");
+		assert!(windows(&mut w, 16.0, 1).is_empty(), "one slow spell is not enough");
+		assert!(windows(&mut w, 32.0, 1).is_empty());
+		assert_eq!(windows(&mut w, 16.0, 2), vec![1], "slow twice running: outlines go");
+		assert_eq!(windows(&mut w, 16.0, 10), vec![2, 3, 4], "then one step at a time, and no further");
+		let lite = Watchdog::new(LITE_LEVEL);
+		assert_eq!(lite.level, 2, "lite starts with outlines and half-rate springs already given up");
 	}
 
 	#[test]

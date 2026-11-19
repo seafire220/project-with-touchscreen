@@ -546,10 +546,11 @@ def from_vrm(data, name=None, texture_side=vrm_format.TEXTURE_SIDE):
         raise PackageError(str(error))
     if contains_secret(json.dumps(doc, ensure_ascii=False)):
         raise PackageError("the avatar appears to contain an API key; it was refused")
+    # Fitted to the device: textures scaled down (further if need be), or refused if it cannot be shown.
     try:
-        doc, binary, _ = vrm_format.shrink_textures(doc, binary, texture_side)
-    except ImportError:                  # pragma: no cover - Pillow is installed on the device
-        pass
+        doc, binary, fitted = vrm_format.fit(doc, binary, texture_side)
+    except vrm_format.VrmError as error:
+        raise PackageError(str(error))
     files = {VRM_MODEL: vrm_format.build_glb(doc, binary)}
     preview = vrm_format.thumbnail(doc, binary, about)
     if preview:
@@ -572,6 +573,8 @@ def from_vrm(data, name=None, texture_side=vrm_format.TEXTURE_SIDE):
     note = vrm_format.restricted(about)
     if note:
         manifest["licence_note"] = note
+    # What it costs to show, for the settings page; a heavy one starts with its drawing kept light.
+    manifest["vrm_cost"] = {k: fitted[k] for k in ("points", "triangles", "texture_mb", "estimate_mb", "textures", "lite")}
     files["persona.md"] = IMPORT_PERSONA.format(name=name)
     files["voice.json"] = json.dumps({"note": "Choose the voice on the device. No keys are stored here."}, indent=1)
     return build(files, manifest)

@@ -141,6 +141,30 @@ impl Springs {
 	}
 }
 
+impl Springs {
+	/// Keep the bones where the last step left them, without moving them on (for frames between
+	/// steps, when the springs run at half rate).
+	pub fn hold(&self, model: &Model, rig: &mut Rig) {
+		if self.joints.is_empty() {
+			return;
+		}
+		for chain in &self.chains {
+			let to_world = chain.center.map(|c| rig.world[c]).unwrap_or(Mat4::IDENTITY);
+			for j in &self.joints[chain.joints.clone()] {
+				let parent_world = j.parent.map(|p| rig.world[p]).unwrap_or(Mat4::IDENTITY);
+				let parent_rot = j.parent.map(|p| rig.world_rotation(p)).unwrap_or(Quat::IDENTITY);
+				let node = &model.nodes[j.node];
+				let here = parent_world.transform_point3(node.translation);
+				let tip = to_world.transform_point3(j.current);
+				let to_local = (parent_rot * node.rotation).inverse();
+				let dir = (to_local * (tip - here)).try_normalize().unwrap_or(j.axis);
+				rig.set_local(model, j.node, node.rotation * Quat::from_rotation_arc(j.axis, dir));
+			}
+		}
+		rig.update_world(model);
+	}
+}
+
 fn closest_on_segment(a: Vec3, b: Vec3, p: Vec3) -> Vec3 {
 	let ab = b - a;
 	let t = if ab.length_squared() > 1e-12 { ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };

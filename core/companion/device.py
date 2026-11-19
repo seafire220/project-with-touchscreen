@@ -68,6 +68,11 @@ class Device:
         self.restart = restart or (lambda: os._exit(0))
         self.run = run or _run_command
         self.stage_seen = time.time()
+        # A 3D avatar the stage keeps failing with: when the stage was last asked to start again (so a
+        # lost connection then is expected), and how many times it failed since the avatar was shown.
+        self.stage_restarted = 0.0
+        self.stage_ready_at = 0.0
+        self.vrm_failures = {}
         self.last_use = 0.0                 # when the settings page was last used
         self.summarising = False            # a memory update is under way
         self.memory_retry = 0.0             # after a failed memory update, wait until then
@@ -103,6 +108,14 @@ class Device:
             entry.update({k: event[k] for k in ("cause", "played", "why") if event.get(k)})
             self.gesture_log = (self.gesture_log + [entry])[-60:]
             self.publish("animation", {"gesture": entry})
+        if kind == "quality":
+            self._quality_stepped(event)
+        # Stopping soon after it started, unasked, is a failure (a crash or running out of memory).
+        lost = kind == "lost" and time.time() - self.stage_restarted > 10.0 and time.time() - self.stage_ready_at < 60.0
+        if kind == "fatal" or lost:
+            self._stage_failed(event.get("message") or "the screen program stopped")
+        if kind == "ready":
+            self.stage_ready_at = time.time()
         if event.get("event") in ("error", "fatal"):
             self.emit("stage_error", {"message": event.get("message", "")})
         elif event.get("event") == "ready":
@@ -138,6 +151,10 @@ class Device:
                 continue
             showing = os.path.realpath(self.current_puppet)
             if time.time() - self.stage_seen > patience and showing != os.path.realpath(self.card):
+                # A 3D avatar gets a second try, drawn lightly, before the card.
+                if self._stage_failed("the screen program did not start"):
+                    self.stage_seen = time.time()
+                    continue
                 self.emit("error", {"message": "the character could not be shown; showing a message instead"})
                 self.show_card(screen.message_card(
                     "Character problem", "This character could not be shown. Choose another one, or add it "
@@ -252,11 +269,12 @@ class Device:
         if cid not in self.characters.ids():
             raise KeyError(cid)
         self.interrupt()
+        self.vrm_failures.pop(cid, None)          # chosen again: a fresh start
         self.store.update_settings({"active_character": cid})
         self._link_puppet(cid)
         self.use_emotion_map(cid)
         self.conversation = None
-        self.stage.send({"quit": True})      # the service manager restarts the stage with the new puppet
+        self.restart_stage()                 # the service manager starts it again with the new puppet
         self.emit("character", {"id": cid})
 
     def use_emotion_map(self, cid=None):
@@ -318,14 +336,55 @@ class Device:
         self.write_stage_settings()
         write_atomic(self.card, screen.card_puppet(png))
         self._point_stage_at(self.card)
-        self.stage.send({"quit": True})
+        self.restart_stage()
 
     def show_character(self):
         cid = self.active_id()
         if cid:
             self._link_puppet(cid)
-            self.stage.send({"quit": True})
+            self.restart_stage()
         return cid
+
+    def restart_stage(self):
+        """Ask the stage to start again (the service manager does), with what it is to show now."""
+        self.stage_restarted = time.time()
+        self.stage.send({"quit": True})
+
+    def _stage_failed(self, why):
+        """The stage stopped, or never started, while showing a 3D avatar: draw it lighter once; if that
+        fails too, show a card saying it is too much for this device. Other characters are left to the
+        service manager (it starts the stage again) and to stage_watch."""
+        cid = self.active_id()
+        if not cid or self.characters.drawing(cid) != "vrm" or os.path.realpath(self.current_puppet) == os.path.realpath(self.card):
+            return False
+        failures = self.vrm_failures.get(cid, 0) + 1
+        self.vrm_failures[cid] = failures
+        quality = self.animations.settings(cid)["quality"]
+        if quality != "lite":
+            self.animations.set_settings(cid, {"quality": "lite"})
+            self.characters.set_device_settings(cid, {"vrm_failsafe": {"why": str(why)[:200], "at": int(time.time())}})
+            self.write_stage_settings(cid)
+            self.emit("error", {"message": "the 3D avatar stopped the screen (%s); showing it with a lighter drawing" % str(why)[:120]})
+            return True
+        if failures >= 2:
+            self.emit("error", {"message": "the 3D avatar is too much for this device, even drawn lightly; showing a message instead"})
+            self.show_card(screen.message_card(
+                "Too detailed for this device",
+                "This 3D avatar needs more than this device has, even drawn lightly. Choose another character, "
+                "or export it with fewer polygons and smaller textures and add it again."))
+            return True
+        return False
+
+    def _quality_stepped(self, event):
+        """The stage drew a 3D avatar more simply because frames came too slowly: keep a note for the
+        settings page."""
+        cid = self.active_id()
+        if not cid:
+            return
+        seen = {"level": int(event.get("level") or 0), "change": str(event.get("change") or "")[:80],
+                "fps": event.get("fps"), "at": int(time.time())}
+        self.characters.set_device_settings(cid, {"vrm_quality_seen": seen})
+        self.emit("stage_quality", {"message": "the screen was too slow, so the avatar is now " + seen["change"]})
 
     def write_movement_map(self, cid=None):
         """The movement settings of the character on the screen (none for a message card), for the stage."""

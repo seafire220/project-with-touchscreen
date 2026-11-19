@@ -85,6 +85,8 @@ class StageLink:
                 pass
             self.writer = None
             log.warning("lost the stage; reconnecting")
+            if self.on_event:
+                self.on_event({"event": "lost"})
             await asyncio.sleep(0.5)
 
     def send(self, command):

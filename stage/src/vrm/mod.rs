@@ -161,6 +161,12 @@ pub struct VrmPuppet {
 	pub framing: Framing,
 	/// Full-body animation (clips on the whole skeleton), when the avatar is set to it.
 	animator: Option<Animator>,
+	/// The springs move every this many frames (2 at half rate, to save time), and the time since.
+	pub spring_every: u32,
+	spring_wait: u32,
+	spring_dt: f32,
+	/// The largest texture side drawn (the profile's, or 512 when the drawing is kept light).
+	pub texture_side: u32,
 	/// What the character is doing, for the animation.
 	scene: Scene,
 }
@@ -238,6 +244,10 @@ impl VrmPuppet {
 			material_uv,
 			framing: Framing::default(),
 			animator: None,
+			spring_every: 1,
+			spring_wait: 0,
+			spring_dt: 0.0,
+			texture_side: profile.texture_side(),
 			scene: Scene::default(),
 			model,
 		};
@@ -254,6 +264,13 @@ impl VrmPuppet {
 	/// No swinging hair or clothes (for comparisons).
 	pub fn drop_physics(&mut self) {
 		self.springs = None;
+	}
+
+	/// Keep the drawing light, for a slow or small device: small textures and springs at half rate (the
+	/// renderer leaves out outlines too).
+	pub fn lite(&mut self) {
+		self.texture_side = self.texture_side.min(512);
+		self.spring_every = 2;
 	}
 
 	/// The hips' height above the feet at rest, in metres.
@@ -411,7 +428,15 @@ impl VrmPuppet {
 		self.rig.pose(&self.model, &q);
 		self.rig.constrain(&self.model);
 		if let Some(springs) = &mut self.springs {
-			springs.update(&self.model, &mut self.rig, dt);
+			self.spring_dt += dt;
+			self.spring_wait += 1;
+			if self.spring_wait >= self.spring_every {
+				springs.update(&self.model, &mut self.rig, self.spring_dt);
+				self.spring_wait = 0;
+				self.spring_dt = 0.0;
+			} else {
+				springs.hold(&self.model, &mut self.rig);
+			}
 		}
 		self.rig.skin(&self.model);
 		self.face(&c, &expr, look_weights);

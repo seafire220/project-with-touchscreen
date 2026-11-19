@@ -67,6 +67,29 @@ class VrmTest(unittest.TestCase):
         with self.assertRaises(package.PackageError):
             package.from_vrm(b"glTF\x02\x00\x00\x00\x14\x00\x00\x00" + b"\x00" * 8)
 
+    def test_what_an_avatar_costs_is_worked_out_and_kept(self):
+        pkg = package.open_package(io.BytesIO(package.from_vrm(sample_vrm(1), texture_side=1024)))
+        c = pkg.manifest["vrm_cost"]
+        self.assertEqual((c["points"], c["triangles"], c["textures"], c["lite"]), (3, 1, 1024, False))
+        self.assertGreater(c["estimate_mb"], vrm.BASE_MB)
+
+    def test_heavy_textures_are_made_smaller_until_the_avatar_fits(self):
+        data = sample_vrm(1, texture_side=2048, textures=6)
+        pkg = package.open_package(io.BytesIO(package.from_vrm(data, texture_side=2048)))
+        c = pkg.manifest["vrm_cost"]
+        self.assertEqual(c["textures"], vrm.LITE_TEXTURE_SIDE, "six 2048 textures do not fit; at 512 they do")
+        self.assertLessEqual(c["estimate_mb"], vrm.BUDGET_MB)
+        doc, binary = vrm.read_glb(pkg.files[package.VRM_MODEL])
+        self.assertEqual(vrm._image_size(doc, binary, 0), (512, 512))
+
+    def test_an_avatar_too_much_for_the_device_is_refused_with_advice(self):
+        with self.assertRaisesRegex(package.PackageError, "too detailed.*500,000 triangles.*VRoid Studio"):
+            package.from_vrm(sample_vrm(1, points=3, triangles=500_000))
+        with self.assertRaisesRegex(package.PackageError, "needs about \\d+ MB.*room for 260 MB"):
+            package.from_vrm(sample_vrm(1, points=250_000, triangles=100_000, dense_targets=200))
+        heavy = package.open_package(io.BytesIO(package.from_vrm(sample_vrm(1, points=200_000, triangles=150_000))))
+        self.assertTrue(heavy.manifest["vrm_cost"]["lite"], "heavy, but it fits: it starts drawn lightly")
+
     def test_an_avatar_only_its_maker_may_use_is_marked(self):
         pkg = package.open_package(io.BytesIO(package.from_vrm(sample_vrm(1, meta={"avatarPermission": "onlyAuthor"}))))
         self.assertIn("only its maker", pkg.manifest["licence_note"].replace("allows only themselves", "only its maker"))

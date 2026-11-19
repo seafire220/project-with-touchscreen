@@ -143,6 +143,12 @@ class Animations:
     def settings(self, cid):
         saved = self.characters.device_settings(cid).get("vrm") or {}
         out = dict(DEFAULTS)
+        # An avatar that is heavy for this device starts with its drawing kept light.
+        try:
+            if (self.characters.manifest(cid).get("vrm_cost") or {}).get("lite"):
+                out["quality"] = "lite"
+        except (OSError, ValueError):
+            pass
         for key, allowed in (("animation", STYLES), ("quality", QUALITIES), ("shot", SHOTS)):
             if saved.get(key) in allowed:
                 out[key] = saved[key]
@@ -236,5 +242,11 @@ class Animations:
         for name in sorted(set(gestures) | {n for n in builtin if n not in LOOPS}):
             roles.append({"role": name, "label": "Instead of: " + name.replace("_", " "), "kind": "replaces",
                           "builtin": name in builtin})
+        device = self.characters.device_settings(cid)
+        try:
+            cost = self.characters.manifest(cid).get("vrm_cost") or {}
+        except (OSError, ValueError):
+            cost = {}
         return {"settings": self.settings(cid), "added": added, "roles": roles, "builtin": builtin,
-                "styles": list(STYLES), "qualities": list(QUALITIES), "shots": list(SHOTS)}
+                "styles": list(STYLES), "qualities": list(QUALITIES), "shots": list(SHOTS), "cost": cost,
+                "failsafe": device.get("vrm_failsafe"), "quality_seen": device.get("vrm_quality_seen")}

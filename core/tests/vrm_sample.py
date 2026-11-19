@@ -24,7 +24,10 @@ def glb(doc, binary):
             + struct.pack("<I4s", len(binary), b"BIN\x00") + binary)
 
 
-def sample_vrm(version=1, texture_side=2048, meta=None, drop_bone=None, external=False):
+def sample_vrm(version=1, texture_side=2048, meta=None, drop_bone=None, external=False, textures=1, points=3,
+               triangles=None, dense_targets=0):
+    """`textures` large pictures; `points`, `triangles` and `dense_targets` only change the counts the
+    description gives (the device judges an avatar's cost from those before reading its data)."""
     binary = bytearray()
     views = []
 
@@ -39,6 +42,7 @@ def sample_vrm(version=1, texture_side=2048, meta=None, drop_bone=None, external
     pos_view = add(positions)
     texture_view = add(png(texture_side, texture_side))
     thumb_view = add(png(64, 64, (10, 200, 10, 255)))
+    extra_views = [add(png(texture_side, texture_side, (40 * k % 255, 90, 160, 255))) for k in range(1, textures)]
     nodes = [{"name": b, "translation": [0, 0.1 * i, 0]} for i, b in enumerate(BONES)]
     nodes.append({"name": "Body", "mesh": 0})
     nodes[0]["children"] = list(range(1, len(BONES))) + [len(BONES)]
@@ -47,16 +51,23 @@ def sample_vrm(version=1, texture_side=2048, meta=None, drop_bone=None, external
         "scenes": [{"nodes": [0]}],
         "nodes": nodes,
         "meshes": [{"primitives": [{"attributes": {"POSITION": 0}, "material": 0}]}],
-        "accessors": [{"bufferView": pos_view, "componentType": 5126, "count": 3, "type": "VEC3"}],
+        "accessors": [{"bufferView": pos_view, "componentType": 5126, "count": points, "type": "VEC3"}],
         "materials": [{"name": "Skin", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}],
-        "textures": [{"source": 0}, {"source": 1}],
+        "textures": [{"source": 0}, {"source": 1}] + [{"source": 2 + k} for k in range(len(extra_views))],
         "images": [{"bufferView": texture_view, "mimeType": "image/png"},
-                   {"bufferView": thumb_view, "mimeType": "image/png"}],
+                   {"bufferView": thumb_view, "mimeType": "image/png"}]
+        + [{"bufferView": v, "mimeType": "image/png"} for v in extra_views],
         "bufferViews": views,
         "buffers": [{"byteLength": 0}],
     }
     if external:
         doc["buffers"][0]["uri"] = "model.bin"
+    if triangles is not None:
+        doc["accessors"].append({"bufferView": pos_view, "componentType": 5125, "count": triangles * 3, "type": "SCALAR"})
+        doc["meshes"][0]["primitives"][0]["indices"] = len(doc["accessors"]) - 1
+    if dense_targets:
+        doc["accessors"].append({"bufferView": pos_view, "componentType": 5126, "count": points, "type": "VEC3"})
+        doc["meshes"][0]["primitives"][0]["targets"] = [{"POSITION": len(doc["accessors"]) - 1}] * dense_targets
     bones = [b for b in BONES if b != drop_bone]
     if version == 1:
         doc["extensions"] = {"VRMC_vrm": {

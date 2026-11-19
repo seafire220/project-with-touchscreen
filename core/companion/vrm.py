@@ -274,6 +274,110 @@ def shrink_textures(doc, binary, side=TEXTURE_SIDE):
     return doc, packed, report
 
 
+# What the stage may use, at most, to show one avatar: its service is limited to 300 MB, and the
+# estimate below keeps 40 MB of that in hand. About 95 MB of the estimate is the stage program itself,
+# its drawing buffers and the graphics driver; the rest is the avatar's.
+BUDGET_MB = 260
+BASE_MB = 95
+# Textures are made this small, if need be, before an avatar is refused.
+LITE_TEXTURE_SIDE = 512
+# More than this is too much to draw smoothly, whatever the memory (most avatars have under 100,000
+# triangles; VRoid Studio's are 30,000 to 70,000).
+MAX_POINTS = 300_000
+MAX_TRIANGLES = 400_000
+# Above these, the avatar starts out with the drawing kept light (no outlines, small textures).
+HEAVY_TRIANGLES = 120_000
+HEAVY_MB = 200
+ADVICE = ("In VRoid Studio, export it again with fewer polygons and smaller textures (the export settings' "
+          "polygon reduction, a texture atlas of 2048 or less, fewer materials); in Blender with the VRM "
+          "add-on, a Decimate modifier reduces polygons.")
+
+
+def _image_size(doc, binary, index):
+    from PIL import Image
+    try:
+        img = (doc.get("images") or [])[index]
+        view = (doc.get("bufferViews") or [])[img["bufferView"]]
+        start = view.get("byteOffset", 0)
+        with Image.open(io.BytesIO(binary[start:start + view.get("byteLength", 0)])) as im:
+            return im.size
+    except Exception:
+        return (0, 0)
+
+
+def cost(doc, binary, file_bytes, texture_side=TEXTURE_SIDE):
+    """What showing the avatar costs on the device: its points, triangles, textures (MB, as drawn at
+    most `texture_side` a side, with mipmaps) and an estimate of the stage's memory for it at most
+    (MB): the program, the file while it loads, its meshes on the graphics chip and the processor's
+    copy while they go there, the face shapes, and the textures."""
+    accessors = doc.get("accessors") or []
+
+    def count(i):
+        try:
+            return int(accessors[i].get("count", 0))
+        except (IndexError, TypeError, AttributeError):
+            return 0
+
+    points = triangles = indices = morph_points = 0
+    for mesh in doc.get("meshes") or []:
+        for p in (mesh or {}).get("primitives") or []:
+            if not isinstance(p, dict) or p.get("mode", 4) != 4:
+                continue
+            n = count((p.get("attributes") or {}).get("POSITION", -1))
+            points += n
+            k = count(p["indices"]) if "indices" in p else n
+            indices += k
+            triangles += k // 3
+            for t in p.get("targets") or []:
+                a = accessors[t["POSITION"]] if isinstance(t, dict) and isinstance(t.get("POSITION"), int) \
+                    and t["POSITION"] < len(accessors) else {}
+                if "sparse" in a and "bufferView" not in a:
+                    morph_points += int((a.get("sparse") or {}).get("count", 0))
+                else:
+                    morph_points += int(a.get("count", 0)) // 4      # a face shape moves about a quarter of its mesh
+    texture_bytes = 0
+    used = {t.get("source") for t in doc.get("textures") or [] if isinstance(t, dict) and isinstance(t.get("source"), int)}
+    for index in used:
+        w, h = _image_size(doc, binary, index)
+        k = min(1.0, texture_side / float(max(w, h, 1)))
+        texture_bytes += int(w * k) * int(h * k) * 4 * 4 // 3
+    mesh_bytes = points * 56 + indices * 4
+    mb = 1024 * 1024
+    estimate = BASE_MB + file_bytes / mb + 2 * mesh_bytes / mb + morph_points * 16 / mb + 1.35 * texture_bytes / mb
+    return {"points": points, "triangles": triangles, "morph_points": morph_points,
+            "texture_mb": round(texture_bytes / mb, 1), "estimate_mb": round(estimate)}
+
+
+def fit(doc, binary, texture_side=TEXTURE_SIDE):
+    """Fit an avatar to the device: scale its textures down to `texture_side` (and further, to 512, if
+    it would not fit otherwise), or refuse it, saying why and what would help.
+    Returns (doc, binary, cost) with the cost as shown on the device, `lite` if it should start with
+    its drawing kept light, and `textures` the side its pictures were kept at."""
+    first = cost(doc, binary, len(binary), texture_side)
+    if first["triangles"] > MAX_TRIANGLES or first["points"] > MAX_POINTS:
+        raise VrmError("this avatar is too detailed for this device: it has %s triangles and %s points; the device "
+                       "draws up to %s triangles and %s points (most avatars have under 100,000 triangles). %s"
+                       % (_n(first["triangles"]), _n(first["points"]), _n(MAX_TRIANGLES), _n(MAX_POINTS), ADVICE))
+    doc, binary, _ = shrink_textures(doc, binary, texture_side)
+    side = texture_side
+    now = cost(doc, binary, len(binary), side)
+    if now["estimate_mb"] > BUDGET_MB and side > LITE_TEXTURE_SIDE:
+        side = LITE_TEXTURE_SIDE
+        doc, binary, _ = shrink_textures(doc, binary, side)
+        now = cost(doc, binary, len(binary), side)
+    if now["estimate_mb"] > BUDGET_MB:
+        raise VrmError("this avatar needs about %d MB to show, even with its pictures made smaller, and this device "
+                       "has room for %d MB (it has %s triangles and %.0f MB of textures). %s"
+                       % (now["estimate_mb"], BUDGET_MB, _n(now["triangles"]), now["texture_mb"], ADVICE))
+    now["textures"] = side
+    now["lite"] = now["estimate_mb"] > HEAVY_MB or now["triangles"] > HEAVY_TRIANGLES
+    return doc, binary, now
+
+
+def _n(x):
+    return "{:,}".format(int(x))
+
+
 def thumbnail(doc, binary, about, side=512):
     """The avatar's own thumbnail as PNG bytes, or None."""
     from PIL import Image

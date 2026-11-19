@@ -326,6 +326,7 @@ class Console:
 
     def _restage(self, cid):
         """Show the character again with its new settings, if it is the one on the screen."""
+        self.device.vrm_failures.pop(cid, None)
         if cid == self.device.active_id():
             self.device.show_character()
 
