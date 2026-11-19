@@ -97,6 +97,22 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         r = await self.client.post("/api/characters", data=b"PK\x05\x06" + b"\0" * 18, headers=H)
         self.assertEqual(r.status, 400)
 
+    async def test_a_vrm_avatar_can_be_uploaded(self):
+        from vrm_sample import sample_vrm
+        await self.login()
+        r = await self.client.post("/api/characters?name=Kit", data=sample_vrm(1), headers=H)
+        self.assertEqual(r.status, 200, await r.text())
+        self.assertEqual((await r.json())["id"], "kit")
+        self.assertTrue(os.path.realpath(self.device.current_puppet).endswith("model.vrm"),
+                        "the first character is shown at once, with its VRM drawing")
+        r = await self.client.get("/api/characters", headers=H)
+        listed = (await r.json())["characters"][0]
+        self.assertEqual(listed["drawing"], "vrm")
+        self.assertIn("Test Maker", listed["licence"])
+        r = await self.client.post("/api/characters", data=sample_vrm(1, drop_bone="head"), headers=H)
+        self.assertEqual(r.status, 400)
+        self.assertIn("head", await r.text())
+
     async def test_turning_off_gestures_by_mood_tells_the_stage(self):
         await self.login()
         r = await self.client.put("/api/settings", json={"conversation": {"random_gestures": False}}, headers=H)

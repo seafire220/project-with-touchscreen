@@ -421,6 +421,11 @@ async function refreshCharacters() {
     const name = document.createElement("div"); text(name, c.name); li.append(name);
     const cannot = Object.entries(c.capabilities || {}).filter(([, v]) => !v).map(([k]) => k.replace("_", " "));
     if (cannot.length) { const n = document.createElement("small"); text(n, "cannot: " + cannot.join(", ")); li.append(n); }
+    if (c.drawing === "vrm") {
+      // A VRM avatar's maker's terms, as the avatar carries them.
+      const n = document.createElement("small"); text(n, "3D avatar. " + (c.licence || "")); li.append(n);
+      if (c.licence_note) { const w = document.createElement("small"); w.className = "error"; text(w, c.licence_note); li.append(w); }
+    }
     const actions = [["Use", () => api("POST", "/api/characters/" + c.id + "/activate").then(refreshCharacters)],
                      ["Edit", () => editCharacter(c)],
                      ["Save copy", () => { location.href = "/api/characters/" + c.id + "/export"; }],
@@ -443,7 +448,7 @@ async function refreshCharacters() {
 $("char-file").addEventListener("change", async () => {
   const file = $("char-file").files[0];
   if (!file) return;
-  text($("char-error"), "Checking and installing…");
+  text($("char-error"), file.name.toLowerCase().endsWith(".vrm") ? "Checking the avatar and fitting its pictures to this device…" : "Checking and installing…");
   try {
     const q = $("char-replace").checked ? "?replace=1" : "";
     await api("POST", "/api/characters" + q, undefined, file);

@@ -287,7 +287,8 @@ class Device:
         inochi = ("visual/puppet.inp", "visual/puppet.inx")
         live2d = (package.LIVE2D_MODEL,)
         prefer_inochi = self.store.settings().get("character_format") == "inochi2d"
-        for name in (inochi + live2d) if prefer_inochi else (live2d + inochi):
+        # A VRM avatar (3D) is the character's only drawing when it has one.
+        for name in (package.VRM_MODEL,) + ((inochi + live2d) if prefer_inochi else (live2d + inochi)):
             target = self.characters.file(cid, name)
             if os.path.exists(target):
                 # The owner's movement settings name the drawing's parameters; both drawings of a character

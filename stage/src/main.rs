@@ -1,7 +1,7 @@
 //! The stage: draws and animates the character on the device screen.
 //!
-//! It loads a character (an Inochi2D puppet, or a Live2D-format model played
-//! with Ayagami), keeps it alive with breathing, blinking and small movements,
+//! It loads a character (an Inochi2D puppet, a Live2D-format model played
+//! with Ayagami, or a VRM 3D avatar), keeps it alive with breathing, blinking and small movements,
 //! and moves its mouth and changes its manner according to commands from the
 //! core service. It holds no API keys and makes no network connections.
 
@@ -16,6 +16,7 @@ mod overrides;
 mod puppet_info;
 mod smooth;
 mod speech;
+mod vrm;
 mod window;
 
 use std::path::PathBuf;
@@ -38,14 +39,16 @@ use mapping::Mapper;
 use motion::{Library, Motion, Start};
 use overrides::Overrides;
 use puppet_info::PuppetInfo;
+use vrm::render::{Shot, VrmRenderer};
+use vrm::{Profile, VrmPuppet};
 use window::{App, AppFrame, GlPreference};
 
 const USAGE: &str = "\
 Usage: stage CHARACTER [options]
 
-  CHARACTER is an Inochi2D puppet (.inp or .inx) or a Live2D-format model
-  (.model3.json, with the files it names beside it). The kind is decided by
-  the file's contents, so a link with any name works.
+  CHARACTER is an Inochi2D puppet (.inp or .inx), a Live2D-format model
+  (.model3.json, with the files it names beside it) or a VRM avatar (.vrm).
+  The kind is decided by the file's contents, so a link with any name works.
 
   --size WxH            window size when not full screen (default 720x1280)
   --fullscreen          take the whole screen
@@ -60,6 +63,10 @@ Usage: stage CHARACTER [options]
   --still               no idle movement; only commanded mouth, blink and look
   --view X0,Y0,X1,Y1    show this box instead of the whole character (puppet units;
                         canvas pixels for Live2D-format models)
+  --shot bust|upper|full  how much of a VRM avatar to show (default upper)
+  --profile auto|l1|l2  memory profile for VRM avatars: textures up to 1024 (l1)
+                        or 2048 (l2) pixels a side (default auto: l2 with 1.5 GB
+                        of memory or more)
 
 Testing:
   --script FILE         timed commands, one JSON object per line with \"at\"
@@ -84,6 +91,8 @@ struct Options {
 	still: bool,
 	physics: bool,
 	view: Option<[f32; 4]>,
+	shot: Shot,
+	profile: Option<Profile>,
 	script: Option<PathBuf>,
 	fixed_dt: Option<f32>,
 	capture_dir: Option<PathBuf>,
@@ -106,6 +115,8 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 		still: false,
 		physics: true,
 		view: None,
+		shot: Shot::Upper,
+		profile: None,
 		script: None,
 		fixed_dt: None,
 		capture_dir: None,
@@ -157,6 +168,18 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 				}
 				o.view = Some([v[0], v[1], v[2], v[3]]);
 			}
+			"--shot" => {
+				let v = value("--shot")?;
+				o.shot = Shot::parse(&v).ok_or(format!("--shot must be bust, upper or full, not '{v}'"))?;
+			}
+			"--profile" => {
+				o.profile = match value("--profile")?.as_str() {
+					"auto" => None,
+					"l1" => Some(Profile::L1),
+					"l2" => Some(Profile::L2),
+					other => return Err(format!("--profile must be auto, l1 or l2, not '{other}'")),
+				}
+			}
 			"--script" => o.script = Some(value("--script")?.into()),
 			"--fixed-dt" => {
 				let dt: f32 = value("--fixed-dt")?.parse().map_err(|_| "--fixed-dt is not a number")?;
@@ -193,6 +216,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 enum Puppet {
 	Inox(Model),
 	Live2d(Box<Live2dPuppet>),
+	Vrm(Box<VrmPuppet>),
 }
 
 impl Puppet {
@@ -200,6 +224,7 @@ impl Puppet {
 		match self {
 			Puppet::Inox(_) => "inochi2d",
 			Puppet::Live2d(_) => "live2d",
+			Puppet::Vrm(_) => "vrm",
 		}
 	}
 }
@@ -207,6 +232,7 @@ impl Puppet {
 enum Renderer {
 	Inox(OpenglRenderer),
 	Live2d(Box<Live2dRenderer>),
+	Vrm(Box<VrmRenderer>),
 }
 
 struct StageApp {
@@ -261,6 +287,8 @@ impl StageApp {
 				r.camera.position = -centre;
 			}
 			Renderer::Live2d(r) => r.camera = live2d::Camera { centre, scale },
+			// A VRM avatar frames itself (its head, hips and hands), by the shot asked for.
+			Renderer::Vrm(_) => {}
 		}
 	}
 
@@ -406,12 +434,18 @@ impl App for StageApp {
 				r.background = self.opts.background;
 				Renderer::Live2d(Box::new(r))
 			}),
+			Puppet::Vrm(puppet) => VrmRenderer::new(gl, puppet).map(|mut r| {
+				r.background = self.opts.background;
+				r.shot = self.opts.shot;
+				Renderer::Vrm(Box::new(r))
+			}),
 		};
 		match made {
 			Ok(mut renderer) => {
 				match &mut renderer {
 					Renderer::Inox(r) => r.resize(self.opts.width, self.opts.height),
 					Renderer::Live2d(r) => r.resize(self.opts.width, self.opts.height),
+					Renderer::Vrm(r) => r.resize(self.opts.width, self.opts.height),
 				}
 				self.width = self.opts.width;
 				self.height = self.opts.height;
@@ -463,6 +497,15 @@ impl App for StageApp {
 						self.events.emit(json!({"event": "warning", "message": warning}));
 					}
 				}
+				if let (Puppet::Vrm(puppet), Some((Renderer::Vrm(r), _))) = (&self.puppet, &self.on_window) {
+					let mut features = puppet.features();
+					features["texture_bytes"] = json!(r.texture_bytes);
+					features["depth_bits"] = json!(r.depth_bits);
+					self.events.emit(json!({"event": "features", "vrm": features}));
+					for warning in &puppet.warnings {
+						self.events.emit(json!({"event": "warning", "message": warning}));
+					}
+				}
 			}
 			Err(e) => {
 				self.events.emit(json!({"event": "fatal", "message": format!("renderer could not start: {e}")}));
@@ -479,6 +522,7 @@ impl App for StageApp {
 		match &mut self.on_window {
 			Some((Renderer::Inox(r), _)) => r.resize(width, height),
 			Some((Renderer::Live2d(r), _)) => r.resize(width, height),
+			Some((Renderer::Vrm(r), _)) => r.resize(width, height),
 			None => {}
 		}
 		self.fit_camera();
@@ -517,7 +561,8 @@ impl App for StageApp {
 				_ => {}
 			}
 		}
-		let smooth_eyelids = matches!(self.puppet, Puppet::Live2d(_));
+		// Models that close their eyes by changing shape (not by fading drawn lids) can stop half way.
+		let smooth_eyelids = matches!(self.puppet, Puppet::Live2d(_) | Puppet::Vrm(_));
 		self.behaviour.set_smooth_eyelids(smooth_eyelids);
 		self.motion.set_smooth_eyelids(smooth_eyelids);
 		self.motion.set_idle(&direction.idle, direction.mood_share);
@@ -562,6 +607,14 @@ impl App for StageApp {
 				renderer.on_end_draw(puppet);
 			}
 			(Puppet::Live2d(puppet), Renderer::Live2d(renderer)) => {
+				puppet.update(&values, dt);
+				posed = Instant::now();
+				if let Err(e) = renderer.draw(puppet) {
+					self.events.emit(json!({"event": "fatal", "message": format!("drawing failed: {e}")}));
+					return false;
+				}
+			}
+			(Puppet::Vrm(puppet), Renderer::Vrm(renderer)) => {
 				puppet.update(&values, dt);
 				posed = Instant::now();
 				if let Err(e) = renderer.draw(puppet) {
@@ -639,7 +692,18 @@ impl App for StageApp {
 fn run(opts: Options) -> Result<(), String> {
 	let events = Events::default();
 	let bytes = std::fs::read(&opts.puppet).map_err(|e| format!("cannot read {}: {e}", opts.puppet.display()))?;
-	let (puppet, info) = if live2d::looks_like_model3(&bytes) {
+	let (puppet, info) = if vrm::looks_like_vrm(&bytes) {
+		if bytes.len() as u64 > vrm::MAX_FILE_BYTES {
+			return Err(format!("{} is too large ({} bytes)", opts.puppet.display(), bytes.len()));
+		}
+		let profile = opts.profile.unwrap_or_else(Profile::auto);
+		let mut puppet = VrmPuppet::from_bytes(bytes, profile)?;
+		if !opts.physics {
+			puppet.drop_physics();
+		}
+		let info = puppet.info.clone();
+		(Puppet::Vrm(Box::new(puppet)), info)
+	} else if live2d::looks_like_model3(&bytes) {
 		drop(bytes);
 		let mut puppet = Live2dPuppet::load(&opts.puppet)?;
 		if !opts.physics {
@@ -708,7 +772,9 @@ fn run(opts: Options) -> Result<(), String> {
 	if opts.fullscreen {
 		builder = builder.with_fullscreen(Some(Fullscreen::Borderless(None)));
 	}
-	let frame = AppFrame::init(builder, opts.gl).map_err(|e| format!("cannot open a window: {e}"))?;
+	// 3D avatars need a depth buffer; the flat formats do not.
+	let depth = matches!(puppet, Puppet::Vrm(_));
+	let frame = AppFrame::init(builder, opts.gl, depth).map_err(|e| format!("cannot open a window: {e}"))?;
 	let mut behaviour = Behaviour::new(opts.seed);
 	behaviour.set_idle_motion(!opts.still);
 	let mut motion = Motion::new(Library::builtin(), |key| mapper.drives(key), opts.seed);
@@ -716,6 +782,7 @@ fn run(opts: Options) -> Result<(), String> {
 	motion.set_variation(!opts.still);
 	let expressions = match &puppet {
 		Puppet::Live2d(p) => p.expressions.clone(),
+		Puppet::Vrm(p) => p.expressions.clone(),
 		Puppet::Inox(_) => Vec::new(),
 	};
 	let expression_weights = expressions.iter().map(|_| (smooth::Spring::new(0.0, 0.3), 0.0)).collect();

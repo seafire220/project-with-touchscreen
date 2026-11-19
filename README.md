@@ -83,6 +83,7 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 27. [Animation tested on all eleven test characters](docs/27-character-tests.md)
 28. [User guide: your character device (for buyers)](docs/28-user-guide.md)
 29. [Setting up the first device, once the parts arrive](docs/29-hardware-setup.md)
+30. [VRM avatars: 3D characters beside the 2D ones](docs/30-vrm.md)
 - [Decision log](docs/decision-log.md)
 
 ## Awaiting the owner

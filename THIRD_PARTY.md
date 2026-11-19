@@ -17,6 +17,7 @@ device").
 | espeak-ng | Turns text into phonemes for the voice | GPL-3.0; installed from the operating system's packages and run as a separate program | Operating system |
 | Raspberry Pi OS and its packages (Linux, Mesa, cage, NetworkManager, ALSA...) | The operating system | Their own licences (mostly GPL, LGPL, MIT) | Operating system |
 | aiohttp, numpy, Pillow, qrcode | The core service | Apache-2.0, BSD, HPND/MIT-CMU, BSD | Python packages |
+| Rust libraries built into the stage program (glam, glow, glutin, winit, serde_json, image with its PNG and JPEG readers, among them zune-jpeg) | Windows, OpenGL, maths, reading pictures (including a VRM avatar's textures) | MIT or Apache-2.0 (zune-jpeg also Zlib) | `stage/Cargo.lock` |
 | Anthropic Python library (only if Claude is chosen) | Talking to Claude | MIT | Python package |
 
 ## In the character maker (laptop)
@@ -37,4 +38,7 @@ pages onto the buyer's computer; neither is bundled with the studio.
 
 Live2D's Cubism SDK, Cubism Core, Cubism Editor output and sample models are
 not in the product or the repository (`docs/19-live2d-format-licensing.md`).
-Test pictures of commercial characters are kept out as well (D-024).
+Test pictures of commercial characters are kept out as well (D-024), and so
+are the VRM sample avatars used for testing (`docs/30-vrm.md`); the VRM
+support is our own code, written from the VRM specifications (no VRM
+library is included).

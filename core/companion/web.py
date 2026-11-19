@@ -18,7 +18,7 @@ import time
 
 from aiohttp import web
 
-from . import cards, motions, package, persona, speech_text, temperament
+from . import cards, motions, package, persona, speech_text, temperament, vrm
 from .memory import when
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
@@ -227,6 +227,11 @@ class Console:
             if package.is_live2d_zip(data):
                 # A buyer's own Live2D-format model, zipped as it comes for VTube Studio and the like.
                 data = package.from_live2d_zip(io.BytesIO(data), name=request.query.get("name") or None)
+            elif vrm.is_vrm(data):
+                # A VRM avatar (3D): its textures are scaled down for this device, which takes a while.
+                data = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: package.from_vrm(data, name=request.query.get("name") or None,
+                                                   texture_side=vrm.device_texture_side()))
             cid = self.device.characters.install(data, replace=replace)
         except package.PackageError as error:
             raise web.HTTPBadRequest(text=str(error))

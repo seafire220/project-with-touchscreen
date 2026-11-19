@@ -14,7 +14,7 @@ import os
 import shutil
 import tempfile
 
-from . import package
+from . import package, vrm
 from .store import write_atomic
 
 
@@ -43,6 +43,8 @@ class Characters:
             out.append({
                 "id": cid, "name": m.get("name", cid), "kind": m.get("kind"), "author": m.get("author", ""),
                 "capabilities": m.get("capabilities", {}),
+                "licence": m.get("licence", ""), "licence_note": m.get("licence_note", ""),
+                "drawing": self.drawing(cid),
                 "preview": any(os.path.exists(self.file(cid, n)) for n in ("preview.png", "preview.webp")),
             })
         return out
@@ -93,8 +95,21 @@ class Characters:
             raise ValueError("the persona appears to contain an API key; it was not saved")
         write_atomic(self.file(cid, "persona.md"), text)
 
+    def drawing(self, cid):
+        """How the character is drawn: "vrm" (3D), "live2d", "inochi2d", or "" if it has no drawing."""
+        for kind, names in (("vrm", (package.VRM_MODEL,)), ("live2d", (package.LIVE2D_MODEL,)),
+                            ("inochi2d", ("visual/puppet.inp", "visual/puppet.inx"))):
+            if any(os.path.exists(self.file(cid, n)) for n in names):
+                return kind
+        return ""
+
     def expressions(self, cid):
-        """The names of a Live2D-format character's own expressions."""
+        """The names of a character's own expressions (a Live2D-format model's, or a VRM avatar's)."""
+        if os.path.exists(self.file(cid, package.VRM_MODEL)):
+            try:
+                return vrm.info(vrm.read_description(self.file(cid, package.VRM_MODEL)))["expressions"]
+            except (OSError, ValueError):
+                return []
         try:
             with open(self.file(cid, package.LIVE2D_MODEL), encoding="utf-8") as f:
                 refs = json.load(f).get("FileReferences", {})

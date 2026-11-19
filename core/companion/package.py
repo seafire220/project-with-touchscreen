@@ -27,6 +27,8 @@ import posixpath
 import re
 import zipfile
 
+from . import vrm as vrm_format
+
 FORMAT = 1
 KINDS = ("puppet", "clips", "sprite")
 
@@ -52,6 +54,7 @@ ALLOWED = [
     (re.compile(r"visual/live2d/expressions/[A-Za-z0-9_.\-]{1,96}\.exp3\.json"), MAX_TEXT),
     (re.compile(r"visual/live2d/textures/[A-Za-z0-9_.\-]{1,96}\.png"), 32 * 1024 * 1024),
     (re.compile(r"visual/emotions\.json"), MAX_TEXT),
+    (re.compile(r"visual/vrm/model\.vrm"), vrm_format.MAX_VRM_BYTES),
     (re.compile(r"visual/clips/[A-Za-z0-9_\-]{1,64}\.(webm|mp4|webp|png)"), 32 * 1024 * 1024),
     (re.compile(r"visual/frames/[A-Za-z0-9_\-]{1,64}\.(webp|png)"), 4 * 1024 * 1024),
     (re.compile(r"ui/background\.(webp|png|jpg)"), 8 * 1024 * 1024),
@@ -76,6 +79,7 @@ TEXT_SUFFIXES = (".json", ".md")
 PUPPET_MAGIC = b"TRNSRTS\0"
 MOC3_MAGIC = b"MOC3"
 LIVE2D_MODEL = "visual/live2d/model.model3.json"
+VRM_MODEL = "visual/vrm/model.vrm"
 
 
 class PackageError(ValueError):
@@ -165,6 +169,15 @@ def _check_moc3(name, data):
     if not data.startswith(MOC3_MAGIC) or len(data) < 64 or not 1 <= data[4] <= 6:
         raise PackageError("%s is not a Live2D-format model file" % name)
     if contains_secret(data.decode("latin-1")):
+        raise PackageError("%s appears to contain an API key; it was refused" % name)
+
+
+def _check_vrm(name, data):
+    try:
+        doc, _, _ = vrm_format.check(data)
+    except vrm_format.VrmError as error:
+        raise PackageError("%s: %s" % (name, error))
+    if contains_secret(json.dumps(doc, ensure_ascii=False)):
         raise PackageError("%s appears to contain an API key; it was refused" % name)
 
 
@@ -267,12 +280,15 @@ def open_package(source):
             _check_puppet(name, data)
         elif name.endswith(".moc3"):
             _check_moc3(name, data)
+        elif name.endswith(".vrm"):
+            _check_vrm(name, data)
     manifest = json.loads(files["manifest.json"])
     _check_manifest(manifest)
     _check_live2d(files)
     kind = manifest["kind"]
-    if kind == "puppet" and not any(n.startswith("visual/puppet.in") for n in files) and LIVE2D_MODEL not in files:
-        raise PackageError("a puppet character needs visual/puppet.inp or a Live2D-format model")
+    if (kind == "puppet" and not any(n.startswith("visual/puppet.in") for n in files) and LIVE2D_MODEL not in files
+            and VRM_MODEL not in files):
+        raise PackageError("a puppet character needs visual/puppet.inp, a Live2D-format model or a VRM avatar")
     if kind == "clips" and "visual/clips.json" not in files:
         raise PackageError("a clips character needs visual/clips.json")
     if kind == "sprite" and "visual/sprite.json" not in files:
@@ -508,6 +524,54 @@ def from_live2d_zip(source, name=None):
         "licence": IMPORT_LICENCE,
         "capabilities": {"blink": bool(groups.get("EyeBlink")), "speak": bool(groups.get("LipSync"))},
     }
+    files["persona.md"] = IMPORT_PERSONA.format(name=name)
+    files["voice.json"] = json.dumps({"note": "Choose the voice on the device. No keys are stored here."}, indent=1)
+    return build(files, manifest)
+
+
+# Importing a VRM avatar (a 3D humanoid character, as made with VRoid Studio and similar programs)
+# --------------------------------------------------------------------------------------------------
+
+def _shorten(text, limit):
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "\u2026"
+
+
+def from_vrm(data, name=None, texture_side=vrm_format.TEXTURE_SIDE):
+    """Make a character package from a .vrm file. Its textures are scaled down to `texture_side`
+    pixels once, here, so the device never holds a larger picture; its maker's licence terms go into
+    the manifest for the settings page to show. Returns package bytes. Raises PackageError."""
+    try:
+        doc, binary, about = vrm_format.check(data)
+    except vrm_format.VrmError as error:
+        raise PackageError(str(error))
+    if contains_secret(json.dumps(doc, ensure_ascii=False)):
+        raise PackageError("the avatar appears to contain an API key; it was refused")
+    try:
+        doc, binary, _ = vrm_format.shrink_textures(doc, binary, texture_side)
+    except ImportError:                  # pragma: no cover - Pillow is installed on the device
+        pass
+    files = {VRM_MODEL: vrm_format.build_glb(doc, binary)}
+    preview = vrm_format.thumbnail(doc, binary, about)
+    if preview:
+        files["preview.png"] = preview
+    guessed = vrm_format.guess_emotions(about["expressions"], guess_emotions)
+    if guessed:
+        files["visual/emotions.json"] = json.dumps(guessed, indent=1)
+    name = (name or about["name"] or "Character").strip()[:60] or "Character"
+    expressions = set(about["expressions"])
+    manifest = {
+        "format": FORMAT,
+        "id": slug(name),
+        "name": name,
+        "kind": "puppet",
+        "author": ", ".join(about["authors"])[:100],
+        "licence": _shorten(vrm_format.licence_summary(about), 400),
+        "capabilities": {"blink": bool(expressions & {"blink", "blinkLeft"}), "speak": "aa" in expressions,
+                         "head_turn": True, "arm_left": True, "arm_right": True, "legs": True, "vrm": True},
+    }
+    note = vrm_format.restricted(about)
+    if note:
+        manifest["licence_note"] = note
     files["persona.md"] = IMPORT_PERSONA.format(name=name)
     files["voice.json"] = json.dumps({"note": "Choose the voice on the device. No keys are stored here."}, indent=1)
     return build(files, manifest)

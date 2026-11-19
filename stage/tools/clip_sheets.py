@@ -2,10 +2,11 @@
 """Play every gesture, idle action, mood and state on the real stage for one character, and save
 sheets of frames to look at.
 
-    python3 stage/tools/clip_sheets.py CHARACTER.char OUT_DIR [--name NAME] [--background RRGGBB]
+    python3 stage/tools/clip_sheets.py CHARACTER OUT_DIR [--name NAME] [--background RRGGBB]
 
-CHARACTER.char is a package made by the studio (it holds both the Inochi2D puppet, used here only to
-find the head, and the Live2D-format model the device plays). Writes to OUT_DIR:
+CHARACTER is a package made by the studio (it holds both the Inochi2D puppet, used here only to
+find the head, and the Live2D-format model the device plays), a package with a VRM avatar, or a
+.vrm file (a VRM avatar frames itself: the head close-up is its "bust" shot). Writes to OUT_DIR:
 
   NAME_peaks.png    each gesture and idle action at its largest moment, then each mood and state,
                     head to hips
@@ -66,7 +67,7 @@ def clip_timing(clip):
     return length, best_t
 
 
-def run_stage(model, view, size, lines, captures, frames_dir, background, env):
+def run_stage(model, view, size, lines, captures, frames_dir, background, env, extra=()):
     """Play a script on the stage, saving frames at the given times. Returns (frames, events)."""
     os.makedirs(frames_dir, exist_ok=True)
     for old in os.listdir(frames_dir):
@@ -78,6 +79,7 @@ def run_stage(model, view, size, lines, captures, frames_dir, background, env):
            "--capture-at", ",".join("%.2f" % t for t in captures), "--exit-after", "%.2f" % (captures[-1] + 0.1)]
     if view:
         cmd[2:2] = ["--view", ",".join("%.2f" % v for v in pose_sheet.fit_aspect(view, size))]
+    cmd[2:2] = list(extra)
     try:
         run = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=1200)
     finally:
@@ -200,26 +202,36 @@ def main(argv):
     library = json.load(open(LIBRARY))
     os.makedirs(args.out, exist_ok=True)
     with tempfile.TemporaryDirectory() as unpacked:
-        with zipfile.ZipFile(args.package) as z:
-            z.extractall(unpacked)
-        model = os.path.join(unpacked, "visual", "live2d", "model.model3.json")
-        inp = os.path.join(unpacked, "visual", "puppet.inp")
-        if not os.path.exists(inp):
-            raise SystemExit("this package has no studio puppet (visual/puppet.inp) to find the head with")
-        if not os.path.exists(model):
-            model = inp                                # an older package: the Inochi2D puppet alone
-        head, full = pose_sheet.views(pose_sheet.read_puppet(inp))
-        x0, y0, x1, y1 = full
-        w, h = x1 - x0, y1 - y0
-        # Live2D-format views are in canvas pixels: the puppet's bounds grown by a twentieth each way.
-        lo = (x0 - 0.05 * w, y0 - 0.05 * h) if model.endswith(".json") else (0.0, 0.0)
+        if args.package.lower().endswith(".vrm"):
+            model = os.path.abspath(args.package)
+        else:
+            with zipfile.ZipFile(args.package) as z:
+                z.extractall(unpacked)
+            model = os.path.join(unpacked, "visual", "vrm", "model.vrm")
+        if os.path.exists(model):
+            # A VRM avatar frames itself: the upper body, and its "bust" shot for the face.
+            upper, face = None, None
+            shots = {"peaks": ["--shot", "upper"], "face": ["--shot", "bust"], "motion": ["--shot", "upper"]}
+        else:
+            shots = {}
+            model = os.path.join(unpacked, "visual", "live2d", "model.model3.json")
+            inp = os.path.join(unpacked, "visual", "puppet.inp")
+            if not os.path.exists(inp):
+                raise SystemExit("this package has no studio puppet (visual/puppet.inp) to find the head with")
+            if not os.path.exists(model):
+                model = inp                                # an older package: the Inochi2D puppet alone
+            head, full = pose_sheet.views(pose_sheet.read_puppet(inp))
+            x0, y0, x1, y1 = full
+            w, h = x1 - x0, y1 - y0
+            # Live2D-format views are in canvas pixels: the puppet's bounds grown by a twentieth each way.
+            lo = (x0 - 0.05 * w, y0 - 0.05 * h) if model.endswith(".json") else (0.0, 0.0)
 
-        def place(box):
-            return (box[0] - lo[0], box[1] - lo[1], box[2] - lo[0], box[3] - lo[1])
-        size = head[2] - head[0]
-        cx = (head[0] + head[2]) / 2
-        upper = place((cx - 1.2 * size, head[1], cx + 1.2 * size, min(head[1] + 2.6 * size, y1 + 0.02 * h)))
-        face = place((head[0] - 0.1 * size, head[1] - 0.05 * size, head[2] + 0.1 * size, head[3] + 0.15 * size))
+            def place(box):
+                return (box[0] - lo[0], box[1] - lo[1], box[2] - lo[0], box[3] - lo[1])
+            size = head[2] - head[0]
+            cx = (head[0] + head[2]) / 2
+            upper = place((cx - 1.2 * size, head[1], cx + 1.2 * size, min(head[1] + 2.6 * size, y1 + 0.02 * h)))
+            face = place((head[0] - 0.1 * size, head[1] - 0.05 * size, head[2] + 0.1 * size, head[3] + 0.15 * size))
         xvfb = subprocess.Popen(["Xvfb", "-displayfd", "1", "-screen", "0", "1200x1200x24"],
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         env = dict(os.environ, DISPLAY=":" + xvfb.stdout.readline().strip(), LIBGL_ALWAYS_SOFTWARE="1")
@@ -230,7 +242,8 @@ def main(argv):
                                                    ("face", face_script, face, (220, 220), 8),
                                                    ("motion", motion_script, upper, (300, 290), 6)):
                 lines, caps, names = script(library)
-                frames, events = run_stage(model, view, tile, lines, caps, frames_dir, args.background, env)
+                frames, events = run_stage(model, view, tile, lines, caps, frames_dir, args.background, env,
+                                           shots.get(kind, ()))
                 sheet(frames, names, cols).save(os.path.join(args.out, "%s_%s.png" % (name, kind)))
                 if kind == "peaks":
                     ready = next((e for e in events if e.get("event") == "ready"), {})

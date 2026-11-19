@@ -55,10 +55,12 @@
     <h2>Characters</h2>
     <ul id="char-list" class="cards"></ul>
     <h3>Add a character</h3>
-    <p>Choose a <code>.char</code> file made with the character maker on your computer, or a <code>.zip</code>
-      of a Live2D-format model's folder (the folder with its <code>.model3.json</code>, as used by VTube Studio).
-      Only add models you have the right to use; some model licences say which programs may show them.</p>
-    <p><input type="file" id="char-file" accept=".char,.zip"> <label><input type="checkbox" id="char-replace"> replace if it exists</label></p>
+    <p>Choose a <code>.char</code> file made with the character maker on your computer, a <code>.zip</code>
+      of a Live2D-format model's folder (the folder with its <code>.model3.json</code>, as used by VTube Studio),
+      or a 3D avatar's <code>.vrm</code> file (as made with VRoid Studio; adding one takes up to a minute while its
+      pictures are fitted to this device). Only add models you have the right to use; some model licences say
+      which programs may show them, and a VRM avatar's own terms are shown with it below.</p>
+    <p><input type="file" id="char-file" accept=".char,.zip,.vrm"> <label><input type="checkbox" id="char-replace"> replace if it exists</label></p>
     <p class="error" id="char-error"></p>
     <div id="char-edit" hidden>
       <h3>Edit <span id="edit-name"></span></h3>

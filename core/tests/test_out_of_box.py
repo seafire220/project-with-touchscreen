@@ -92,6 +92,16 @@ class OutOfBoxTest(unittest.IsolatedAsyncioTestCase):
             linked = os.path.realpath(device.current_puppet)
             self.assertEqual(linked, os.path.realpath(device.characters.file("aria", package.LIVE2D_MODEL)))
 
+    async def test_a_vrm_avatar_is_shown_with_its_vrm_drawing(self):
+        from vrm_sample import sample_vrm
+        with tempfile.TemporaryDirectory() as d:
+            cmds, restarted = Commands(), []
+            device = device_in(d, cmds, restarted)
+            device.characters.install(package.from_vrm(sample_vrm(1)))
+            device.activate("sample")
+            linked = os.path.realpath(device.current_puppet)
+            self.assertEqual(linked, os.path.realpath(device.characters.file("sample", package.VRM_MODEL)))
+
     async def test_a_character_with_both_formats_shows_the_chosen_one(self):
         from test_package import live2d_files
         with tempfile.TemporaryDirectory() as d:

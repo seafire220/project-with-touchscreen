@@ -48,16 +48,19 @@ pub struct AppFrame {
 }
 
 impl AppFrame {
-	pub fn init(window_builder: WindowBuilder, preference: GlPreference) -> Result<Self, Box<dyn Error>> {
+	pub fn init(window_builder: WindowBuilder, preference: GlPreference, depth: bool) -> Result<Self, Box<dyn Error>> {
 		let event_loop = EventLoop::new()?;
-		let template = ConfigTemplateBuilder::new().with_transparency(false).with_stencil_size(8);
+		let mut template = ConfigTemplateBuilder::new().with_transparency(false).with_stencil_size(8);
+		if depth {
+			template = template.with_depth_size(24);
+		}
 
 		// Only Windows requires the window to be present before creating the display.
 		let maybe_window_builder = cfg!(target_os = "windows").then_some(window_builder.clone());
 		let display_builder = DisplayBuilder::new().with_window_builder(maybe_window_builder);
 
 		let (window, gl_config) = display_builder.build(&event_loop, template, |configs| {
-			// No multisampling is needed for flat 2D art; prefer the cheapest config.
+			// No multisampling: prefer the cheapest config (3D avatars asked for depth above).
 			configs
 				.reduce(|best, config| if config.num_samples() < best.num_samples() { config } else { best })
 				.unwrap()

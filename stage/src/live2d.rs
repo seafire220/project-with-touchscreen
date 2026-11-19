@@ -604,7 +604,7 @@ void main() {
 }
 "#;
 
-fn header(gl: &glow::Context) -> &'static str {
+pub(crate) fn header(gl: &glow::Context) -> &'static str {
 	if gl.version().is_embedded {
 		"#version 300 es\nprecision highp float;\nprecision highp int;\n"
 	} else {
@@ -612,7 +612,7 @@ fn header(gl: &glow::Context) -> &'static str {
 	}
 }
 
-unsafe fn compile(gl: &glow::Context, vertex: &str, fragment: &str) -> Result<glow::Program, String> {
+pub(crate) unsafe fn compile(gl: &glow::Context, vertex: &str, fragment: &str) -> Result<glow::Program, String> {
 	let program = gl.create_program()?;
 	let mut shaders = Vec::new();
 	for (kind, source) in [(glow::VERTEX_SHADER, vertex), (glow::FRAGMENT_SHADER, fragment)] {

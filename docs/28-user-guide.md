@@ -15,7 +15,8 @@ it looks around, gazes out of the window, stretches and, late at night,
 dozes off. It remembers what you tell it.
 
 You choose the character: make one from a picture, bring a Live2D-format
-model you already have, or bring a character card's personality.
+model or a 3D VRM avatar you already have, or bring a character card's
+personality.
 
 ## What you need
 
@@ -122,6 +123,16 @@ on. If something moves wrongly, the **Movement** section under the
 character lets you choose the right setting for each movement and test it
 on the screen. **Feelings** maps the model's own expressions to the
 character's moods.
+
+### A 3D avatar (VRM) you already have
+
+On **Characters → Add a character**, choose a `.vrm` file (as made with
+VRoid Studio and most VTubing programs). Adding it takes up to a minute
+while its pictures are fitted to the device's memory. It moves and talks
+like any other character: the same moods, gestures, idle life and lip
+sync, with its arms, hands and hair moving in 3D. Its maker's terms (who may
+use it, whether commercially) are shown under it; follow them. **Feelings**
+starts with its own happy, sad, angry and surprised expressions.
 
 ### Who the character is
 

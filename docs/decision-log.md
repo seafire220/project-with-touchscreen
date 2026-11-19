@@ -610,3 +610,25 @@ rejected. Settled entries are not reopened without new evidence.
   its end (`studio/partsplit.py`). Cases the rules miss (hands in pockets,
   a bent arm with the hand on the hip) are switched off by the buyer in
   Character Studio's review, which shows the wave before sending.
+
+## D-047 — VRM avatars are a third drawing inside the stage, on the same rig
+
+- Date: 2026-11-19. Status: built (owner's request, after handoffs from
+  ChatGPT and Gemini; `30-vrm.md`).
+- Buyers can add VRM avatars (3D humanoids) beside the 2D characters. The
+  stage draws them as a third format next to Inochi2D and Live2D-format;
+  the core, the socket commands and the whole animation system are
+  unchanged. A separate renderer process with its own protocol (ChatGPT's
+  brief) would have duplicated the director, motion library and speech
+  timing, and doubled the memory on a 1 GB board.
+- A VRM offers the stage the same parameter names a Live2D-format model
+  does, so the motion library (D-045's generic controls) drives it. Poses
+  are written in VRM's normalised humanoid, so they fit every avatar. Where
+  3D can do better than a picture (an open-palmed wave, forearms forward
+  in a shrug), the same clip values are read the 3D way.
+- No VRM library is used: the format is read from its specifications.
+  vrm-runtime (Rust) reads VRM 1.0 only, and most avatars people own are
+  VRM 0.x. Textures are scaled down once at import (1024 pixels on 1 GB
+  boards, 2048 above).
+- An avatar's own licence terms are shown on the settings page, not
+  enforced; whoever imports it is responsible for the right to use it.
