@@ -156,7 +156,9 @@ def _status_error(service, status, body):
     if status == 429:
         return ProviderError("%s is rate-limiting or out of credit (429). %s" % (service, detail), retry=True)
     if status >= 500:
-        return ProviderError("%s had a server error (%d)." % (service, status), retry=True)
+        # The server's own words matter most from a model on the owner's computer ("model requires more
+        # system memory than is available").
+        return ProviderError(("%s had a server error (%d). %s" % (service, status, detail[:200])).strip(), retry=True)
     return ProviderError("%s refused the request (%d). %s" % (service, status, detail))
 
 

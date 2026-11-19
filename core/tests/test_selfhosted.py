@@ -55,6 +55,9 @@ class FakeServers:
     async def ollama_chat(self, request):
         body = await request.json()
         self.seen.append(body)
+        if body["model"] == "llama3.3:70b":
+            return web.json_response({"error": "model requires more system memory (42.1 GiB) than is available (11.3 GiB)"},
+                                     status=500)
         if body["model"] not in ("qwen2.5:7b", "llama3.2:3b"):
             return web.json_response({"error": "model '%s' not found" % body["model"]}, status=404)
         response = web.StreamResponse(headers={"Content-Type": "application/x-ndjson"})
@@ -146,6 +149,12 @@ class ServersTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ProviderError, "ollama pull gemma3:4b"):
             await collect(llm)
 
+    async def test_a_model_too_big_for_the_computer_says_so(self):
+        llm = providers.build_llm(self.settings(provider="selfhosted", server="ollama", model="llama3.3:70b",
+                                                base_url="127.0.0.1:%d" % self.fake.ollama_port), self.store)
+        with self.assertRaisesRegex(ProviderError, r"server error \(500\)\. model requires more system memory"):
+            await collect(llm)
+
     async def test_other_servers_are_spoken_to_as_openai_compatible(self):
         llm = providers.build_llm(self.settings(provider="selfhosted", server="lmstudio", model="local-model",
                                                 base_url="http://127.0.0.1:%d" % self.fake.other_port), self.store)
@@ -181,8 +190,8 @@ class ServersTest(unittest.IsolatedAsyncioTestCase):
             h = {"X-Companion": "1"}
             await client.post("/api/setup", json={"password": "a good password"}, headers=h)
             r = await client.post("/api/llm/find", json={"host": "127.0.0.1:%d" % self.fake.ollama_port}, headers=h)
-            servers = (await r.json())["servers"]
-            self.assertEqual([s["kind"] for s in servers], ["ollama"])
+            servers = [s for s in (await r.json())["servers"] if s["address"].endswith(":%d" % self.fake.ollama_port)]
+            self.assertEqual([s["kind"] for s in servers], ["ollama"], "(a real server on this computer may be found too)")
             r = await client.put("/api/settings", json={"llm": {"provider": "selfhosted", "server": "ollama",
                                                                "base_url": servers[0]["address"], "model": "qwen2.5:7b"}},
                                  headers=h)
