@@ -22,6 +22,9 @@ from .store import Store, redact, write_atomic
 
 log = logging.getLogger("companion")
 
+MEMORY_TEMPERATURE = 0.3      # the background memory work: summing up, memories, the diary
+MEMORY_MAX_TOKENS = 700
+
 # Memory is kept up to date in the background (memory.Memory.process): a conversation is summed up, and
 # its memories changed, once it is over; a long one's early part as it goes; the diary at night.
 
@@ -465,7 +468,13 @@ class Device:
         try:
             name = self.characters.manifest(cid).get("name", "")
             persona, _ = split_persona(self.characters.persona(cid))
-            done = await memory.process(self.build("llm"), now=now, name=name, persona=persona, keep=keep)
+            llm = self.build("llm")
+            # Careful note-taking, not lively talk: a low temperature, and room for a full answer.
+            if isinstance(getattr(llm, "temperature", None), (int, float)):
+                llm.temperature = min(llm.temperature, MEMORY_TEMPERATURE)
+            if isinstance(getattr(llm, "max_tokens", None), int):
+                llm.max_tokens = max(llm.max_tokens, MEMORY_MAX_TOKENS)
+            done = await memory.process(llm, now=now, name=name, persona=persona, keep=keep)
             if done["summed"] or done["diary"]:
                 self.emit("memory", dict(done, character=cid))
             return done

@@ -10,6 +10,7 @@ class FakeLLM:
     def __init__(self, reply="Hello there. How are you today?", pieces=7, delay=0.0, fail=None, hang=False):
         self.reply = reply
         self.pieces = pieces
+        self.temperature, self.max_tokens = 0.8, 400       # as the real clients start
         self.delay = delay
         self.fail = fail
         self.hang = hang

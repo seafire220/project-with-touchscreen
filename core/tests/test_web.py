@@ -524,6 +524,7 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(s["title"], s["summary"], s["why"]) for s in memory.sessions()],
                          [("Tea", "They said hello and we talked about tea.", "quiet")])
         self.assertEqual([x["text"] for x in memory.memories()], ["They love tea"])
+        self.assertEqual((llm.temperature, llm.max_tokens), (0.3, 700), "careful note-taking, with room for a full answer")
 
     async def test_a_conversation_ends_on_time_even_without_a_working_model(self):
         await self.login()

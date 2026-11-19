@@ -465,10 +465,11 @@ class ParseTest(unittest.TestCase):
         labels = parse_sum_up("ADD category | importance 4 | Their driving test is on Friday, 13th November | 2026-11-13\n"
                               "ADD category | importance 4 | Their sister Kim will support them | 2026-11-13\n"
                               "ADD 2 | They like hiking | likes\n"
-                              "ADD | Their favourite tea is oolong")["ops"]
+                              "ADD | Their favourite tea is oolong\n"
+                              "ADD category | importance 4 | Their people: Kim is flying in from Perth | 2026-11-13")["ops"]
         self.assertEqual([(x["category"], x["importance"], x.get("when")) for x in labels],
                          [("plans and events", 4, "2026-11-13"), ("their people", 4, "2026-11-13"),
-                          ("likes and dislikes", 2, None), ("likes and dislikes", 3, None)],
+                          ("likes and dislikes", 2, None), ("likes and dislikes", 3, None), ("their people", 4, "2026-11-13")],
                          "what a 7-billion model wrote: the form's labels copied, fields out of order")
 
     def test_dates_in_words(self):

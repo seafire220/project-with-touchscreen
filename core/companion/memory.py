@@ -1212,6 +1212,10 @@ def _parse_add(rest):
             continue
         texts.append(field)
     text, day = _tail(max(texts, key=len) if texts else "")
+    stripped = _drop_category(text)               # "Their people: Kim is ...": the category written into it
+    if stripped != text:
+        category = category or _category_of(text[:len(text) - len(stripped)])
+        text = stripped
     if not _meaningful(text):
         return None
     when = when or day
