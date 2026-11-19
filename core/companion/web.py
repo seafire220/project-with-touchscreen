@@ -641,6 +641,7 @@ class Console:
         return web.json_response({
             "notes": memory.notes(),
             "memories": sorted(memory.memories(), key=lambda m: (-m.get("pinned", False), -m.get("importance", 3), -m.get("updated", 0))),
+            "retired": [m for m in memory.memories(everything=True) if m.get("status", "active") != "active"][-100:][::-1],
             "categories": list(memory_module.CATEGORIES),
             "sessions": [dict(s, when=when(s.get("start", 0), now)) for s in reversed(sessions[-300:])],
             "session_count": len(sessions),
@@ -714,6 +715,10 @@ class Console:
         for flag in ("pinned", "follow_up"):
             if flag in body:
                 fields[flag] = bool(body[flag])
+        if body.get("status") is not None:
+            if body["status"] not in ("active", "retired"):
+                raise web.HTTPBadRequest(text="a memory is active or retired")
+            fields["status"] = body["status"]
         return fields
 
     async def add_memory_item(self, request):

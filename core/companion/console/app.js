@@ -815,7 +815,8 @@ function showMemories(m) {
     for (const x of items) {
       const li = document.createElement("li");
       const words = document.createElement("span");
-      text(words, (x.pinned ? "\u{1F4CC} " : "") + x.text + (x.when ? " (" + x.when + ")" : "") + "  " + "\u2605".repeat(x.importance || 3));
+      const date = x.follow_up ? "  \u2014 to ask about after " + x.when + (x.asked ? " (asked)" : "") : x.when ? " (" + x.when + ")" : "";
+      text(words, (x.pinned ? "\u{1F4CC} " : "") + x.text + date + "  " + "\u2605".repeat(x.importance || 3));
       const pin = button(x.pinned ? "Unpin" : "Pin", () => api("PUT", memPath("items", x.id), { pinned: !x.pinned }).then(loadMemory));
       const change = button("Change", () => {
         const input = document.createElement("input"); input.size = 50; input.value = x.text;
@@ -830,6 +831,22 @@ function showMemories(m) {
     }
     box.append(head, list);
   }
+  if (m.retired && m.retired.length) {
+    // What a conversation showed to be no longer true: kept out of mind, but the owner can bring one back.
+    const more = document.createElement("details");
+    const title = document.createElement("summary");
+    text(title, "No longer true (" + m.retired.length + "): replaced or retired after a conversation");
+    const list = document.createElement("ul"); list.className = "log";
+    for (const x of m.retired) {
+      const li = document.createElement("li");
+      const words = document.createElement("span"); words.className = "muted"; text(words, x.text);
+      li.append(words, " ", button("Restore", () => api("PUT", memPath("items", x.id), { status: "active" }).then(loadMemory)),
+        " ", button("Forget", () => api("DELETE", memPath("items", x.id)).then(loadMemory), "danger"));
+      list.append(li);
+    }
+    more.append(title, list);
+    box.append(more);
+  }
 }
 
 function showSessions(m) {
@@ -842,17 +859,22 @@ function showSessions(m) {
     const when = document.createElement("span"); when.className = "who";
     const t0 = new Date(e.start * 1000), t1 = new Date(e.end * 1000);
     const hm = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    text(when, e.when + " " + hm(t0) + "\u2013" + hm(t1));
+    const from = hm(t0), to = hm(t1);
+    text(when, e.when + " " + from + (to !== from ? "\u2013" + to : ""));
     const words = document.createElement("span");
-    text(words, (e.title ? e.title + ": " : "") + (e.summary || (e.done ? "" : "(to be summed up)")) + (e.mood ? " (" + e.mood + ")" : ""));
+    if (e.title) { const b = document.createElement("b"); text(b, e.title); words.append(b, " \u2014 "); }
+    words.append((e.summary || (e.done ? "" : "(to be summed up)")) + (e.mood ? " (" + e.mood + ")" : ""));
     const show = button("Show words", async () => {
       const r = await api("GET", memPath("sessions", e.id));
+      const name = $("mem-name").textContent || "Character";
       const log = document.createElement("ol"); log.className = "log";
       for (const t of r.turns) {
         const row = document.createElement("li");
-        text(row, "You: " + t.user + "  \u2014  " + t.reply + (t.interrupted ? " (interrupted)" : ""));
+        row.append("You: " + (t.user || ""), document.createElement("br"),
+          name + ": " + (t.reply || "") + (t.interrupted ? " (interrupted)" : ""));
         log.append(row);
       }
+      show.remove();
       li.append(log);
     });
     const edit = button("Change", () => {
