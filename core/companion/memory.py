@@ -42,7 +42,7 @@ from .store import write_atomic
 
 KEEP_TURNS = 400              # word for word, in history.jsonl (all of them are in the archive)
 NOTES_LIMIT = 4000
-KEEP_SESSIONS = 5000
+KEEP_SESSIONS = 5000           # conversations' summaries (about four years of daily talks)
 SUMMARY_LIMIT = 700
 TITLE_LIMIT = 60
 MEMORY_LIMIT = 220            # characters in one memory
@@ -384,6 +384,11 @@ class Memory:
         closed.update(why=why, title="", summary="", mood="", done=False, rolling=session.get("rolling", ""))
         with open(self.sessions_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(closed, ensure_ascii=False) + "\n")
+        sessions = self.sessions()
+        if len(sessions) > KEEP_SESSIONS:
+            # Years of conversations: the oldest summaries go (their words stay in the archive, and what was
+            # learnt from them in the memories), so each reply stays quick.
+            _write_jsonl(self.sessions_path, sessions[-KEEP_SESSIONS:])
         state["open"] = None
         return closed
 

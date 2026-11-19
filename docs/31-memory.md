@@ -10,7 +10,7 @@ Everything stays on the device. The code is `core/companion/memory.py`; the owne
 | Layer | What it holds | Kept |
 |---|---|---|
 | This conversation | Its words, word for word; a long one's early part as a running summary | Until it ends |
-| Conversations | Each one's title, summary, how you seemed, when, and why it ended; every word in an archive | Years (5,000 conversations) |
+| Conversations | Each one's title, summary, how you seemed, when, and why it ended; every word in an archive | The latest 5,000 summaries (about four years of daily talks); every word always |
 | Lasting memories | One sentence each, with a category, an importance (1 to 5), when learnt and last changed, and a date for plans | Up to 600; the least important go first |
 | The diary | An entry for each day you talked, in the character's voice | Always |
 | Your notes | What you ask it always to remember | Until you change them |

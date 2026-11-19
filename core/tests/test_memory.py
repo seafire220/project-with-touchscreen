@@ -81,6 +81,13 @@ class ConversationsTest(Base):
         self.assertEqual([t["n"] for t in m.history()], [1, 2], "turns are numbered, not only timed")
         self.assertEqual([t["user"] for t in m.transcript(sid)], ["hello", "the clock jumped back"])
 
+    def test_years_of_conversations_keep_the_latest_summaries_and_every_word(self):
+        m = self.m
+        with mock.patch.object(mem, "KEEP_SESSIONS", 3):
+            ids = [m.add_turn("chat number %d" % day, "ok", now=at(day, 10)) for day in range(1, 7)]
+        self.assertEqual([s["id"] for s in m.sessions()], ids[2:5], "the latest summaries (the last one is still going on)")
+        self.assertEqual(m.transcript(ids[0])[0]["user"], "chat number 1", "the oldest words stay in the archive")
+
     def test_every_word_is_kept_and_a_conversation_can_be_forgotten_whole(self):
         m = self.m
         self.talk(at(18, 10), ("my secret is the cake recipe", "I'll keep it"), ("it has cardamom", "lovely"))
