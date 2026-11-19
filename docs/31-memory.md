@@ -74,6 +74,15 @@ A memory that says nearly the same as one already kept (three quarters of their 
 - a colon instead of a bar;
 - a missing importance.
 
+Guards keep a small model's mistakes out:
+- A memory that is only a category's name, the form's own words, or a single word is left out.
+- At most eight new memories and eight updates are taken from one conversation, so a model stuck in a loop can't flood the list.
+- A new memory is read field by field, whatever the order or labels.
+- An update of a memory the model was never shown is kept as something new.
+- A forget whose reason plainly names a different memory is not carried out.
+- Plans whose day has come are always shown to it, so a conversation can settle them.
+- The memory work runs at a low temperature (0.3), careful rather than lively.
+
 A plain paragraph instead of the form becomes the summary. No answer at all leaves the person's own first words, so the conversation can still be found.
 
 A failed call is reported on the settings page and tried again 15 minutes later.
@@ -275,7 +284,22 @@ What varied between runs:
 
 Small models embellish, and the owner can correct any of it on the Memory tab.
 
-**A model on your own computer**: see below.
+**A model on your own computer.** The same eleven days ran through the device's own Ollama client against a real Ollama (0.40), on a 4-core processor with no graphics card:
+
+| Model | A reply | A memory step | How it kept memory |
+|---|---|---|---|
+| qwen2.5:3b (1.9 GB) | 4–8 s | 25–45 s | Poorly. Its summing-up repeated the form, left fields out, copied the form's own words back, and looped. It kept almost nothing true, and on the Friday said "My sister moved to Darwin recently … I don't have specific dates for when you passed your driving test". Held to a JSON schema (Ollama can do this), its answers were valid but still wrong ("Kim was coming to Perth"): the limit is the model, not the form |
+| qwen2.5:7b (4.7 GB) | 4–17 s | 15–47 s | Mostly. It kept the test (then that it was passed) and Kim's move to Darwin, and answered the Friday question correctly: "Your sister Kim is in Darwin now for her new job. You passed your driving test on the first try on Friday, 13th". But it didn't ask how the test went, and its summaries and diary mixed up who did what ("Kim and I celebrated with pancakes"). Once it retired the wrong memory by number; that is now guarded |
+
+Most of the guards above came from these runs, and the summing-up step is now the same whichever model does it.
+
+**Advice.** Memory is only as good as the model's summing-up.
+- A cloud model, even a small cheap one, keeps it well.
+- On your own computer, use 7 to 8 billion parameters at least. Expect mistakes now and then; a look at the Memory tab helps.
+- Larger models should do better, but weren't measured here (no graphics card).
+- A 3-billion model can chat, but keeps poor memories.
+
+`core/tools/memory_check.py` shows how your own model does.
 
 ## Not done yet
 
@@ -284,4 +308,4 @@ Small models embellish, and the owner can correct any of it on the Memory tab.
 - **Questions by date**: "what did we talk about last Monday?" isn't matched by its date.
 - **More than one person**: memory assumes one person; telling voices apart isn't done.
 - **Encryption at rest**: memory is protected by file permissions. Encrypting it would need a key the device can keep secret, a secure element or your password at start-up, which a Pi lacks.
-- **Very small models**: memory is only as good as the model's summaries. The form is read forgivingly, but a 1B model will miss things a cloud model catches.
+- **Small models on your own computer**: memory is only as good as the model's summing-up (see Tested). A 3-billion model keeps poor memories, and a 7-billion one makes mistakes. Letting a bigger model on the same computer do the memory work, while a quick small one chats, would help; it isn't built.

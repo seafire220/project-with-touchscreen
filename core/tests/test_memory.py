@@ -312,6 +312,16 @@ class ProcessTest(Base):
                           "They said: the basil is already sprouting"], "a plain answer, or their own words")
         self.assertTrue(all(s["done"] for s in m.sessions()))
 
+    def test_a_forget_that_names_the_wrong_number_is_not_carried_out(self):
+        m = self.m
+        test = m.add_memory("Their driving test is on Friday", "plans and events", 4, "2026-11-13", now=at(9, 19))
+        visit = m.add_memory("Their sister Kim will be there to support them", "their people", 4, now=at(9, 19))
+        self.talk(at(19, 20), ("Kim moved to Darwin for a new job", "Oh, that's far!"))
+        run(m.process(FakeLLM("TITLE: Darwin\nSUMMARY: Kim moved.\nMOOD: sad\n"
+                              "FORGET #%d | Their sister Kim will be there to support them (Kim is now far away)\n"
+                              "FORGET #%d | no longer true, she moved" % (test["id"], visit["id"])), now=at(19, 21)))
+        self.assertEqual([x["id"] for x in m.memories()], [test["id"]], "the right one retired, the test kept")
+
     def test_a_question_answered_is_not_asked_again(self):
         m = self.m
         question = m.add_memory("how the driving test went", "plans and events", 3, "2026-11-13", follow_up=True, now=at(9, 19))
@@ -457,7 +467,7 @@ class ParseTest(unittest.TestCase):
                                   "text": "They start at the library on Monday", "when": "2026-11-23"})
         self.assertEqual(ops[1]["category"], "likes and dislikes")
         self.assertEqual(ops[2], {"op": "update", "id": 3, "text": "Works at the library"})
-        self.assertEqual(ops[3], {"op": "forget", "id": 7})
+        self.assertEqual(ops[3], {"op": "forget", "id": 7, "why": "no longer true"})
         self.assertEqual(ops[4], {"op": "follow", "text": "how their first day went", "when": "2026-11-24"})
         self.assertEqual(len(ops), 5)
         loose = parse_sum_up("ADD likes | They like oolong tea\nUPDATE #3: Works at the library now\nUPDATE 4 — Lives in Darwin")["ops"]

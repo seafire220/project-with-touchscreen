@@ -696,8 +696,12 @@ rejected. Settled entries are not reopened without new evidence.
 - A server error carries the server's own words ("model requires more
   system memory than is available").
 - The key, if a server wants one, is stored like every other key.
-- Checked against a real Ollama (qwen2.5:3b on a 4-core processor) with
-  the device's own client (`31-memory.md`).
+- Checked against a real Ollama with the device's own client
+  (`31-memory.md`). On a 4-core processor without a graphics card, qwen2.5:3b
+  replied in 4–8 s and qwen2.5:7b in 4–17 s. Memory needs the bigger one: the
+  3-billion model kept poor memories even held to a JSON schema. The settings
+  page and user guide say so, and `core/tools/memory_check.py` lets an owner
+  try their own model.
 
 ## D-051 — Memory as conversations, lasting memories and a diary
 

@@ -239,8 +239,12 @@ Under **AI services**, in three parts:
    - **Context** is how much the model reads at once (8,192 if left empty).
      More lets it remember more of a long conversation, but needs more of the
      computer's memory.
-   - A model of 3 to 8 billion parameters works well on a recent laptop.
-     The first reply after a while is slower, as the model loads.
+   - **Model size matters most for memory.** A model of 7 to 8 billion
+     parameters (such as `qwen2.5:7b` or `llama3.1:8b`) chats well on a recent
+     laptop and keeps memory mostly right; glance at the Memory tab now and
+     then. A 3-billion model can chat, but keeps poor memories. Larger models
+     on a computer with a graphics card do better.
+   - The first reply after a while is slower, as the model loads.
 2. **Voice**: the free on-device voice, or a voice service.
 3. **Speech recognition** (hearing you): free and on the device by default,
    or a cloud service.

@@ -224,7 +224,9 @@
         <p class="muted">A model running on a computer or server in your home. Nothing you say leaves your home
           network, and with the device's own voice and speech recognition the character works without the
           internet at all. The model has to be open to the network: with Ollama, start it with
-          <code>OLLAMA_HOST=0.0.0.0</code>; in LM Studio, turn on <i>Serve on Local Network</i>.</p>
+          <code>OLLAMA_HOST=0.0.0.0</code>; in LM Studio, turn on <i>Serve on Local Network</i>.
+          For memory that stays right, choose a model of 7 billion parameters or more: smaller ones can chat,
+          but keep poor memories.</p>
         <label>Kind <select id="llm-server">
           <option value="ollama">Ollama</option><option value="lmstudio">LM Studio</option>
           <option value="llamacpp">llama.cpp server</option><option value="vllm">vLLM</option>

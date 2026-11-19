@@ -935,7 +935,7 @@ class Memory:
                 if self.add_memory(op["text"], _guess_category(op["text"], op.get("when")), 3, op.get("when"),
                                    source=session["id"], now=now):
                     changed += 1
-            elif op["op"] == "forget" and op["id"] in visible:
+            elif op["op"] == "forget" and op["id"] in visible and not _mixed_up(op, shown):
                 if self.edit_memory(op["id"], now=now, status="retired"):
                     changed += 1
         return changed
@@ -1105,7 +1105,7 @@ New things you learnt about them today:
 
 ADD_LINE = re.compile(r"(?i)^add\b[\s:]*(.+)$")
 UPDATE_LINE = re.compile(r"(?i)^update\b[\s:]*#?\s*(\d+)\b\s*(.*)$")
-FORGET_LINE = re.compile(r"(?i)^(?:forget|remove|retire)\b[\s:]*#?\s*(\d+)\b")
+FORGET_LINE = re.compile(r"(?i)^(?:forget|remove|retire)\b[\s:]*#?\s*(\d+)\b(.*)$")
 FOLLOW_LINE = re.compile(r"(?i)^follow[\s-]*up\b(.*)$")
 PLACEHOLDER = re.compile(r"\b[Yy]{4}-[Mm]{2}-[Dd]{2}\b")
 TEMPLATE_WORDS = {"the memory", "the memory as it is now", "the memory, one short sentence", "why", "what to ask",
@@ -1144,7 +1144,7 @@ def parse_sum_up(text):
             continue
         m = FORGET_LINE.match(line)
         if m:
-            out["ops"].append({"op": "forget", "id": int(m.group(1))})
+            out["ops"].append({"op": "forget", "id": int(m.group(1)), "why": m.group(2).strip(SEPARATORS)})
             continue
         m = FOLLOW_LINE.match(line)
         if m:
@@ -1243,6 +1243,18 @@ def _meaningful(text):
     plain = (text or "").strip(" .").lower()
     return (len(plain.split()) >= 2 and len(plain) >= 8 and plain not in CATEGORIES and plain not in TEMPLATE_WORDS
             and not plain.startswith(("category |", "importance")))
+
+
+def _mixed_up(op, shown):
+    """Whether a FORGET's reason is plainly about another memory than its number's (a small model mixed
+    the numbers up): it shares no word with its own memory, and two or more with another one shown."""
+    why = set(_words(op.get("why", "")))
+    if not why:
+        return False
+    target = next((m for m in shown if m["id"] == op["id"]), None)
+    if target is None or why & set(_words(target["text"])):
+        return False
+    return any(len(why & set(_words(m["text"]))) >= 2 for m in shown if m["id"] != op["id"])
 
 
 def _drop_category(text):
