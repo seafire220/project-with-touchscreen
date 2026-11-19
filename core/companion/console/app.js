@@ -483,6 +483,16 @@ async function loadVrm(c) {
   $("vrm-shot").value = data.settings.shot;
   $("vrm-lite").checked = data.settings.quality === "lite";
   text($("vrm-msg"), "");
+  // What it costs this device, and anything the device did to cope.
+  const notes = [];
+  if (data.cost && data.cost.triangles !== undefined) {
+    notes.push("It has " + data.cost.triangles.toLocaleString() + " triangles and " + data.cost.texture_mb +
+      " MB of textures (kept at " + data.cost.textures + " pixels); showing it takes about " + data.cost.estimate_mb + " MB.");
+    if (data.cost.lite) notes.push("It is heavy for this device, so it starts with a simpler drawing.");
+  }
+  if (data.failsafe) notes.push("The screen stopped while showing it (" + data.failsafe.why + "), so it is now drawn more simply.");
+  if (data.quality_seen) notes.push("The screen was slow with it, so the device made it simpler: " + data.quality_seen.change + ".");
+  text($("vrm-cost"), notes.join(" "));
   $("vrm-anims").hidden = data.settings.animation !== "full";
   const list = $("vrm-anim-list");
   list.replaceChildren();
