@@ -18,7 +18,7 @@ import time
 
 from aiohttp import web
 
-from . import cards, motions, package, persona, speech_text, temperament, vrm
+from . import animations, cards, motions, package, persona, speech_text, temperament, vrm
 from .memory import when
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
@@ -312,6 +312,76 @@ class Console:
             raise web.HTTPBadRequest(text="the card appears to contain an API key; it was not used")
         return web.json_response({"name": card["name"], "persona": text, "greeting": greeting, "tags": card["tags"],
                                   "creator": card["creator"]})
+
+    # ----- full-body animation for 3D (VRM) avatars
+    def _vrm_cid(self, request):
+        cid = self._cid(request)
+        if self.device.characters.drawing(cid) != "vrm":
+            raise web.HTTPBadRequest(text="only 3D (VRM) avatars have full-body animations")
+        return cid
+
+    def _stage_gestures(self):
+        link = self.device.stage
+        return list(getattr(link, "gestures", []) or []) + list(getattr(link, "actions", []) or [])
+
+    def _restage(self, cid):
+        """Show the character again with its new settings, if it is the one on the screen."""
+        if cid == self.device.active_id():
+            self.device.show_character()
+
+    async def get_animations(self, request):
+        cid = self._vrm_cid(request)
+        out = self.device.animations.describe(cid, self._stage_gestures())
+        out["active"] = cid == self.device.active_id()
+        return web.json_response(out)
+
+    async def put_animations(self, request):
+        """The animation style (full or light), how much the drawing may cost, and the shot."""
+        cid = self._vrm_cid(request)
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="send animation, quality and shot")
+        try:
+            settings = self.device.animations.set_settings(cid, body)
+        except animations.AnimationError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        self._restage(cid)
+        return web.json_response({"settings": settings})
+
+    async def add_animation(self, request):
+        """Keep a VRM Animation clip for the character, in the role named (an idle loop, a gesture it
+        replaces, or a new gesture with the words that say what it means)."""
+        cid = self._vrm_cid(request)
+        role = request.match_info["role"]
+        data = await request.read()
+        try:
+            entry = self.device.animations.add(cid, role, data, title=request.query.get("title", ""),
+                                               words=request.query.get("words"), gestures=self._stage_gestures())
+        except animations.AnimationError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        self.device.emit("animation_added", {"id": cid, "role": role})
+        self._restage(cid)
+        return web.json_response(dict(entry, role=role))
+
+    async def delete_animation(self, request):
+        cid = self._vrm_cid(request)
+        if not self.device.animations.remove(cid, request.match_info["role"]):
+            raise web.HTTPNotFound(text="no such animation")
+        self._restage(cid)
+        return web.json_response({"ok": True})
+
+    async def try_animation(self, request):
+        """Play one of the character's added clips once on the screen."""
+        cid = self._vrm_cid(request)
+        if cid != self.device.active_id():
+            raise web.HTTPConflict(text="put the character on the screen first")
+        try:
+            path = self.device.animations.path(cid, request.match_info["role"])
+        except KeyError:
+            raise web.HTTPNotFound(text="no such animation")
+        if self.device.stage.send({"try_animation": path}) is False:
+            raise web.HTTPServiceUnavailable(text="the character's screen is not running")
+        return web.json_response({"ok": True})
 
     # ----- movement settings: which of the character's own parameters each kind of movement uses
     async def get_movement(self, request):
@@ -672,6 +742,11 @@ def make_app(device):
     r.add_put("/api/characters/{cid}/movement", console.put_movement)
     r.add_delete("/api/characters/{cid}/movement", console.reset_movement)
     r.add_put("/api/characters/{cid}/temperament", console.put_temperament)
+    r.add_get("/api/characters/{cid}/animations", console.get_animations)
+    r.add_put("/api/characters/{cid}/animations", console.put_animations)
+    r.add_post("/api/characters/{cid}/animations/{role}", console.add_animation)
+    r.add_delete("/api/characters/{cid}/animations/{role}", console.delete_animation)
+    r.add_post("/api/characters/{cid}/animations/{role}/try", console.try_animation)
     r.add_get("/api/motions", console.get_motions)
     r.add_post("/api/motions/try", console.try_motion)
     r.add_put("/api/motions/{name}", console.put_motion)

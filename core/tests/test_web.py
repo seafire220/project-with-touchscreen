@@ -113,6 +113,61 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status, 400)
         self.assertIn("head", await r.text())
 
+    async def test_a_3d_avatars_animation_style_and_own_animations(self):
+        from vrm_sample import sample_vrm, sample_vrma
+        await self.login()
+        r = await self.client.post("/api/characters?name=Kit", data=sample_vrm(1), headers=H)
+        cid = (await r.json())["id"]
+        with open(self.device.stage_settings) as f:
+            settings = json.load(f)
+        self.assertEqual(settings["vrm_animation"], "full", "full-body animation unless the owner chooses light")
+        self.assertEqual(settings["clip_folders"][0], "builtin")
+        r = await self.client.get("/api/characters/%s/animations" % cid, headers=H)
+        data = await r.json()
+        self.assertEqual(data["settings"]["animation"], "full")
+        self.assertTrue(data["active"])
+        self.assertIn("idle_talk", [x["role"] for x in data["roles"]])
+        # A new gesture of its own, and an idle loop.
+        self.stage.commands.clear()
+        r = await self.client.post("/api/characters/%s/animations/little_dance?title=Dance&words=do+a+little+dance" % cid,
+                                   data=sample_vrma(3.0), headers=H)
+        self.assertEqual(r.status, 200, await r.text())
+        self.assertEqual((await r.json())["kind"], "gesture")
+        self.assertIn({"quit": True}, self.stage.commands, "the stage starts again with the new animation")
+        r = await self.client.post("/api/characters/%s/animations/idle_happy" % cid, data=sample_vrma(4.0), headers=H)
+        self.assertEqual(r.status, 200)
+        self.device.use_custom_motions()
+        from companion import speech_text
+        self.assertEqual(speech_text.CUSTOM_WORDS.get("little_dance"), "do a little dance")
+        r = await self.client.post("/api/characters/%s/animations/wave" % cid, data=sample_vrm(1), headers=H)
+        self.assertEqual(r.status, 400)
+        self.assertIn("VRM Animation", await r.text())
+        # Trying one plays its file on the screen.
+        self.stage.commands.clear()
+        r = await self.client.post("/api/characters/%s/animations/little_dance/try" % cid, headers=H)
+        self.assertEqual(r.status, 200)
+        tried = [c for c in self.stage.commands if "try_animation" in c]
+        self.assertTrue(tried and tried[0]["try_animation"].endswith(os.path.join("animations", "little_dance.vrma")))
+        # The light style: no clips play, and the stage is told so.
+        r = await self.client.put("/api/characters/%s/animations" % cid, json={"animation": "light", "quality": "lite"}, headers=H)
+        self.assertEqual(r.status, 200)
+        with open(self.device.stage_settings) as f:
+            settings = json.load(f)
+        self.assertEqual((settings["vrm_animation"], settings["quality"]), ("light", "lite"))
+        r = await self.client.put("/api/characters/%s/animations" % cid, json={"animation": "jumpy"}, headers=H)
+        self.assertEqual(r.status, 400)
+        r = await self.client.delete("/api/characters/%s/animations/little_dance" % cid, headers=H)
+        self.assertEqual(r.status, 200)
+        r = await self.client.delete("/api/characters/%s/animations/little_dance" % cid, headers=H)
+        self.assertEqual(r.status, 404)
+        # A 2D character has none of this, and its stage settings are empty.
+        self.device.characters.install(package.build(good_files(), manifest()))
+        r = await self.client.get("/api/characters/aria/animations", headers=H)
+        self.assertEqual(r.status, 400)
+        self.device.activate("aria")
+        with open(self.device.stage_settings) as f:
+            self.assertEqual(json.load(f), {})
+
     async def test_turning_off_gestures_by_mood_tells_the_stage(self):
         await self.login()
         r = await self.client.put("/api/settings", json={"conversation": {"random_gestures": False}}, headers=H)

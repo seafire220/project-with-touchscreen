@@ -469,8 +469,83 @@ async function editCharacter(c) {
   $("char-edit").hidden = false;
   loadFeelings(c.id);
   loadMovement(c.id);
+  loadVrm(c).catch((e) => text($("vrm-msg"), e.message));
   $("char-edit").scrollIntoView();
 }
+
+// A 3D avatar: full-body or light animation, the shot, a simpler drawing, and animations of its own.
+async function loadVrm(c) {
+  const box = $("edit-vrm");
+  box.hidden = c.drawing !== "vrm";
+  if (box.hidden) return;
+  const data = await api("GET", "/api/characters/" + c.id + "/animations");
+  $("vrm-style").value = data.settings.animation;
+  $("vrm-shot").value = data.settings.shot;
+  $("vrm-lite").checked = data.settings.quality === "lite";
+  text($("vrm-msg"), "");
+  $("vrm-anims").hidden = data.settings.animation !== "full";
+  const list = $("vrm-anim-list");
+  list.replaceChildren();
+  if (!data.added.length) {
+    const li = document.createElement("li");
+    text(li, "None yet: the built-in animations play.");
+    list.append(li);
+  }
+  for (const a of data.added) {
+    const li = document.createElement("li");
+    const what = document.createElement("span");
+    text(what, a.label + " \u2014 " + (a.title || a.role) + " (" + a.seconds + " s)" + (a.words ? ", for \u201c" + a.words + "\u201d" : ""));
+    li.append(what, " ");
+    if (data.active) {
+      const t = document.createElement("button"); t.className = "secondary"; text(t, "Try");
+      t.addEventListener("click", () => api("POST", "/api/characters/" + c.id + "/animations/" + a.role + "/try")
+        .catch((e) => text($("vrm-anim-msg"), e.message)));
+      li.append(t, " ");
+    }
+    const r = document.createElement("button"); r.className = "secondary"; text(r, "Remove");
+    r.addEventListener("click", () => api("DELETE", "/api/characters/" + c.id + "/animations/" + a.role)
+      .then(() => loadVrm(c)).catch((e) => text($("vrm-anim-msg"), e.message)));
+    li.append(r);
+    list.append(li);
+  }
+  const select = $("vrm-role");
+  select.replaceChildren();
+  for (const r of data.roles) {
+    const o = document.createElement("option"); o.value = r.role; o.textContent = r.label; select.append(o);
+  }
+  const fresh = document.createElement("option"); fresh.value = "_new"; fresh.textContent = "A new gesture\u2026"; select.append(fresh);
+  $("vrm-new-row").hidden = true;
+  state.vrmCharacter = c;
+}
+
+$("vrm-role").addEventListener("change", () => { $("vrm-new-row").hidden = $("vrm-role").value !== "_new"; });
+$("btn-save-vrm").addEventListener("click", async () => {
+  const c = state.vrmCharacter;
+  if (!c) return;
+  try {
+    await api("PUT", "/api/characters/" + c.id + "/animations", {
+      animation: $("vrm-style").value, shot: $("vrm-shot").value, quality: $("vrm-lite").checked ? "lite" : "auto" });
+    await loadVrm(c);
+    text($("vrm-msg"), c.id === state.active ? "Saved; the character starts again on the screen." : "Saved.");
+  } catch (e) { text($("vrm-msg"), e.message); }
+});
+$("vrm-file").addEventListener("change", async () => {
+  const c = state.vrmCharacter, file = $("vrm-file").files[0];
+  if (!c || !file) return;
+  let role = $("vrm-role").value;
+  const q = new URLSearchParams({ title: file.name.replace(/\.vrma$/i, "") });
+  if (role === "_new") {
+    role = $("vrm-new-name").value.trim().toLowerCase().replace(/[^a-z_]+/g, "_");
+    q.set("words", $("vrm-new-words").value.trim());
+  }
+  text($("vrm-anim-msg"), "Checking the animation\u2026");
+  try {
+    await api("POST", "/api/characters/" + c.id + "/animations/" + encodeURIComponent(role) + "?" + q, undefined, file);
+    await loadVrm(c);
+    text($("vrm-anim-msg"), c.id === state.active ? "Added; the character starts again on the screen with it." : "Added.");
+  } catch (e) { text($("vrm-anim-msg"), e.message); }
+  $("vrm-file").value = "";
+});
 
 // Which of a character's own expressions shows each feeling (Live2D-format models that have some).
 async function loadFeelings(cid) {

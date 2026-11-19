@@ -99,6 +99,36 @@
         <div id="feelings-list"></div>
         <p><button id="btn-save-feelings">Save feelings</button> <span id="feelings-msg"></span></p>
       </div>
+      <div id="edit-vrm" hidden>
+        <h4>3D animation</h4>
+        <p class="muted">How this 3D avatar moves. <b>Full body</b> plays animations on its whole body: an idle
+          pose for each mood and for listening, thinking and talking, and gestures such as waving, bowing and
+          stretching, with its face, eyes and lip sync on top. <b>Light</b> moves it the way the 2D characters
+          move, and uses a little less of the device.</p>
+        <div class="sliders">
+          <label>Style <select id="vrm-style"><option value="full">Full body</option><option value="light">Light</option></select></label>
+          <label>Show <select id="vrm-shot"><option value="upper">Head to thighs</option>
+            <option value="bust">Head and shoulders</option><option value="full">Whole body</option></select></label>
+          <label><input type="checkbox" id="vrm-lite"> Simplify the drawing (no outlines, smaller pictures)</label>
+        </div>
+        <p><button id="btn-save-vrm">Save</button> <span id="vrm-msg"></span></p>
+        <div id="vrm-anims">
+          <h5>Its own animations</h5>
+          <p class="muted">Add VRM Animation files (.vrma, from VRoid Hub, VRM Posing Desktop, or Blender with the
+            VRM add-on). Each can be an idle pose, take the place of a built-in gesture, or be a new gesture it
+            makes when the words call for it. Use only animations you have the right to use.</p>
+          <ul id="vrm-anim-list" class="plain"></ul>
+          <div class="sliders">
+            <label>Use it as <select id="vrm-role"></select></label>
+            <span id="vrm-new-row" hidden>
+              <label>Name <input id="vrm-new-name" placeholder="little_dance" size="14"></label>
+              <label>It means <input id="vrm-new-words" placeholder="do a little dance" size="20"></label>
+            </span>
+            <label>File <input type="file" id="vrm-file" accept=".vrma"></label>
+          </div>
+          <p><span id="vrm-anim-msg"></span></p>
+        </div>
+      </div>
       <div id="edit-temperament">
         <h4>Temperament</h4>
         <p class="muted">How this character moves: calm or lively, reserved or expressive. A lively character moves

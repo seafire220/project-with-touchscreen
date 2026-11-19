@@ -6,6 +6,7 @@ live beside it and are never written back into a package.
 
     characters/<id>/package/...   the files from the package
     characters/<id>/device.json   voice chosen on this device
+    characters/<id>/animations/   full-body animations added for a 3D avatar (animations.py)
     memory/<id>/                  what the character remembers (memory.py)
 """
 import io
@@ -67,9 +68,13 @@ class Characters:
                 with open(path, "wb") as f:
                     f.write(content)
             if os.path.exists(target):
+                # The device's own choices for the character, and animations added for it, stay.
                 kept = os.path.join(target, "device.json")
                 if os.path.exists(kept):
                     shutil.copy(kept, os.path.join(staging, "device.json"))
+                added = os.path.join(target, "animations")
+                if os.path.isdir(added):
+                    shutil.copytree(added, os.path.join(staging, "animations"))
                 old = target + ".old"
                 os.replace(target, old)
                 os.replace(staging, target)

@@ -79,9 +79,10 @@ Usage: stage CHARACTER [options]
                         how much a VRM avatar's drawing may cost: lite leaves out
                         outlines and keeps textures small; auto (the default)
                         steps down by itself if frames come too slowly
-  --settings FILE       JSON file with any of: vrm_animation, clip_folders,
-                        quality, shot (written by the core for the character on
-                        the screen; the options above win; a missing file is fine)
+  --settings FILE       JSON file with any of: vrm_animation, clip_folders (builtin
+                        names the built-in clips), quality, shot (written by the
+                        core for the character on the screen; the options above
+                        win; a missing file is fine)
 
 Testing:
   --script FILE         timed commands, one JSON object per line with \"at\"
@@ -915,7 +916,15 @@ fn run(mut opts: Options) -> Result<(), String> {
 		}
 		// The full-body style: its clips are read only for an avatar set to it.
 		if opts.vrm_animation == Some(VrmStyle::Full) {
-			let folders = if opts.clip_folders.is_empty() { builtin_clip_folder().into_iter().collect() } else { opts.clip_folders.clone() };
+			// "builtin" in the list (as the core writes it) is the stage's own clips.
+			let folders: Vec<PathBuf> = if opts.clip_folders.is_empty() {
+				builtin_clip_folder().into_iter().collect()
+			} else {
+				opts.clip_folders
+					.iter()
+					.filter_map(|f| if f.as_os_str() == "builtin" { builtin_clip_folder() } else { Some(f.clone()) })
+					.collect()
+			};
 			let (clips, problems) = anim::load_folders(&folders);
 			warnings.extend(problems);
 			if clips.is_empty() {

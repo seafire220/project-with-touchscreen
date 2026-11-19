@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import time
 
-from . import package, providers
+from . import animations, package, providers
 from .audio import Detector, Microphone, Speaker, tone
 from .characters import Characters, split_persona
 from .conversation import Conversation
@@ -41,6 +41,9 @@ class Device:
         self.tts_model_dir = os.path.join(data_dir, "models", "tts")
         self.current_puppet = os.path.join(data_dir, "current.inp")
         self.movement_map = os.path.join(data_dir, "current-map.json")   # read by the stage at start
+        # A 3D avatar's animation style, clip folders, drawing cost and shot, also read by the stage at start.
+        self.stage_settings = os.path.join(data_dir, "current-stage.json")
+        self.animations = animations.Animations(self.characters)
         # Gestures and idle actions changed or added on the settings page, for every character.
         self.custom_motions = motions.CustomMotions(os.path.join(data_dir, "config", "custom-motions.json"))
         speech_text.set_custom_gestures(self.custom_motions.words())
@@ -263,8 +266,13 @@ class Device:
             self.stage.emotion_map = self.characters.emotion_map(cid)
 
     def use_custom_motions(self):
-        """Give the stage the gestures and idle actions changed or added on this device."""
-        speech_text.set_custom_gestures(self.custom_motions.words())
+        """Give the stage the gestures and idle actions changed or added on this device (and tell the
+        language model about them, with the new gestures a 3D avatar's own clips add)."""
+        words = self.custom_motions.words()
+        cid = self.active_id()
+        if cid:
+            words.update(self.animations.words(cid))
+        speech_text.set_custom_gestures(words)
         if hasattr(self.stage, "define"):
             for name, entry in self.custom_motions.all().items():
                 self.stage.define(name, entry)
@@ -294,9 +302,11 @@ class Device:
                 # The owner's movement settings name the drawing's parameters; both drawings of a character
                 # use the same names, and the stage keeps its own choice for any it lacks.
                 self.write_movement_map(cid)
+                self.write_stage_settings(cid)
                 self._point_stage_at(target)
                 return
         self.write_movement_map()
+        self.write_stage_settings()
         write_atomic(self.card, screen.card_puppet(screen.message_card(
             "Can't show this character",
             "Its package has no drawing this device can show. Try installing it again.")))
@@ -305,6 +315,7 @@ class Device:
     def show_card(self, png):
         """Show a message on the screen instead of the character."""
         self.write_movement_map()
+        self.write_stage_settings()
         write_atomic(self.card, screen.card_puppet(png))
         self._point_stage_at(self.card)
         self.stage.send({"quit": True})
@@ -320,6 +331,11 @@ class Device:
         """The movement settings of the character on the screen (none for a message card), for the stage."""
         controls = self.characters.device_settings(cid).get("controls") if cid else None
         write_atomic(self.movement_map, json.dumps(controls if isinstance(controls, dict) else {}, indent=1))
+
+    def write_stage_settings(self, cid=None):
+        """The stage settings of the character on the screen (a 3D avatar's animation style and the
+        like; none for others)."""
+        write_atomic(self.stage_settings, json.dumps(self.animations.stage_settings(cid) if cid else {}, indent=1))
 
     def _point_stage_at(self, target):
         tmp = self.current_puppet + ".new"

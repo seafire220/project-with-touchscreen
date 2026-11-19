@@ -79,3 +79,43 @@ def sample_vrm(version=1, texture_side=2048, meta=None, drop_bone=None, external
         }}
     doc["buffers"][0]["byteLength"] = len(binary)
     return glb(doc, bytes(binary))
+
+
+def sample_vrma(seconds=1.5, bones=("hips", "spine", "head", "leftUpperArm", "rightUpperArm"), extension=True,
+                copyright=None, external=False, with_max=True):
+    """A small made-up VRM Animation clip (.vrma): the head turning, over `seconds`."""
+    binary = bytearray()
+    views = []
+
+    def add(data):
+        while len(binary) % 4:
+            binary.append(0)
+        views.append({"buffer": 0, "byteOffset": len(binary), "byteLength": len(data)})
+        binary.extend(data)
+        return len(views) - 1
+
+    times = add(struct.pack("<2f", 0.0, seconds))
+    turns = add(struct.pack("<8f", 0, 0, 0, 1, 0, 0.2, 0, 0.98))
+    nodes = [{"name": b, "translation": [0, 0.1 * i, 0]} for i, b in enumerate(bones)]
+    nodes[0]["children"] = list(range(1, len(bones)))
+    time_accessor = {"bufferView": times, "componentType": 5126, "count": 2, "type": "SCALAR"}
+    if with_max:
+        time_accessor.update({"min": [0.0], "max": [seconds]})
+    doc = {
+        "asset": {"version": "2.0"},
+        "nodes": nodes,
+        "accessors": [time_accessor, {"bufferView": turns, "componentType": 5126, "count": 2, "type": "VEC4"}],
+        "animations": [{"samplers": [{"input": 0, "output": 1}],
+                        "channels": [{"sampler": 0, "target": {"node": min(2, len(bones) - 1), "path": "rotation"}}]}],
+        "bufferViews": views,
+        "buffers": [{"byteLength": len(binary)}],
+    }
+    if extension:
+        doc["extensions"] = {"VRMC_vrm_animation": {
+            "specVersion": "1.0", "humanoid": {"humanBones": {b: {"node": i} for i, b in enumerate(bones)}},
+            "expressions": {"preset": {"happy": {"node": 0}}}}}
+    if copyright:
+        doc["asset"]["copyright"] = copyright
+    if external:
+        doc["buffers"][0]["uri"] = "clip.bin"
+    return glb(doc, bytes(binary))
