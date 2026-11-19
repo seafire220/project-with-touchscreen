@@ -462,6 +462,14 @@ class ParseTest(unittest.TestCase):
                                "FOLLOW UP: 2026-11-10")["ops"]
         self.assertEqual(garbage, [{"op": "add", "category": "health and wellbeing", "importance": 2,
                                     "text": "They hoped Kim settles in well"}], "what a 3-billion model wrote: only the real one kept")
+        labels = parse_sum_up("ADD category | importance 4 | Their driving test is on Friday, 13th November | 2026-11-13\n"
+                              "ADD category | importance 4 | Their sister Kim will support them | 2026-11-13\n"
+                              "ADD 2 | They like hiking | likes\n"
+                              "ADD | Their favourite tea is oolong")["ops"]
+        self.assertEqual([(x["category"], x["importance"], x.get("when")) for x in labels],
+                         [("plans and events", 4, "2026-11-13"), ("their people", 4, "2026-11-13"),
+                          ("likes and dislikes", 2, None), ("likes and dislikes", 3, None)],
+                         "what a 7-billion model wrote: the form's labels copied, fields out of order")
 
     def test_dates_in_words(self):
         now = datetime.datetime(2026, 11, 18, 15, 0).timestamp()

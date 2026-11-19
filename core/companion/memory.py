@@ -1091,8 +1091,7 @@ New things you learnt about them today:
 
 {previous}"""
 
-ADD_LINE = re.compile(r"(?i)^add\b[\s:]*([^|]+)\|\s*(?:([1-5])\s*\|\s*)?([^|]+?)\s*"
-                      r"(?:\|\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|-|none|n/?a)?\s*)?$")
+ADD_LINE = re.compile(r"(?i)^add\b[\s:]*(.+)$")
 UPDATE_LINE = re.compile(r"(?i)^update\b[\s:]*#?\s*(\d+)\b\s*(.*)$")
 FORGET_LINE = re.compile(r"(?i)^(?:forget|remove|retire)\b[\s:]*#?\s*(\d+)\b")
 FOLLOW_LINE = re.compile(r"(?i)^follow[\s-]*up\b(.*)$")
@@ -1118,18 +1117,9 @@ def parse_sum_up(text):
             continue
         m = ADD_LINE.match(line)
         if m:
-            category = m.group(1).strip().strip("[]()").strip().lower()
-            glued = re.match(r"(.*?)\s+([1-5])$", category)              # "about them 4": the importance glued on
-            importance = int(m.group(2) or (glued.group(2) if glued else 3))
-            category = glued.group(1) if glued else category
-            category = next((c for c in CATEGORIES if c == category),
-                            next((c for c in CATEGORIES if category and (category in c or c in category)), "other"))
-            op = {"op": "add", "category": category, "importance": importance, "text": _tail(m.group(3))[0]}
-            if not _meaningful(op["text"]):
-                continue
-            if m.group(4) and m.group(4)[0].isdigit() and _valid_date(m.group(4)):
-                op["when"] = m.group(4)
-            out["ops"].append(op)
+            op = _parse_add(m.group(1))
+            if op:
+                out["ops"].append(op)
             continue
         m = UPDATE_LINE.match(line)
         if m:
@@ -1156,6 +1146,79 @@ def parse_sum_up(text):
                     op["when"] = found.group(0)
                 out["ops"].append(op)
     return out
+
+
+CATEGORY_WORDS = {"likes": "likes and dislikes", "dislikes": "likes and dislikes", "people": "their people",
+                  "plans": "plans and events", "events": "plans and events", "health": "health and wellbeing",
+                  "wellbeing": "health and wellbeing", "work": "work and study", "study": "work and study",
+                  "relationship": "our relationship", "me": "about me", "them": "about them"}
+GUESSES = (("about me", r"^(i|i'm|i am|my)\b"),
+           ("their people", r"\b(sister|brother|mum|mom|mother|dad|father|parents?|wife|husband|partner|girlfriend|boyfriend|"
+                            r"friends?|son|daughter|kids|children|cousin|aunt|uncle|grand\w+|boss|colleague|family|neighbou?r)\b"),
+           ("about them", r"\b(name|called|birthday|born|live[sd]?|from|age|years old)\b"),
+           ("work and study", r"\b(job|work\w*|study\w*|school|universit\w+|college|exam|course|office|career|degree)\b"),
+           ("health and wellbeing", r"\b(health\w*|sick|ill|doctor|sleep\w*|anxious|anxiety|stress\w*|diet|vegetarian|vegan|"
+                                    r"allerg\w+|exercise|nervous|tired)\b"),
+           ("likes and dislikes", r"\b(like[sd]?|love[sd]?|enjoy\w*|favou?rite|hate[sd]?|dislike[sd]?|prefer\w*|fan of)\b"))
+
+
+def _category_of(field):
+    """The category a field of an ADD line names, if it names one ("likes", "[their people]", "about them 4")."""
+    low = field.lower().strip(" []().:")
+    if low in CATEGORIES:
+        return low
+    if low in CATEGORY_WORDS:
+        return CATEGORY_WORDS[low]
+    if len(low.split()) <= 4:
+        return next((c for c in CATEGORIES if len(low) >= 4 and (low in c or c in low)), None)
+    return None
+
+
+def _guess_category(text, when):
+    """A category for a memory a model gave none for: by its words, or a plan if it has a date."""
+    low = text.lower()
+    for category, pattern in GUESSES[:2]:
+        if re.search(pattern, low):
+            return category
+    if when:
+        return "plans and events"
+    return next((c for c, pattern in GUESSES[2:] if re.search(pattern, low)), "other")
+
+
+def _parse_add(rest):
+    """An ADD line's fields, in whatever order and dress a model wrote them ("category | importance 4 | the
+    memory | 2026-11-13" with the form's own labels, a number glued to the category, a field missing):
+    the category, the importance, the date, and the longest remaining field as the memory. None if it
+    says nothing."""
+    category, importance, when, texts = None, None, None, []
+    for field in rest.split("|"):
+        field = field.strip()
+        low = field.lower().strip(" .[]()")
+        if not low or low in ("-", "none", "n/a", "na", "category"):
+            continue
+        number = re.fullmatch(r"(?:importance\s*:?\s*)?([1-5])(?:\s*/\s*5)?", low)
+        if number:
+            importance = importance or int(number.group(1))
+            continue
+        if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", low):
+            when = when or (low if _valid_date(low) else None)
+            continue
+        glued = re.fullmatch(r"(.*?)\s+([1-5])", low)
+        named = _category_of(glued.group(1) if glued else low)
+        if named and not category:
+            category = named
+            if glued:
+                importance = importance or int(glued.group(2))
+            continue
+        texts.append(field)
+    text, day = _tail(max(texts, key=len) if texts else "")
+    if not _meaningful(text):
+        return None
+    when = when or day
+    op = {"op": "add", "category": category or _guess_category(text, when), "importance": importance or 3, "text": text}
+    if when:
+        op["when"] = when
+    return op
 
 
 def _meaningful(text):
