@@ -793,46 +793,100 @@ async function loadMemory() {
   if (!state.active) return;
   const m = await api("GET", "/api/memory/" + state.active);
   $("mem-notes").value = m.notes;
-  showEpisodes(m);
-  const list = $("mem-history");
-  list.replaceChildren();
-  for (const t of m.history.slice().reverse()) {
-    const li = document.createElement("li");
-    text(li, "You: " + t.user + "  —  " + t.reply + (t.interrupted ? " (interrupted)" : ""));
-    list.append(li);
+  const pick = $("mem-add-category");
+  if (!pick.options.length) for (const c of m.categories) { const o = document.createElement("option"); o.value = c; o.textContent = c; pick.append(o); }
+  text($("mem-now"), m.open ? "A conversation is going on (" + m.open.turns + " turns, began " + m.open.when + ")." : "");
+  showMemories(m);
+  showSessions(m);
+  showDiary(m);
+}
+
+function memPath(kind, id) { return "/api/memory/" + state.active + "/" + kind + (id === undefined ? "" : "/" + id); }
+
+function showMemories(m) {
+  const box = $("mem-items");
+  box.replaceChildren();
+  text($("mem-item-count"), m.memories.length ? m.memories.length + " memories." : "None yet: they come from your conversations.");
+  for (const category of m.categories) {
+    const items = m.memories.filter((x) => x.category === category);
+    if (!items.length) continue;
+    const head = document.createElement("h4"); text(head, category.charAt(0).toUpperCase() + category.slice(1));
+    const list = document.createElement("ul"); list.className = "log";
+    for (const x of items) {
+      const li = document.createElement("li");
+      const words = document.createElement("span");
+      text(words, (x.pinned ? "\u{1F4CC} " : "") + x.text + (x.when ? " (" + x.when + ")" : "") + "  " + "\u2605".repeat(x.importance || 3));
+      const pin = button(x.pinned ? "Unpin" : "Pin", () => api("PUT", memPath("items", x.id), { pinned: !x.pinned }).then(loadMemory));
+      const change = button("Change", () => {
+        const input = document.createElement("input"); input.size = 50; input.value = x.text;
+        const save = button("Save", () => api("PUT", memPath("items", x.id), { text: input.value }).then(loadMemory)
+          .catch((err) => alert(err.message)));
+        li.replaceChildren(input, " ", save, " ", button("Cancel", loadMemory));
+        input.focus();
+      });
+      const forget = button("Forget", () => api("DELETE", memPath("items", x.id)).then(loadMemory), "danger");
+      li.append(words, " ", pin, " ", change, " ", forget);
+      list.append(li);
+    }
+    box.append(head, list);
   }
 }
 
-function showEpisodes(m) {
-  const list = $("mem-episodes");
+function showSessions(m) {
+  const list = $("mem-sessions");
   list.replaceChildren();
-  text($("mem-episode-count"), m.episode_count === 0 ? "None yet." :
-    m.episode_count > m.episodes.length ? "The newest " + m.episodes.length + " of " + m.episode_count + "." : "");
-  for (const e of m.episodes) {
+  text($("mem-session-count"), m.session_count === 0 ? "None yet." :
+    m.session_count > m.sessions.length ? "The newest " + m.sessions.length + " of " + m.session_count + "." : "");
+  for (const e of m.sessions) {
     const li = document.createElement("li");
-    const when = document.createElement("span");
-    when.className = "who";
-    text(when, e.when);
+    const when = document.createElement("span"); when.className = "who";
+    const t0 = new Date(e.start * 1000), t1 = new Date(e.end * 1000);
+    const hm = (d) => d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    text(when, e.when + " " + hm(t0) + "\u2013" + hm(t1));
     const words = document.createElement("span");
-    text(words, e.summary);
-    const edit = button("Change", async () => {
-      const box = document.createElement("textarea");
-      box.rows = 3;
-      box.maxLength = 600;
-      box.value = e.summary;
-      const save = button("Save", () => api("PUT", episodePath(e), { summary: box.value }).then(loadMemory)
+    text(words, (e.title ? e.title + ": " : "") + (e.summary || (e.done ? "" : "(to be summed up)")) + (e.mood ? " (" + e.mood + ")" : ""));
+    const show = button("Show words", async () => {
+      const r = await api("GET", memPath("sessions", e.id));
+      const log = document.createElement("ol"); log.className = "log";
+      for (const t of r.turns) {
+        const row = document.createElement("li");
+        text(row, "You: " + t.user + "  \u2014  " + t.reply + (t.interrupted ? " (interrupted)" : ""));
+        log.append(row);
+      }
+      li.append(log);
+    });
+    const edit = button("Change", () => {
+      const box = document.createElement("textarea"); box.rows = 3; box.maxLength = 700; box.value = e.summary || "";
+      const save = button("Save", () => api("PUT", memPath("sessions", e.id), { summary: box.value }).then(loadMemory)
         .catch((err) => alert(err.message)));
       li.replaceChildren(when, box, save, button("Cancel", loadMemory));
       box.focus();
     });
-    const forget = button("Forget", () => confirm("Forget this conversation's summary?") &&
-      api("DELETE", episodePath(e)).then(loadMemory).catch((err) => alert(err.message)), "danger");
-    li.append(when, words, " ", edit, " ", forget);
+    const forget = button("Forget", () => confirm("Forget this conversation, every word of it?") &&
+      api("DELETE", memPath("sessions", e.id)).then(loadMemory).catch((err) => alert(err.message)), "danger");
+    li.append(when, words, " ", show, " ", edit, " ", forget);
     list.append(li);
   }
 }
 
-function episodePath(e) { return "/api/memory/" + state.active + "/episodes/" + e.id; }
+function showDiary(m) {
+  const list = $("mem-diary");
+  list.replaceChildren();
+  if (!m.diary.length) { const li = document.createElement("li"); text(li, "No entries yet."); list.append(li); }
+  for (const d of m.diary) {
+    const li = document.createElement("li");
+    const day = document.createElement("span"); day.className = "who"; text(day, d.day);
+    const words = document.createElement("span"); text(words, d.text);
+    const edit = button("Change", () => {
+      const box = document.createElement("textarea"); box.rows = 5; box.value = d.text;
+      const save = button("Save", () => api("PUT", memPath("diary", d.day), { text: box.value }).then(loadMemory));
+      li.replaceChildren(day, box, save, button("Cancel", loadMemory));
+    });
+    const forget = button("Forget", () => api("DELETE", memPath("diary", d.day)).then(loadMemory), "danger");
+    li.append(day, words, " ", edit, " ", forget);
+    list.append(li);
+  }
+}
 
 function button(label, onClick, className) {
   const b = document.createElement("button");
@@ -843,7 +897,17 @@ function button(label, onClick, className) {
 }
 
 $("btn-save-notes").addEventListener("click", () => api("PUT", "/api/memory/" + state.active, { notes: $("mem-notes").value }).then(loadMemory));
-$("btn-clear-memory").addEventListener("click", () => confirm("Forget the whole conversation, all notes and all summaries for this character?") &&
+$("btn-new-conversation").addEventListener("click", () => api("POST", memPath("new")).then(loadMemory));
+$("btn-add-memory").addEventListener("click", async () => {
+  try {
+    await api("POST", memPath("items"), { text: $("mem-add-text").value, category: $("mem-add-category").value,
+      when: $("mem-add-when").value || null, follow_up: !!$("mem-add-when").value, pinned: false });
+    $("mem-add-text").value = ""; $("mem-add-when").value = "";
+    text($("mem-add-msg"), "Added.");
+    loadMemory();
+  } catch (err) { text($("mem-add-msg"), err.message); }
+});
+$("btn-clear-memory").addEventListener("click", () => confirm("Forget everything this character remembers: every conversation, every memory, the diary and your notes?") &&
   api("DELETE", "/api/memory/" + state.active).then(loadMemory));
 
 // ----- services and keys

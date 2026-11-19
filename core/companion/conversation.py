@@ -18,7 +18,6 @@ import random
 from .audio import FRAME, tone
 from .characters import split_persona
 from .performance import Planner, SyllableMarks, even_timing, guess_feeling, syllable_offsets
-from .memory import when
 from .providers import ProviderError
 from .search import results_for_model
 from .speech_text import SEARCH_RULE, Splitter, speech_rules
@@ -34,20 +33,18 @@ MOOD_LINGER = 6.0            # seconds a feeling stays after a reply ends, befor
 REPLY_TIMEOUT = 90.0         # longest a whole reply may take
 
 
-def system_prompt(persona, notes, now=None, search_tag=False, gestures=("nod", "shake", "bow", "tilt"), recalled=()):
-    """The model's instructions: the persona, how to speak, the time, and what the character remembers:
-    its notes and the summaries of earlier conversations recalled for this reply (oldest first)."""
+def system_prompt(persona, remembered="", now=None, search_tag=False, gestures=("nod", "shake", "bow", "tilt")):
+    """The model's instructions: the persona, how to speak, the time, and what the character remembers
+    for this reply (memory.Memory.context: the owner's notes, its memories, the last conversation ...)."""
     body, _ = split_persona(persona)
     now = now or datetime.datetime.now()
     rules = speech_rules(gestures) + ("\n" + SEARCH_RULE if search_tag else "")
-    parts = [body, rules, "It is now %s." % now.strftime("%A %d %B %Y, %H:%M")]
-    if notes.strip():
-        parts.append("What you remember about the person you are talking with:\n" + notes.strip())
-    if recalled:
-        lines = ["- %s: %s" % (when(e["t"], now.timestamp()), e["summary"]) for e in recalled]
-        parts.append("From earlier conversations with them (your own summaries; bring them up only when "
-                     "they fit):\n" + "\n".join(lines))
+    parts = [body, rules, "It is now %s." % now.strftime("%A %d %B %Y, %H:%M"), (remembered or "").strip()]
     return "\n\n".join(p for p in parts if p)
+
+
+# Characters of text per token, roughly, for fitting what the model is given into its room.
+CHARS_PER_TOKEN = 3.2
 
 
 class Reply:
@@ -118,11 +115,12 @@ class Conversation:
         reply = self.current = Reply(heard)
         self.on_event("heard", {"text": heard})
         self.stage.state("thinking")
-        messages = self.memory.recent(self.history_turns) + [{"role": "user", "content": heard}]
         gestures = self.gestures if self.gestures is not None else getattr(self.stage, "gestures", ("nod", "shake", "bow", "tilt"))
         gestures = [g for g in gestures if g not in getattr(self.stage, "disabled", ())]
-        system = system_prompt(self.persona, self.memory.notes(), search_tag=self.search is not None, gestures=gestures,
-                               recalled=self.memory.recall(heard))
+        base = system_prompt(self.persona, "", search_tag=self.search is not None, gestures=gestures)
+        remembered, past = self.memory.context(heard, room=self.room(len(base) + len(heard)), verbatim=self.history_turns)
+        messages = past + [{"role": "user", "content": heard}]
+        system = system_prompt(self.persona, remembered, search_tag=self.search is not None, gestures=gestures)
         writer = None
         try:
             queries = []
@@ -183,6 +181,12 @@ class Conversation:
         except Exception as error:             # a provider bug must not leave the character stuck
             log.exception("language model stream failed")
             await sentences.put(ProviderError("the language model failed (%s)" % type(error).__name__))
+
+    def room(self, used):
+        """Characters left for memories and this conversation, in what the model can read at once."""
+        tokens = getattr(self.llm, "context", None) or 32000
+        reply = getattr(self.llm, "max_tokens", 400) or 400
+        return max(2000, min(int((tokens - reply) * CHARS_PER_TOKEN) - used - 1500, 60000))
 
     @property
     def patience(self):

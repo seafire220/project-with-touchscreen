@@ -20,6 +20,7 @@ import urllib.parse
 from aiohttp import web
 
 from . import animations, cards, motions, package, persona, providers, speech_text, temperament, vrm
+from . import memory as memory_module
 from .memory import when
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
@@ -631,44 +632,123 @@ class Console:
 
     # ----- memory
     async def get_memory(self, request):
+        """Everything a character remembers, for the Memory tab: the owner's notes, its memories, its
+        conversations (newest first), the one going on, and its diary."""
         memory = self.device.memory(self._cid(request))
-        episodes = memory.episodes()
         now = time.time()
+        sessions = memory.sessions()
+        open_session = memory.open_session()
         return web.json_response({
-            "notes": memory.notes(), "history": memory.history()[-100:],
-            # newest first; the page shows these, the device keeps up to memory.KEEP_EPISODES
-            "episodes": [dict(e, when=when(e["t"], now)) for e in reversed(episodes[-300:])],
-            "episode_count": len(episodes)})
+            "notes": memory.notes(),
+            "memories": sorted(memory.memories(), key=lambda m: (-m.get("pinned", False), -m.get("importance", 3), -m.get("updated", 0))),
+            "categories": list(memory_module.CATEGORIES),
+            "sessions": [dict(s, when=when(s.get("start", 0), now)) for s in reversed(sessions[-300:])],
+            "session_count": len(sessions),
+            "open": dict(open_session, when=when(open_session.get("start", 0), now),
+                         turns_now=memory.session_turns(open_session["id"])) if open_session else None,
+            "diary": list(reversed(memory.diary()[-200:])),
+        })
 
     async def put_memory(self, request):
         body = await request.json()
-        self.device.memory(self._cid(request)).set_notes(str(body.get("notes", "")))
+        if not isinstance(body, dict) or not isinstance(body.get("notes", ""), str):
+            raise web.HTTPBadRequest(text="send the notes as text")
+        self.device.memory(self._cid(request)).set_notes(body.get("notes", ""))
         return web.json_response({"ok": True})
 
     async def clear_memory(self, request):
         self.device.memory(self._cid(request)).clear()
         return web.json_response({"ok": True})
 
-    def _episode(self, request):
-        try:
-            return self.device.memory(self._cid(request)), int(request.match_info["id"])
-        except ValueError:
-            raise web.HTTPNotFound(text="no such summary")
+    async def new_conversation(self, request):
+        """Start afresh: the conversation going on ends now (it is summed up as usual)."""
+        cid = self._cid(request)
+        closed = self.device.memory(cid).new_conversation()
+        asyncio.ensure_future(self.device.keep_memory(cid))
+        return web.json_response({"ok": True, "ended": closed["id"] if closed else None})
 
-    async def put_episode(self, request):
-        memory, eid = self._episode(request)
+    def _number(self, request, name="id"):
+        try:
+            return int(request.match_info[name])
+        except ValueError:
+            raise web.HTTPNotFound()
+
+    async def get_session(self, request):
+        memory = self.device.memory(self._cid(request))
+        return web.json_response({"turns": memory.transcript(self._number(request))})
+
+    async def put_session(self, request):
+        memory = self.device.memory(self._cid(request))
         body = await request.json()
-        summary = body.get("summary") if isinstance(body, dict) else None
-        if not isinstance(summary, str) or not summary.strip():
+        if not isinstance(body, dict) or not any(isinstance(body.get(k), str) and body[k].strip() for k in ("summary", "title")):
             raise web.HTTPBadRequest(text="a summary needs some words")
-        if not memory.edit_episode(eid, summary):
-            raise web.HTTPNotFound(text="no such summary")
+        if not memory.edit_session(self._number(request), title=body.get("title"), summary=body.get("summary")):
+            raise web.HTTPNotFound(text="no such conversation")
         return web.json_response({"ok": True})
 
-    async def delete_episode(self, request):
-        memory, eid = self._episode(request)
-        if not memory.delete_episode(eid):
-            raise web.HTTPNotFound(text="no such summary")
+    async def delete_session(self, request):
+        if not self.device.memory(self._cid(request)).forget_session(self._number(request)):
+            raise web.HTTPNotFound(text="no such conversation")
+        return web.json_response({"ok": True})
+
+    def _memory_fields(self, body):
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="send the memory's text and category")
+        fields = {}
+        if "text" in body:
+            fields["text"] = str(body["text"] or "")
+        if body.get("category") is not None:
+            if body["category"] not in memory_module.CATEGORIES:
+                raise web.HTTPBadRequest(text="the category is one of: " + ", ".join(memory_module.CATEGORIES))
+            fields["category"] = body["category"]
+        if body.get("importance") is not None:
+            try:
+                fields["importance"] = max(1, min(5, int(body["importance"])))
+            except (TypeError, ValueError):
+                raise web.HTTPBadRequest(text="importance is 1 to 5")
+        if "when" in body:
+            day = str(body["when"] or "")
+            if day and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                raise web.HTTPBadRequest(text="a date is written 2026-11-21")
+            fields["when"] = day or None
+        for flag in ("pinned", "follow_up"):
+            if flag in body:
+                fields[flag] = bool(body[flag])
+        return fields
+
+    async def add_memory_item(self, request):
+        memory = self.device.memory(self._cid(request))
+        fields = self._memory_fields(await request.json())
+        entry = memory.add_memory(fields.get("text", ""), fields.get("category", "other"), fields.get("importance", 3),
+                                  fields.get("when"), follow_up=fields.get("follow_up", False), source="owner",
+                                  pinned=fields.get("pinned", False))
+        if not entry:
+            raise web.HTTPBadRequest(text="a memory needs some words")
+        return web.json_response(entry)
+
+    async def put_memory_item(self, request):
+        memory = self.device.memory(self._cid(request))
+        if not memory.edit_memory(self._number(request), **self._memory_fields(await request.json())):
+            raise web.HTTPNotFound(text="no such memory")
+        return web.json_response({"ok": True})
+
+    async def delete_memory_item(self, request):
+        if not self.device.memory(self._cid(request)).forget_memory(self._number(request)):
+            raise web.HTTPNotFound(text="no such memory")
+        return web.json_response({"ok": True})
+
+    async def put_diary(self, request):
+        memory = self.device.memory(self._cid(request))
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("text"), str) or not body["text"].strip():
+            raise web.HTTPBadRequest(text="a diary entry needs some words (or remove it)")
+        if not memory.set_diary(request.match_info["day"], body["text"]):
+            raise web.HTTPNotFound(text="no diary entry for that day")
+        return web.json_response({"ok": True})
+
+    async def delete_diary(self, request):
+        if not self.device.memory(self._cid(request)).set_diary(request.match_info["day"], ""):
+            raise web.HTTPNotFound(text="no diary entry for that day")
         return web.json_response({"ok": True})
 
     # ----- talking from the console
@@ -781,8 +861,15 @@ def make_app(device):
     r.add_get("/api/memory/{cid}", console.get_memory)
     r.add_put("/api/memory/{cid}", console.put_memory)
     r.add_delete("/api/memory/{cid}", console.clear_memory)
-    r.add_put("/api/memory/{cid}/episodes/{id}", console.put_episode)
-    r.add_delete("/api/memory/{cid}/episodes/{id}", console.delete_episode)
+    r.add_post("/api/memory/{cid}/new", console.new_conversation)
+    r.add_get("/api/memory/{cid}/sessions/{id}", console.get_session)
+    r.add_put("/api/memory/{cid}/sessions/{id}", console.put_session)
+    r.add_delete("/api/memory/{cid}/sessions/{id}", console.delete_session)
+    r.add_post("/api/memory/{cid}/items", console.add_memory_item)
+    r.add_put("/api/memory/{cid}/items/{id}", console.put_memory_item)
+    r.add_delete("/api/memory/{cid}/items/{id}", console.delete_memory_item)
+    r.add_put("/api/memory/{cid}/diary/{day}", console.put_diary)
+    r.add_delete("/api/memory/{cid}/diary/{day}", console.delete_diary)
     r.add_post("/api/say", console.say)
     r.add_post("/api/button", console.press)
     r.add_post("/api/interrupt", console.interrupt)

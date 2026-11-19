@@ -255,13 +255,14 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn({"express": "happy"}, self.stage.commands)
 
         memory = await (await self.client.get("/api/memory/aria")).json()
-        self.assertEqual(memory["history"][-1]["user"], "hello")
+        self.assertEqual(memory["open"]["turns_now"][-1]["user"], "hello", "the conversation going on")
         await self.client.put("/api/memory/aria", json={"notes": "- Says hello a lot\n"}, headers=H)
         self.assertIn("hello a lot", (await (await self.client.get("/api/memory/aria")).json())["notes"])
         exported = await (await self.client.get("/api/characters/aria/export")).read()
         self.assertNotIn(b"hello a lot", exported, "memories never leave in a package")
         r = await self.client.delete("/api/memory/aria", headers=H)
-        self.assertEqual((await (await self.client.get("/api/memory/aria")).json())["history"], [])
+        m = await (await self.client.get("/api/memory/aria")).json()
+        self.assertEqual((m["open"], m["sessions"], m["memories"], m["notes"]), (None, [], [], ""))
         r = await self.client.delete("/api/characters/aria", headers=H)
         self.assertEqual((await (await self.client.get("/api/characters")).json())["characters"], [])
 
@@ -419,64 +420,118 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         await self.client.post("/api/stage/preview", json={"clear": True}, headers=H)
         self.assertEqual(self.stage.commands[-2:], [{"gesture": "wave"}, {"clear": True, "ease": 0.3}])
 
-    async def test_summaries_of_earlier_conversations_can_be_read_changed_and_forgotten(self):
+    async def test_the_memory_tab_shows_and_changes_everything_remembered(self):
+        from companion import memory as memory_module
         await self.login()
         self.device.characters.install(package.build(good_files(), manifest()))
         memory = self.device.memory("aria")
         old = time.time() - 40 * 86400
-        memory.add_episode(4, old, "We talked about tea.")
-        memory.add_episode(9, time.time(), "We planned a picnic.")
+        first = memory.add_turn("I love green tea", "Me too!", now=old)
+        second = memory.add_turn("we planned a picnic", "How fun!")
+        memory.edit_session(first, title="Tea", summary="We talked about tea.")
         m = await (await self.client.get("/api/memory/aria")).json()
-        self.assertEqual([(e["id"], e["when"]) for e in m["episodes"]], [(9, "today"), (4, when(old))], "newest first")
-        self.assertEqual(m["episode_count"], 2)
-        r = await self.client.put("/api/memory/aria/episodes/4", json={"summary": "We talked about green tea."}, headers=H)
-        self.assertEqual(r.status, 200)
-        for path, body, status in (("4", {"summary": "  "}, 400), ("4", ["no"], 400), ("77", {"summary": "x"}, 404),
-                                   ("abc", {"summary": "x"}, 404)):
-            r = await self.client.put("/api/memory/aria/episodes/" + path, json=body, headers=H)
-            self.assertEqual(r.status, status, path)
-        r = await self.client.delete("/api/memory/aria/episodes/9")
-        self.assertEqual(r.status, 403, "changes need the X-Companion header")
-        r = await self.client.delete("/api/memory/aria/episodes/9", headers=H)
-        self.assertEqual(r.status, 200)
-        r = await self.client.delete("/api/memory/aria/episodes/9", headers=H)
-        self.assertEqual(r.status, 404)
-        m = await (await self.client.get("/api/memory/aria")).json()
-        self.assertEqual([e["summary"] for e in m["episodes"]], ["We talked about green tea."])
-        exported = await (await self.client.get("/api/characters/aria/export")).read()
-        self.assertNotIn(b"green tea", exported, "summaries never leave in a package")
+        self.assertEqual([(s["id"], s["when"], s["title"]) for s in m["sessions"]], [(first, when(old), "Tea")])
+        self.assertEqual((m["open"]["id"], m["open"]["turns_now"][0]["user"]), (second, "we planned a picnic"))
+        self.assertIn("their people", m["categories"])
+        r = await self.client.get("/api/memory/aria/sessions/%d" % first)
+        self.assertEqual([t["user"] for t in (await r.json())["turns"]], ["I love green tea"], "every word, from the archive")
 
-    async def test_a_conversation_is_summed_up_once_it_goes_quiet_however_short(self):
+        # Conversations: change one, start afresh, forget one.
+        r = await self.client.put("/api/memory/aria/sessions/%d" % first, json={"summary": "We talked about green tea."}, headers=H)
+        self.assertEqual(r.status, 200)
+        for path, body, status in ((str(first), {"summary": "  "}, 400), (str(first), ["no"], 400),
+                                   ("77", {"summary": "x"}, 404), ("abc", {"summary": "x"}, 404)):
+            r = await self.client.put("/api/memory/aria/sessions/" + path, json=body, headers=H)
+            self.assertEqual(r.status, status, path)
+        r = await self.client.post("/api/memory/aria/new", headers=H)
+        self.assertEqual(await r.json(), {"ok": True, "ended": second})
+        r = await self.client.delete("/api/memory/aria/sessions/%d" % second)
+        self.assertEqual(r.status, 403, "changes need the X-Companion header")
+        r = await self.client.delete("/api/memory/aria/sessions/%d" % second, headers=H)
+        self.assertEqual(r.status, 200)
+        r = await self.client.delete("/api/memory/aria/sessions/%d" % second, headers=H)
+        self.assertEqual(r.status, 404)
+        self.assertNotIn("picnic", json.dumps(memory.history()), "its words are gone too")
+
+        # Memories: add, pin and date, forget.
+        r = await self.client.post("/api/memory/aria/items", json={"text": "Their sister Kim lives in Perth",
+                                                                    "category": "their people", "importance": 4}, headers=H)
+        item = await r.json()
+        self.assertEqual((item["category"], item["importance"], item["source"]), ("their people", 4, "owner"))
+        for body in ({"text": "Kim again", "category": "gossip"}, {"text": "A picnic", "when": "Saturday"}, {"text": " "},
+                     {"text": "Fine then", "importance": "very"}, ["no"]):
+            r = await self.client.post("/api/memory/aria/items", json=body, headers=H)
+            self.assertEqual(r.status, 400, body)
+        r = await self.client.put("/api/memory/aria/items/%d" % item["id"], json={"pinned": True, "when": "2026-12-01"}, headers=H)
+        self.assertEqual(r.status, 200)
+        self.assertEqual([(x["pinned"], x["when"]) for x in memory.memories()], [(True, "2026-12-01")])
+        r = await self.client.put("/api/memory/aria/items/999", json={"pinned": True}, headers=H)
+        self.assertEqual(r.status, 404)
+        r = await self.client.delete("/api/memory/aria/items/%d" % item["id"], headers=H)
+        self.assertEqual(r.status, 200)
+        r = await self.client.delete("/api/memory/aria/items/%d" % item["id"], headers=H)
+        self.assertEqual(r.status, 404)
+
+        # The owner's notes and the diary.
+        r = await self.client.put("/api/memory/aria", json={"notes": "Call me Sam."}, headers=H)
+        self.assertEqual(r.status, 200)
+        r = await self.client.put("/api/memory/aria", json={"notes": ["no"]}, headers=H)
+        self.assertEqual(r.status, 400)
+        memory_module._write_jsonl(memory.diary_path, [{"day": "2026-11-18", "t": 0, "text": "A quiet day."}])
+        r = await self.client.put("/api/memory/aria/diary/2026-11-18", json={"text": "A lovely quiet day."}, headers=H)
+        self.assertEqual(r.status, 200)
+        for day, body, status in (("2026-11-18", {"text": " "}, 400), ("2026-11-17", {"text": "Hello"}, 404)):
+            r = await self.client.put("/api/memory/aria/diary/" + day, json=body, headers=H)
+            self.assertEqual(r.status, status, day)
+        m = await (await self.client.get("/api/memory/aria")).json()
+        self.assertEqual((m["notes"], m["diary"][0]["text"]), ("Call me Sam.", "A lovely quiet day."))
+        exported = await (await self.client.get("/api/characters/aria/export")).read()
+        for words in (b"green tea", b"Call me Sam", b"lovely quiet"):
+            self.assertNotIn(words, exported, "memory never leaves in a package")
+        r = await self.client.delete("/api/memory/aria/diary/2026-11-18", headers=H)
+        self.assertEqual(r.status, 200)
+        r = await self.client.delete("/api/memory/aria/diary/2026-11-18", headers=H)
+        self.assertEqual(r.status, 404)
+
+    async def test_a_conversation_is_summed_up_once_it_is_over_however_short(self):
+        from unittest import mock
+        from companion import memory as memory_module
         self.device.characters.install(package.build(good_files(), manifest()))
-        llm = FakeLLM("- Likes tea\nEPISODE: They said hello and we talked about tea.")
+        llm = FakeLLM("TITLE: Tea\nSUMMARY: They said hello and we talked about tea.\nMOOD: cheerful\n"
+                      "ADD likes and dislikes | 3 | They love tea | -")
         self.device.provider_factory = lambda which, device: {"llm": llm, "tts": FakeTTS()}.get(which)
         memory = self.device.memory("aria")
         memory.add_turn("hello, I love tea", "Tea is lovely!")
-        await self.device._maybe_update_notes("aria")
-        self.assertEqual(llm.calls, [], "one turn is not enough while the conversation goes on")
-        watch = asyncio.ensure_future(self.device.memory_watch(quiet=0.0, every=0.01))
-        try:
-            for _ in range(300):
-                await asyncio.sleep(0.01)
-                if memory.episodes():
-                    break
-        finally:
-            watch.cancel()
-        self.assertEqual([e["summary"] for e in memory.episodes()], ["They said hello and we talked about tea."])
-        self.assertEqual((memory.notes(), memory.turns_since_update, len(llm.calls)), ("- Likes tea\n", 0, 1))
+        self.assertIsNone(await self.device.keep_memory("aria"))
+        self.assertEqual(llm.calls, [], "nothing to do while the conversation goes on")
+        with mock.patch.object(memory_module, "QUIET_GAP", 0):
+            watch = asyncio.ensure_future(self.device.memory_watch(every=0.01))
+            try:
+                for _ in range(300):
+                    await asyncio.sleep(0.01)
+                    if memory.sessions() and memory.sessions()[-1].get("done"):
+                        break
+            finally:
+                watch.cancel()
+        self.assertEqual([(s["title"], s["summary"], s["why"]) for s in memory.sessions()],
+                         [("Tea", "They said hello and we talked about tea.", "quiet")])
+        self.assertEqual([x["text"] for x in memory.memories()], ["They love tea"])
 
     async def test_a_failed_memory_update_is_reported_and_retried_later(self):
         self.device.characters.install(package.build(good_files(), manifest()))
         self.device.provider_factory = lambda which, device: {"llm": FakeLLM(fail="start")}.get(which)
-        self.device.memory("aria").add_turn("hello", "hi")
+        memory = self.device.memory("aria")
+        memory.add_turn("hello", "hi")
+        memory.new_conversation()
         self.device.subscribers.add(q := asyncio.Queue())
-        await self.device._maybe_update_notes("aria", force=True)
-        self.assertIn("memory notes were not updated", (await asyncio.wait_for(q.get(), 1))["message"])
+        await self.device.keep_memory("aria")
+        self.assertIn("memory was not brought up to date", (await asyncio.wait_for(q.get(), 1))["message"])
         self.assertGreater(self.device.memory_retry, time.time() + 600)
-        self.assertEqual(self.device.memory("aria").turns_since_update, 1, "kept for the next try")
+        self.assertFalse(memory.sessions()[-1]["done"], "kept for the next try")
+        self.assertIsNone(await self.device.keep_memory("aria"), "not again straight after every reply")
+        self.assertTrue(q.empty())
         self.device.store.update_settings({"conversation": {"memory": False}})
-        self.device.memory_retry = 0
-        await self.device._maybe_update_notes("aria", force=True)
+        await self.device.keep_memory("aria", force=True)
         self.assertTrue(q.empty(), "with memory off, nothing is asked")
 
     async def test_the_button_toggles_listening(self):

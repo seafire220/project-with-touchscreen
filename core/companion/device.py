@@ -22,8 +22,8 @@ from .store import Store, redact, write_atomic
 
 log = logging.getLogger("companion")
 
-NOTES_EVERY = 6          # update the memory notes, and sum the conversation up, after this many turns
-QUIET_SUMMARY = 600.0    # or once it has been quiet this many seconds, however short it was
+# Memory is kept up to date in the background (memory.Memory.process): a conversation is summed up, and
+# its memories changed, once it is over; a long one's early part as it goes; the diary at night.
 
 
 
@@ -441,40 +441,49 @@ class Device:
             self.set_state("speaking")
         elif kind == "replied":
             self.set_state("listening" if self.listening else "idle")
-            asyncio.ensure_future(self._maybe_update_notes())
+            asyncio.ensure_future(self.keep_memory())
         self.emit(kind, data)
 
-    async def _maybe_update_notes(self, cid=None, force=False):
-        """Fold the conversation into the notes and a dated summary: every few turns, or, with
-        `force`, as soon as there is anything new (used once a conversation has gone quiet)."""
-        if not self.store.settings()["conversation"].get("memory", True) or self.summarising:
-            return
+    async def keep_memory(self, cid=None, now=None, force=False):
+        """Bring a character's memory up to date if anything is due: a conversation that is over summed
+        up (with its memories), the early part of a long one, the diary. One at a time, never while the
+        character is talking, and after a failure not again for a while (unless `force`)."""
+        settings = self.store.settings()["conversation"]
+        if not settings.get("memory", True) or self.summarising:
+            return None
+        if (self.conversation is not None and self.conversation.busy) or (not force and time.time() < self.memory_retry):
+            return None
+        cid = cid or self.active_id()
+        if not cid:
+            return None
         memory = self.memory(cid)
-        pending = memory.turns_since_update
-        if not pending or (pending < NOTES_EVERY and not force):
-            return
+        keep = int(settings.get("history_turns", 12))
+        if not memory.needs_work(now, keep=keep):
+            return None
         self.summarising = True
         try:
-            count = await memory.update_notes(self.build("llm"))
-            self.emit("memory", {"notes": count})
+            name = self.characters.manifest(cid).get("name", "")
+            persona, _ = split_persona(self.characters.persona(cid))
+            done = await memory.process(self.build("llm"), now=now, name=name, persona=persona, keep=keep)
+            if done["summed"] or done["diary"]:
+                self.emit("memory", dict(done, character=cid))
+            return done
         except ProviderError as error:
             self.memory_retry = time.time() + 15 * 60
-            self.emit("error", {"message": "memory notes were not updated: %s" % error})
+            self.emit("error", {"message": "the memory was not brought up to date: %s" % error})
+            return None
         finally:
             self.summarising = False
 
-    async def memory_watch(self, quiet=QUIET_SUMMARY, every=60.0):
-        """Sum up each character's conversation once it has gone quiet, so short chats (and the
-        last few turns before a restart or a change of character) are remembered too."""
+    async def memory_watch(self, every=60.0):
+        """Keep every character's memory up to date: conversations that have gone quiet are summed up
+        (so short chats, and the last turns before a restart or a change of character, are remembered
+        too), and each day's diary is written."""
         while True:
             await asyncio.sleep(every)
             try:
-                if (self.conversation is not None and self.conversation.busy) or time.time() < self.memory_retry:
-                    continue
                 for cid in self.characters.ids():
-                    memory = self.memory(cid)
-                    if memory.turns_since_update and time.time() - memory.last_turn_time() > quiet:
-                        await self._maybe_update_notes(cid, force=True)
+                    await self.keep_memory(cid)
             except Exception:
                 log.exception("memory watch failed")
 

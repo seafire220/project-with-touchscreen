@@ -1,21 +1,34 @@
-"""What a character remembers, kept on the device and editable by the owner.
+"""What a character remembers, kept on the device and shown to the owner (docs/31-memory.md).
 
-Per character:
+People remember talks as wholes (when they were, what they were about, how they went) and know lasting
+things about each other. So does the character. Per character:
 
-  history.jsonl   the recent conversation, one numbered turn per line
-  notes.md        lasting notes about the owner and the relationship, in
-                  plain words; the owner can read and edit them in the console
-  episodes.jsonl  a dated summary of each stretch of conversation, kept for
-                  good, so the character can recall what was said months ago;
-                  the owner can read, edit and delete them in the console
-  state.json      the last turn already summarised
+  history.jsonl   the recent turns word for word (the last 400), each marked with its conversation
+  archive/        every turn ever said, a file a month: the settings page shows any conversation again
+  sessions.jsonl  the conversations that have ended: when, why it ended, a title, a summary, how the
+                  person seemed
+  memories.jsonl  what it knows: each memory one short sentence with a category, how much it matters
+                  (1 to 5), when it was learnt and last changed; a plan or event has its date, and some
+                  are to be asked about once that date has passed
+  diary.jsonl     an entry for each day they talked, written in the character's own voice
+  notes.md        what the owner asks it always to remember (the model never changes this)
+  state.json      the conversation going on now, and what has been done
 
-Notes and a new summary come from one language-model call every few turns,
-and once a conversation has gone quiet (`device.memory_watch`). The notes are
-given to the model at the start of every reply, with the most recent summary
-and the older summaries whose words best match what the owner just said,
-found on the device without the model. Nothing here is ever put in a
-character package.
+**Conversations.** One ends after 20 quiet minutes, three minutes after a goodbye, when a new day begins
+(4 am) between two of its turns, or when the owner starts a new one. The next word begins another.
+
+**After a conversation** the model (in the background, when the device is not talking) writes its title
+and summary and says which memories to add, change or retire: what was said wins over what was
+remembered. A **long conversation** has its early part summed up as it goes, so the model always has
+the gist of it and its latest turns word for word. **At night** (or the next day) the character writes
+its diary entry for the day.
+
+**For each reply** the model gets: the owner's notes; the memories that matter now (the most important,
+the pinned, and those whose words match what was just said); plans to ask about; how long since they
+last talked and what about (with the last words, if it was within two hours); yesterday's diary on the
+day's first conversation; older conversations that match; and this conversation, all within the room
+the model has (a small model on a home computer gets less). Nothing here is ever put in a character
+package.
 """
 import datetime
 import json
@@ -27,14 +40,37 @@ import time
 
 from .store import write_atomic
 
-KEEP_TURNS = 400
+KEEP_TURNS = 400              # word for word, in history.jsonl (all of them are in the archive)
 NOTES_LIMIT = 4000
-KEEP_EPISODES = 3000         # years of daily conversation
-EPISODE_LIMIT = 600          # characters in one summary
-RECALL = 3                   # older summaries recalled for a reply, besides the most recent
-SAME_CONVERSATION = 1800     # turns closer than this (seconds) to the last summary extend it
+KEEP_SESSIONS = 5000
+SUMMARY_LIMIT = 700
+TITLE_LIMIT = 60
+MEMORY_LIMIT = 220            # characters in one memory
+KEEP_MEMORIES = 600
+DIARY_LIMIT = 1600
 
-# Words too common to say what a conversation was about.
+QUIET_GAP = 20 * 60           # this long without a word ends a conversation
+GOODBYE_GRACE = 3 * 60        # after a goodbye, a word within this long carries the same conversation on
+NEW_DAY_HOUR = 4              # a pause across 4 am of at least NEW_DAY_PAUSE begins a new conversation
+NEW_DAY_PAUSE = 5 * 60
+CARRY_OVER = 2 * 3600         # a conversation that ended this recently: its last words open the next
+CARRY_TURNS = 3
+KEEP_VERBATIM = 12            # this conversation's latest turns, word for word (the owner can change it)
+ROLL_STEP = 12                # once this many more turns than that are not summed up, the early ones are
+DIARY_HOUR = 21               # the day's diary is written from this hour, once it has gone quiet
+RECALL_MEMORIES = 8
+RECALL_SESSIONS = 3
+
+SHOW_ORDER = ("notes", "memories", "older", "follow", "last", "now")
+
+CATEGORIES = ("about them", "their people", "likes and dislikes", "work and study", "plans and events",
+              "health and wellbeing", "our relationship", "about me", "other")
+
+GOODBYE = re.compile(r"(?i)(\bgood ?bye\b|\bbye\b|\bgood ?night\b|\bnight night\b|\bsee (you|ya)\b|"
+                     r"\btalk (to you )?(later|soon|tomorrow)\b|\bcatch you later\b|\bgot(ta| to) go\b|"
+                     r"\bi('m| am) off\b|\bi (have|need) to go\b|\bsleep well\b|\bsweet dreams\b)")
+
+# Words too common to say what something is about.
 STOPWORDS = set("""a about after again all also am an and any are as at be because been before being but by can
 could did do does doing don't for from had has have having he her here hers him his how i i'm if in into is it it's
 its just know like me more most my no not now of off oh ok okay on once only or other our out over really said say
@@ -43,261 +79,6 @@ were what when where which while who why will with would yeah yes you you're you
 remember remembered tell told talk talks talked talking think thought thing things something anything want wanted
 going gonna got get make made let well sure maybe mean right good great nice much many lot little bit kind sort way
 day time last first back still even ever never always sometimes person character conversation""".split())
-
-UPDATE_PROMPT = """You keep a character's memory of the person they talk with.
-
-Current notes:
-{notes}
-{earlier}
-Recent conversation:
-{conversation}
-
-Write the updated notes: short plain sentences, one per line, each starting
-with "- ". Keep lasting facts (names, likes, plans, important events, how the
-person wants to be treated) and drop small talk. Merge with the current
-notes; remove anything the person corrected. At most 30 lines.
-
-Then, on one last line starting with "EPISODE: ", say in one to three
-sentences what this whole conversation was about, as the character would
-remember it: the topics, anything that happened or was planned, and how the
-person felt.
-
-Reply with the notes and that line only."""
-EARLIER = "\nEarlier in this same conversation (already summed up): {summary}\n"
-
-
-class Memory:
-    def __init__(self, folder):
-        self.folder = folder
-        os.makedirs(folder, exist_ok=True)
-        self.history_path = os.path.join(folder, "history.jsonl")
-        self.notes_path = os.path.join(folder, "notes.md")
-        self.episodes_path = os.path.join(folder, "episodes.jsonl")
-        self.state_path = os.path.join(folder, "state.json")
-        self._lock = threading.Lock()
-        self._index_key = None          # the summaries' words, read again only when the file changes
-        self._index = ([], [], {})
-
-    # ----- the conversation
-    def _lines(self):
-        try:
-            with open(self.history_path, encoding="utf-8") as f:
-                return [l for l in f.read().splitlines() if l.strip()]
-        except OSError:
-            return []
-
-    def history(self):
-        out = []
-        for line in self._lines():
-            try:
-                turn = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(turn, dict):
-                out.append(turn)
-        return out
-
-    def recent(self, turns):
-        """The last `turns` exchanges as chat messages, oldest first."""
-        messages = []
-        for turn in self.history()[-turns:]:
-            if turn.get("user"):
-                messages.append({"role": "user", "content": turn["user"]})
-            if turn.get("reply"):
-                messages.append({"role": "assistant", "content": turn["reply"]})
-        return messages
-
-    def add_turn(self, user, reply, interrupted=False):
-        # Turns are numbered, not only timed: a device without a clock battery can start with the wrong time.
-        with self._lock:
-            history = self.history()
-            turn = {"n": (history[-1].get("n", 0) if history else 0) + 1, "t": round(time.time()),
-                    "user": user, "reply": reply}
-            if interrupted:
-                turn["interrupted"] = True
-            lines = self._lines() + [json.dumps(turn, ensure_ascii=False)]
-            write_atomic(self.history_path, "\n".join(lines[-KEEP_TURNS:]) + "\n")
-
-    def last_turn_time(self):
-        history = self.history()
-        return history[-1].get("t", 0) if history else 0
-
-    # ----- notes
-    def notes(self):
-        try:
-            with open(self.notes_path, encoding="utf-8") as f:
-                return f.read()
-        except OSError:
-            return ""
-
-    def set_notes(self, text):
-        text = (text or "").replace("\r\n", "\n")[:NOTES_LIMIT]
-        write_atomic(self.notes_path, text)
-
-    def clear(self):
-        with self._lock:
-            for path in (self.history_path, self.notes_path, self.episodes_path, self.state_path):
-                if os.path.exists(path):
-                    os.remove(path)
-
-    # ----- summaries of earlier conversations
-    def episodes(self):
-        """Every summary, oldest first: {"id": last turn's number, "t": its time, "summary": text}."""
-        out = []
-        try:
-            with open(self.episodes_path, encoding="utf-8") as f:
-                for line in f:
-                    try:
-                        e = json.loads(line)
-                    except ValueError:
-                        continue
-                    if isinstance(e, dict) and isinstance(e.get("summary"), str) and isinstance(e.get("id"), int):
-                        out.append(e)
-        except OSError:
-            pass
-        return out
-
-    def _write_episodes(self, episodes):
-        write_atomic(self.episodes_path, "".join(json.dumps(e, ensure_ascii=False) + "\n"
-                                                 for e in episodes[-KEEP_EPISODES:]))
-
-    def add_episode(self, id, t, summary):
-        summary = " ".join(summary.split())[:EPISODE_LIMIT]
-        if summary:
-            with self._lock:
-                self._write_episodes([e for e in self.episodes() if e["id"] != id] +
-                                     [{"id": int(id), "t": int(t), "summary": summary}])
-
-    def edit_episode(self, id, summary):
-        """Change one summary (the owner's wording wins); an empty one is forgotten. False if not found."""
-        summary = " ".join((summary or "").split())[:EPISODE_LIMIT]
-        with self._lock:
-            episodes = self.episodes()
-            found = any(e["id"] == id for e in episodes)
-            if found:
-                self._write_episodes([dict(e, summary=summary) if e["id"] == id else e
-                                      for e in episodes if summary or e["id"] != id])
-        return found
-
-    def delete_episode(self, id):
-        return self.edit_episode(id, "")
-
-    def _episode_index(self):
-        """The summaries, the words of each, and how many summaries have each word."""
-        try:
-            st = os.stat(self.episodes_path)
-            key = (st.st_mtime_ns, st.st_size)
-        except OSError:
-            return [], [], {}
-        if key != self._index_key:
-            episodes = self.episodes()
-            words = [set(_words(e["summary"])) for e in episodes]
-            counts = {}
-            for doc in words:
-                for w in doc:
-                    counts[w] = counts.get(w, 0) + 1
-            self._index, self._index_key = (episodes, words, counts), key
-        return self._index
-
-    def recall(self, heard, limit=RECALL):
-        """The most recent summary, and up to `limit` older ones whose words best match `heard`
-        (rarer words count for more), oldest first."""
-        episodes, docs, counts = self._episode_index()
-        if not episodes:
-            return []
-        words = set(_words(heard))
-        scored = []
-        for i, doc in enumerate(docs[:-1]):
-            shared = words & doc
-            if shared:
-                scored.append((sum(math.log(1 + len(episodes) / counts[w]) for w in shared), i))
-        scored.sort(key=lambda x: (-x[0], -x[1]))          # best first; newer wins a tie
-        return [episodes[i] for i in sorted(i for _, i in scored[:limit])] + [episodes[-1]]
-
-    # ----- keeping notes and summaries up to date
-    def _pending(self):
-        """Turns not yet folded into the notes and a summary."""
-        done = self._state().get("summarised", 0)
-        return [turn for turn in self.history() if turn.get("n", 0) > done]
-
-    def _state(self):
-        try:
-            with open(self.state_path, encoding="utf-8") as f:
-                state = json.load(f)
-            return state if isinstance(state, dict) else {}
-        except (OSError, ValueError):
-            return {}
-
-    @property
-    def turns_since_update(self):
-        return len(self._pending())
-
-    def _continues(self, pending):
-        """The summary that the pending turns carry on from, if they belong to the same conversation."""
-        episodes = self.episodes()
-        if not pending or not episodes:
-            return None
-        last = episodes[-1]
-        if last["id"] == self._state().get("summarised") and 0 <= pending[0].get("t", 0) - last["t"] < SAME_CONVERSATION:
-            return last
-        return None
-
-    def update_prompt(self):
-        """The request to the model: the current notes, the summary of this conversation so far
-        (if it was summed up before), and the turns since the last update."""
-        pending = self._pending()[-30:]
-        earlier = self._continues(pending)
-        lines = []
-        for turn in pending:
-            if turn.get("user"):
-                lines.append("Person: %s" % turn["user"])
-            if turn.get("reply"):
-                lines.append("Character: %s" % turn["reply"])
-        return UPDATE_PROMPT.format(notes=self.notes() or "(none yet)", conversation="\n".join(lines) or "(none)",
-                                    earlier=EARLIER.format(summary=earlier["summary"]) if earlier else "")
-
-    async def update_notes(self, llm):
-        """Ask the language model to fold the conversation since the last update into the notes,
-        and to sum it up for the summaries of earlier conversations (one summary per conversation:
-        a later update of the same conversation replaces it). Returns the number of notes."""
-        pending = self._pending()
-        if not pending:
-            return 0
-        earlier = self._continues(pending)
-        prompt = self.update_prompt()
-        text = ""
-        async for piece in llm.stream("You maintain concise notes.", [{"role": "user", "content": prompt}]):
-            text += piece
-        last = pending[-1]
-        if last.get("n") not in {turn.get("n") for turn in self.history()}:
-            return 0                          # the owner had the memory forgotten meanwhile
-        lines, episode = parse_update(text)
-        if lines:
-            self.set_notes("\n".join(lines[:30]) + "\n")
-        if episode:
-            if earlier:
-                self.delete_episode(earlier["id"])
-            self.add_episode(last.get("n", 0), last.get("t", time.time()), episode)
-        write_atomic(self.state_path, json.dumps({"summarised": last.get("n", 0)}))
-        return len(lines)
-
-
-EPISODE_LINE = re.compile(r"(?i)episode\s*[*_]*\s*:\s*[*_]*\s*(.*)")
-
-
-def parse_update(text):
-    """The notes ("- " lines) and the summary ("EPISODE: " line) in the model's answer, allowing for
-    the ways models dress that line up ("**Episode:**", "- EPISODE:", "## Episode:")."""
-    notes, episode = [], ""
-    for line in text.splitlines():
-        line = line.strip()
-        found = EPISODE_LINE.match(re.sub(r"^[-*#_\s]+", "", line))
-        if found:
-            episode = found.group(1).strip().strip("*_").strip()
-        elif line.startswith("- "):
-            notes.append(line)
-    return notes, episode
-
 
 WORD = re.compile(r"[^\W\d_](?:[^\W\d_]|')*")
 
@@ -335,7 +116,7 @@ def stem(w):
 
 
 def when(t, now=None):
-    """A summary's date in words: today, yesterday, 3 days ago, or the date."""
+    """A date in words: today, yesterday, 3 days ago, or the date."""
     now = now or time.time()
     day = datetime.date.fromtimestamp(t)
     days = (datetime.date.fromtimestamp(now) - day).days
@@ -346,3 +127,961 @@ def when(t, now=None):
     if days < 7:
         return "%d days ago" % days
     return "%d %s" % (day.day, day.strftime("%B %Y"))
+
+
+def part_of_day(t):
+    h = datetime.datetime.fromtimestamp(t).hour
+    return "morning" if 5 <= h < 12 else "afternoon" if 12 <= h < 17 else "evening" if 17 <= h < 22 else "night"
+
+
+def said_when(t, now=None):
+    """When something was said, as people put it: "25 minutes ago", "this morning (3 hours ago)",
+    "last night", "yesterday evening", "on Monday evening (2 days ago)", "on 2 March (5 weeks ago)"."""
+    now = now or time.time()
+    gap = max(0, now - t)
+    if gap < 3600:
+        return _ago(gap)
+    part = part_of_day(t)
+    days = (talk_day(now) - talk_day(t)).days
+    if days <= 0:
+        return "%s (%s)" % ("earlier tonight" if part == "night" else "this " + part, _ago(gap))
+    if days == 1:
+        return "last night" if part == "night" else "yesterday " + part
+    stamp = datetime.datetime.fromtimestamp(t)
+    if days < 7:
+        return "on %s %s (%d days ago)" % (stamp.strftime("%A"), part, days)
+    if days < 60:
+        ago = "%d weeks ago" % round(days / 7)
+    elif days < 365:
+        ago = "%d months ago" % round(days / 30.4)
+    else:
+        ago = "over a year ago" if days < 730 else "%d years ago" % (days // 365)
+    return "on %d %s (%s)" % (stamp.day, stamp.strftime("%B %Y"), ago)
+
+
+def talk_day(t):
+    """The day a moment belongs to, the way people count it: until 4 am it is still the day before."""
+    return (datetime.datetime.fromtimestamp(t) - datetime.timedelta(hours=NEW_DAY_HOUR)).date()
+
+
+def _clean(text, limit):
+    return " ".join(str(text or "").split())[:limit]
+
+
+def _jsonl(path):
+    out = []
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    item = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(item, dict):
+                    out.append(item)
+    except OSError:
+        pass
+    return out
+
+
+def _write_jsonl(path, items):
+    write_atomic(path, "".join(json.dumps(i, ensure_ascii=False) + "\n" for i in items))
+
+
+class Index:
+    """Finds the texts whose words best match a question; rarer words count for more."""
+
+    def __init__(self, texts):
+        self.docs = [set(_words(t)) for t in texts]
+        self.counts = {}
+        for doc in self.docs:
+            for w in doc:
+                self.counts[w] = self.counts.get(w, 0) + 1
+
+    def scores(self, question):
+        words = set(_words(question))
+        n = len(self.docs)
+        out = []
+        for i, doc in enumerate(self.docs):
+            shared = words & doc
+            if shared:
+                out.append((sum(math.log(1 + n / self.counts[w]) for w in shared), i))
+        return out
+
+
+class Memory:
+    def __init__(self, folder):
+        self.folder = folder
+        os.makedirs(folder, exist_ok=True)
+        self.history_path = os.path.join(folder, "history.jsonl")
+        self.notes_path = os.path.join(folder, "notes.md")
+        self.sessions_path = os.path.join(folder, "sessions.jsonl")
+        self.memories_path = os.path.join(folder, "memories.jsonl")
+        self.diary_path = os.path.join(folder, "diary.jsonl")
+        self.state_path = os.path.join(folder, "state.json")
+        self.archive_dir = os.path.join(folder, "archive")
+        self._lock = threading.RLock()
+        self._indexes = {}
+        self._upgrade()
+
+    # ----- files
+    def _state(self):
+        try:
+            with open(self.state_path, encoding="utf-8") as f:
+                state = json.load(f)
+            return state if isinstance(state, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save_state(self, state):
+        write_atomic(self.state_path, json.dumps(state, ensure_ascii=False))
+
+    def _history_lines(self):
+        try:
+            with open(self.history_path, encoding="utf-8") as f:
+                return [l for l in f.read().splitlines() if l.strip()]
+        except OSError:
+            return []
+
+    def history(self):
+        """The recent turns, oldest first: {"n", "t", "s" (its conversation), "user", "reply"}."""
+        return _jsonl(self.history_path)
+
+    def last_turn_time(self):
+        history = self.history()
+        return history[-1].get("t", 0) if history else 0
+
+    def _upgrade(self):
+        """Memory kept by the first version (notes written by the model, a summary per stretch of
+        conversation) becomes memories and ended conversations, once."""
+        with self._lock:
+            state = self._state()
+            if state.get("version", 1) >= 2:
+                return
+            old_episodes = os.path.join(self.folder, "episodes.jsonl")
+            sessions, memories = [], []
+            if os.path.exists(old_episodes):
+                last = 0
+                for k, e in enumerate(_jsonl(old_episodes), 1):
+                    if not isinstance(e.get("summary"), str) or not isinstance(e.get("id"), int):
+                        continue
+                    sessions.append({"id": k, "start": int(e.get("t", 0)), "end": int(e.get("t", 0)), "first": last + 1,
+                                     "last": e["id"], "turns": max(0, e["id"] - last), "why": "earlier", "title": "",
+                                     "summary": _clean(e["summary"], SUMMARY_LIMIT), "mood": "", "done": True})
+                    last = e["id"]
+                os.replace(old_episodes, old_episodes + ".v1")
+            notes = self.notes()
+            if notes.strip() and not state.get("owner_notes"):
+                # The first version's notes were the model's: they become memories; the owner's own
+                # notes start empty.
+                now = int(time.time())
+                for line in notes.splitlines():
+                    text = _clean(re.sub(r"^\s*[-*•]\s*", "", line), MEMORY_LIMIT)
+                    if len(text) > 2:
+                        memories.append({"id": len(memories) + 1, "text": text, "category": "about them",
+                                         "importance": 3, "created": now, "updated": now, "source": "notes"})
+                write_atomic(self.notes_path + ".v1", notes)
+                write_atomic(self.notes_path, "")
+            if sessions:
+                _write_jsonl(self.sessions_path, sessions)
+            if memories:
+                _write_jsonl(self.memories_path, memories)
+            # Turns already summed up belong to the conversations above; those since, to an open one.
+            history = self.history()
+            done = state.get("summarised", 0)
+            open_session = None
+            if history:
+                for turn in history:
+                    owner = next((s["id"] for s in sessions if s["first"] <= turn.get("n", 0) <= s["last"]), None)
+                    if owner is None and turn.get("n", 0) > done:
+                        if open_session is None:
+                            open_session = {"id": len(sessions) + 1, "start": turn.get("t", 0), "first": turn.get("n", 0),
+                                            "turns": 0, "rolling": "", "rolled": turn.get("n", 1) - 1}
+                        owner = open_session["id"]
+                        open_session.update(end=turn.get("t", 0), last=turn.get("n", 0), turns=open_session["turns"] + 1)
+                    turn["s"] = owner or 0
+                _write_jsonl(self.history_path, history)
+                self._archive(history)
+            # Diary entries begin with the days after this (none for days long past).
+            self._save_state({"version": 2, "open": open_session, "next": len(sessions) + 2,
+                              "diary_from": (talk_day(time.time()) - datetime.timedelta(days=1)).isoformat()
+                              if sessions else ""})
+
+    def _archive(self, turns):
+        """Add turns to the archive, a file a month."""
+        os.makedirs(self.archive_dir, exist_ok=True)
+        by_month = {}
+        for turn in turns:
+            month = datetime.date.fromtimestamp(turn.get("t", 0)).strftime("%Y-%m")
+            by_month.setdefault(month, []).append(turn)
+        for month, items in by_month.items():
+            with open(os.path.join(self.archive_dir, month + ".jsonl"), "a", encoding="utf-8") as f:
+                for turn in items:
+                    f.write(json.dumps(turn, ensure_ascii=False) + "\n")
+
+    # ----- the owner's notes
+    def notes(self):
+        try:
+            with open(self.notes_path, encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return ""
+
+    def set_notes(self, text):
+        text = (text or "").replace("\r\n", "\n")[:NOTES_LIMIT]
+        with self._lock:
+            write_atomic(self.notes_path, text)
+            state = self._state()
+            state["owner_notes"] = True
+            self._save_state(state)
+
+    # ----- conversations
+    def sessions(self):
+        """The conversations that have ended, oldest first."""
+        return _jsonl(self.sessions_path)
+
+    def open_session(self):
+        return self._state().get("open")
+
+    def _ends(self, session, now):
+        """Why the open conversation is over by `now` (None if a word now would carry it on)."""
+        if not session:
+            return None
+        end = session.get("end", 0)
+        if session.get("goodbye") and now - session["goodbye"] > GOODBYE_GRACE:
+            return "goodbye"
+        if now - end > QUIET_GAP:
+            return "quiet"
+        if now - end > NEW_DAY_PAUSE and talk_day(now) != talk_day(end):
+            return "new day"
+        return None
+
+    def _close(self, state, why):
+        """End the open conversation (it waits to be summed up)."""
+        session = state.get("open")
+        if not session:
+            return None
+        closed = {k: session.get(k) for k in ("id", "start", "end", "first", "last", "turns")}
+        closed.update(why=why, title="", summary="", mood="", done=False, rolling=session.get("rolling", ""))
+        with open(self.sessions_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(closed, ensure_ascii=False) + "\n")
+        state["open"] = None
+        return closed
+
+    def close_stale(self, now=None):
+        """End the open conversation if it is over (quiet, a goodbye, a new day). Returns it if so."""
+        now = now or time.time()
+        with self._lock:
+            state = self._state()
+            why = self._ends(state.get("open"), now)
+            if not why:
+                return None
+            closed = self._close(state, why)
+            self._save_state(state)
+            return closed
+
+    def new_conversation(self):
+        """The owner (or the person) starts afresh: the conversation going on ends now."""
+        with self._lock:
+            state = self._state()
+            closed = self._close(state, "started afresh")
+            self._save_state(state)
+            return closed
+
+    def add_turn(self, user, reply, interrupted=False, now=None):
+        """Keep a turn: in the conversation going on, or a new one if that one is over. Returns its
+        conversation's number."""
+        # Turns are numbered, not only timed: a device without a clock battery can start with the wrong time.
+        now = int(now or time.time())
+        with self._lock:
+            state = self._state()
+            why = self._ends(state.get("open"), now)
+            if why:
+                self._close(state, why)
+            history = self.history()
+            n = (history[-1].get("n", 0) if history else 0) + 1
+            session = state.get("open")
+            if not session:
+                sid = max(state.get("next", 1), max((s.get("id", 0) for s in self.sessions()), default=0) + 1)
+                session = {"id": sid, "start": now, "first": n, "turns": 0, "rolling": "", "rolled": n - 1}
+                state["next"] = sid + 1
+            turn = {"n": n, "t": now, "s": session["id"], "user": user, "reply": reply}
+            if interrupted:
+                turn["interrupted"] = True
+            session.update(end=now, last=n, turns=session.get("turns", 0) + 1)
+            if user and GOODBYE.search(user):
+                session["goodbye"] = now
+            else:
+                session.pop("goodbye", None)
+            state["open"] = session
+            lines = self._history_lines() + [json.dumps(turn, ensure_ascii=False)]
+            write_atomic(self.history_path, "\n".join(lines[-KEEP_TURNS:]) + "\n")
+            self._archive([turn])
+            self._save_state(state)
+            return session["id"]
+
+    def transcript(self, sid):
+        """Every turn of a conversation, from the archive."""
+        out = []
+        try:
+            months = sorted(os.listdir(self.archive_dir))
+        except OSError:
+            return out
+        for month in months:
+            out += [t for t in _jsonl(os.path.join(self.archive_dir, month)) if t.get("s") == sid]
+        return sorted(out, key=lambda t: t.get("n", 0))
+
+    def edit_session(self, sid, title=None, summary=None):
+        with self._lock:
+            sessions = self.sessions()
+            found = False
+            for s in sessions:
+                if s.get("id") == sid:
+                    found = True
+                    if title is not None:
+                        s["title"] = _clean(title, TITLE_LIMIT)
+                    if summary is not None:
+                        s["summary"] = _clean(summary, SUMMARY_LIMIT)
+                    s["done"] = True                      # the owner's words stand
+            if found:
+                _write_jsonl(self.sessions_path, sessions)
+            return found
+
+    def forget_session(self, sid):
+        """Forget a conversation: its summary and every word of it (memories learnt from it stay, for
+        the owner to remove separately). False if not found."""
+        with self._lock:
+            sessions = self.sessions()
+            state = self._state()
+            is_open = (state.get("open") or {}).get("id") == sid
+            if not is_open and not any(s.get("id") == sid for s in sessions):
+                return False
+            _write_jsonl(self.sessions_path, [s for s in sessions if s.get("id") != sid])
+            if is_open:
+                state["open"] = None
+                self._save_state(state)
+            _write_jsonl(self.history_path, [t for t in self.history() if t.get("s") != sid])
+            try:
+                months = os.listdir(self.archive_dir)
+            except OSError:
+                months = []
+            for month in months:
+                path = os.path.join(self.archive_dir, month)
+                turns = _jsonl(path)
+                kept = [t for t in turns if t.get("s") != sid]
+                if len(kept) != len(turns):
+                    _write_jsonl(path, kept)
+            return True
+
+    def session_turns(self, sid):
+        """The turns of a conversation still in the recent history (word for word)."""
+        return [t for t in self.history() if t.get("s") == sid]
+
+    # ----- memories
+    def memories(self, everything=False):
+        """What it knows, oldest first (retired ones only with `everything`)."""
+        items = _jsonl(self.memories_path)
+        return items if everything else [m for m in items if m.get("status", "active") == "active"]
+
+    def _save_memories(self, items):
+        _write_jsonl(self.memories_path, items)
+
+    def add_memory(self, text, category="other", importance=3, when_date=None, follow_up=False, source="owner",
+                   pinned=False, now=None):
+        """Keep a memory; one that says nearly the same as an active one updates that one instead.
+        Returns its entry, or None if it says nothing."""
+        text = _clean(text, MEMORY_LIMIT)
+        if len(text) < 3:
+            return None
+        now = int(now or time.time())
+        category = category if category in CATEGORIES else "other"
+        with self._lock:
+            items = self.memories(everything=True)
+            words = set(_words(text))
+            for m in items:
+                if m.get("status", "active") != "active":
+                    continue
+                theirs = set(_words(m.get("text", "")))
+                if words and theirs and len(words & theirs) / len(words | theirs) >= 0.75:
+                    m.update(text=text, updated=now, importance=max(m.get("importance", 3), int(importance)))
+                    if when_date:
+                        m["when"] = when_date
+                    self._save_memories(items)
+                    return m
+            entry = {"id": max((m.get("id", 0) for m in items), default=0) + 1, "text": text, "category": category,
+                     "importance": max(1, min(5, int(importance))), "created": now, "updated": now, "source": source}
+            if when_date:
+                entry["when"] = when_date
+            if follow_up:
+                entry["follow_up"] = True
+            if pinned:
+                entry["pinned"] = True
+            items.append(entry)
+            # Keep the number within reason: the least important, longest unchanged go first; pinned stay.
+            active = [m for m in items if m.get("status", "active") == "active"]
+            if len(active) > KEEP_MEMORIES:
+                spare = sorted((m for m in active if not m.get("pinned")),
+                               key=lambda m: (m.get("importance", 3), m.get("updated", 0)))
+                drop = {m["id"] for m in spare[:len(active) - KEEP_MEMORIES]}
+                items = [m for m in items if m.get("id") not in drop]
+            self._save_memories(items)
+            return entry
+
+    def edit_memory(self, mid, **changes):
+        """Change a memory (text, category, importance, when, pinned, follow_up); None to retire it.
+        False if not found."""
+        with self._lock:
+            items = self.memories(everything=True)
+            for m in items:
+                if m.get("id") != mid:
+                    continue
+                if "text" in changes and changes["text"] is not None:
+                    text = _clean(changes["text"], MEMORY_LIMIT)
+                    if len(text) < 3:
+                        return False
+                    m["text"] = text
+                if changes.get("category") in CATEGORIES:
+                    m["category"] = changes["category"]
+                if "importance" in changes and changes["importance"] is not None:
+                    m["importance"] = max(1, min(5, int(changes["importance"])))
+                for flag in ("pinned", "follow_up"):
+                    if flag in changes and changes[flag] is not None:
+                        if changes[flag]:
+                            m[flag] = True
+                        else:
+                            m.pop(flag, None)
+                if "when" in changes:
+                    if changes["when"]:
+                        m["when"] = changes["when"]
+                    else:
+                        m.pop("when", None)
+                if changes.get("status") in ("active", "retired", "done"):
+                    m["status"] = changes["status"]
+                m["updated"] = int(time.time())
+                self._save_memories(items)
+                return True
+            return False
+
+    def forget_memory(self, mid):
+        with self._lock:
+            items = self.memories(everything=True)
+            kept = [m for m in items if m.get("id") != mid]
+            if len(kept) == len(items):
+                return False
+            self._save_memories(kept)
+            return True
+
+    def follow_ups(self, now=None):
+        """Plans whose day has come, to ask how they went (each at most twice, within a fortnight)."""
+        now = now or time.time()
+        today = datetime.date.fromtimestamp(now)
+        out = []
+        for m in self.memories():
+            if not m.get("follow_up") or m.get("asked", 0) >= 2:
+                continue
+            try:
+                due = datetime.date.fromisoformat(m.get("when", ""))
+            except ValueError:
+                continue
+            if due <= today <= due + datetime.timedelta(days=14):
+                out.append(m)
+        return out
+
+    def _mark_asked(self, ids):
+        if not ids:
+            return
+        with self._lock:
+            items = self.memories(everything=True)
+            for m in items:
+                if m.get("id") in ids:
+                    m["asked"] = m.get("asked", 0) + 1
+            self._save_memories(items)
+
+    # ----- the diary
+    def diary(self):
+        return _jsonl(self.diary_path)
+
+    def set_diary(self, day, text):
+        """Change (or, with no text, remove) a day's entry. False if there is none."""
+        with self._lock:
+            entries = self.diary()
+            found = any(e.get("day") == day for e in entries)
+            if found:
+                text = (text or "").strip()[:DIARY_LIMIT]
+                _write_jsonl(self.diary_path, [dict(e, text=text) if e.get("day") == day else e
+                                               for e in entries if text or e.get("day") != day])
+            return found
+
+    def clear(self):
+        """Forget everything: conversations, memories, the diary and the owner's notes."""
+        with self._lock:
+            for path in (self.history_path, self.notes_path, self.sessions_path, self.memories_path, self.diary_path,
+                         self.state_path):
+                if os.path.exists(path):
+                    os.remove(path)
+            if os.path.isdir(self.archive_dir):
+                for name in os.listdir(self.archive_dir):
+                    os.remove(os.path.join(self.archive_dir, name))
+            self._save_state({"version": 2, "open": None, "next": 1})
+
+    # ----- what the model is given
+    def context(self, heard, now=None, room=24000, verbatim=KEEP_VERBATIM):
+        """For a reply to `heard`: text about the past for the model's instructions, and this
+        conversation so far as chat messages, within `room` characters in all."""
+        now = now or time.time()
+        state = self._state()
+        session = state.get("open")
+        sessions = self.sessions()
+        last = sessions[-1] if sessions else None
+        if self._ends(session, now):
+            last, session = session, None     # it is over: the next word begins a new conversation
+        history = self.history()
+        parts = []
+        notes = self.notes().strip()
+        if notes:
+            parts.append(("notes", "What they asked you always to remember:\n" + notes[:3000]))
+
+        # Memories: the pinned, the most important, and those that match what was just said.
+        memories = self.memories()
+        if memories:
+            question = heard + " " + " ".join(t.get("user", "") for t in history[-2:] if t.get("s") == (session or {}).get("id"))
+            index = Index([m["text"] + " " + m.get("category", "") for m in memories])
+            matched = {i for _, i in sorted(index.scores(question), reverse=True)[:RECALL_MEMORIES]}
+            core = sorted(range(len(memories)), key=lambda i: (-memories[i].get("importance", 3), -memories[i].get("updated", 0)))
+            chosen = [i for i in range(len(memories)) if memories[i].get("pinned")]
+            chosen += [i for i in core if memories[i].get("importance", 3) >= 4 and i not in chosen][:10]
+            chosen += [i for i in matched if i not in chosen]
+            lines = []
+            for i in sorted(chosen, key=lambda i: memories[i].get("created", 0)):
+                m = memories[i]
+                dated = " (%s)" % m["when"] if m.get("when") else ""
+                lines.append("- (%s%s) %s" % (m.get("category", "other"), dated, m["text"]))
+            if lines:
+                parts.append(("memories", "What you remember about them (bring things up only when they fit):\n" + "\n".join(lines)))
+
+        # Plans to ask about, on a conversation's first reply.
+        asked = []
+        if not session:
+            due = self.follow_ups(now)
+            if due:
+                parts.append(("follow", "Things you could ask how they went, if it fits (once):\n" + "\n".join(
+                    "- %s (%s)" % (m["text"], when(datetime.datetime.fromisoformat(m["when"]).timestamp(), now)) for m in due[:3])))
+                asked = [m["id"] for m in due[:3]]
+
+        # How long since they last talked, and about what; the day's first conversation.
+        carried = []
+        if not session and (last or history):
+            end = (last or {}).get("end") or (history[-1].get("t", 0) if history else 0)
+            lines = []
+            if last:
+                if now - end < CARRY_OVER:
+                    carried = [t for t in history if t.get("s") == last.get("id")][-CARRY_TURNS:]
+                title = (", “%s”" % last["title"]) if last.get("title") else ""
+                summary = last.get("summary") or last.get("rolling") or ""
+                if not summary and not carried:
+                    # Not summed up yet (the device was busy or off): how it ended, at least.
+                    ending = [t for t in history if t.get("s") == last.get("id")][-2:]
+                    summary = ("it ended with:\n" + _lines(ending).replace("Character:", "You:")) if ending else ""
+                lines.append("Your last conversation with them was %s%s%s" % (
+                    said_when(end, now), title, (": " + summary) if summary else "."))
+                if carried:
+                    lines.append("Its last few words are below, before what they say now.")
+            if talk_day(now) != talk_day(end):
+                lines.append("This is the first time you have talked today.")
+                entry = next((e for e in reversed(self.diary()) if e.get("day") != talk_day(now).isoformat()), None)
+                if entry and entry.get("text") and _days_since(entry.get("day"), now) <= 7:
+                    lines.append("From your diary (%s): %s" % (entry["day"], _clean(entry["text"], 600)))
+            parts.append(("last", "\n".join(lines)))
+        elif session:
+            lines = ["This conversation began %s." % _ago(now - session.get("start", now))]
+            if session.get("rolling"):
+                lines.append("Earlier in it: " + session["rolling"])
+            parts.append(("now", "\n".join(lines)))
+
+        # Older conversations that match.
+        older = [s for s in sessions if s is not last]
+        if older:
+            index = self._session_index(older)
+            best = sorted(index.scores(heard), reverse=True)[:RECALL_SESSIONS]
+            if best:
+                lines = []
+                for _, i in sorted(best, key=lambda x: x[1]):
+                    s = older[i]
+                    title = ("“%s”: " % s["title"]) if s.get("title") else ""
+                    lines.append("- %s: %s%s" % (when(s.get("start", 0), now), title, s.get("summary", "")))
+                parts.append(("older", "Earlier conversations that may matter now:\n" + "\n".join(lines)))
+
+        # The latest last, nearest what is said now; within the room, older conversations go first,
+        # then plans to ask about, then the less important memories.
+        parts.sort(key=lambda p: SHOW_ORDER.index(p[0]))
+        text = _fit(parts, room // 3)
+
+        # This conversation word for word since its early part was summed up (so nothing falls between
+        # the summary and the words), and the carried-over last words.
+        if session:
+            turns = [t for t in history if t.get("s") == session["id"] and t.get("n", 0) > session.get("rolled", 0)]
+            turns = turns[-(max(verbatim, 2) + ROLL_STEP + 6):]      # if summing up keeps failing
+        else:
+            turns = carried
+        messages = []
+        left = room - len(text)
+        for turn in reversed(turns):
+            pair = []
+            if turn.get("user"):
+                pair.append({"role": "user", "content": turn["user"]})
+            if turn.get("reply"):
+                pair.append({"role": "assistant", "content": turn["reply"]})
+            size = sum(len(m["content"]) for m in pair)
+            if messages and size > left:
+                break
+            messages = pair + messages
+            left -= size
+        self._mark_asked(asked)
+        return text, messages
+
+    def _session_index(self, sessions):
+        try:
+            stat = os.stat(self.sessions_path)
+            changed = (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+        except OSError:
+            changed = None
+        key = (changed, len(sessions), sessions[-1].get("id") if sessions else 0)
+        cached = self._indexes.get("sessions")
+        if not cached or cached[0] != key:
+            cached = (key, Index([s.get("title", "") + " " + s.get("summary", "") for s in sessions]))
+            self._indexes["sessions"] = cached
+        return cached[1]
+
+    def recall(self, heard, limit=RECALL_SESSIONS):
+        """The conversations whose words best match `heard` (up to `limit`), and the last one, oldest first."""
+        sessions = self.sessions()
+        if not sessions:
+            return []
+        older = sessions[:-1]
+        best = sorted(self._session_index(older).scores(heard), key=lambda x: (-x[0], -x[1]))[:limit] if older else []
+        return [older[i] for i in sorted(i for _, i in best)] + [sessions[-1]]
+
+    # ----- keeping it up to date (in the background, with the language model)
+    def needs_work(self, now=None, keep=KEEP_VERBATIM):
+        """Whether there is anything for `process` to do now (`keep`: the turns given word for word)."""
+        now = now or time.time()
+        state = self._state()
+        session = state.get("open")
+        if self._ends(session, now):
+            return True
+        if session and session.get("last", 0) - session.get("rolled", 0) > max(keep, 2) + ROLL_STEP:
+            return True
+        if any(not s.get("done") for s in self.sessions()):
+            return True
+        return self._diary_due(now) is not None
+
+    async def process(self, llm, now=None, name="", persona="", limit=3, keep=KEEP_VERBATIM):
+        """Do what is due: end a conversation that is over; sum up the early part of a long one (all but
+        its latest `keep` turns); for each ended conversation, a title, a summary and changes to the
+        memories; the diary. Returns what was done: {"summed": n, "memories": n, "diary": day or None}."""
+        now = now or time.time()
+        done = {"summed": 0, "memories": 0, "diary": None}
+        self.close_stale(now)
+        await self._roll(llm, max(keep, 2))
+        for session in [s for s in self.sessions() if not s.get("done")][:limit]:
+            changed = await self._sum_up(llm, session, now, name)
+            if changed is None:
+                break                        # the memory was forgotten meanwhile
+            done["summed"] += 1
+            done["memories"] += changed
+        day = self._diary_due(now)
+        if day is not None and not any(not s.get("done") for s in self.sessions()):
+            if await self._write_diary(llm, day, now, name, persona):
+                done["diary"] = day.isoformat()
+        return done
+
+    async def _ask(self, llm, prompt, system="You keep a character's memory. Follow the format exactly."):
+        text = ""
+        async for piece in llm.stream(system, [{"role": "user", "content": prompt}]):
+            text += piece
+        return text
+
+    async def _roll(self, llm, keep):
+        """Sum up the early part of a long conversation still going on, keeping its latest `keep` turns."""
+        state = self._state()
+        session = state.get("open")
+        if not session or session.get("last", 0) - session.get("rolled", 0) <= keep + ROLL_STEP:
+            return
+        turns = [t for t in self.history() if t.get("s") == session["id"] and t.get("n", 0) > session.get("rolled", 0)]
+        fold = turns[:-keep]
+        if not fold:
+            return
+        prompt = ROLL_PROMPT.format(earlier=session.get("rolling") or "(nothing yet)", conversation=_lines(fold))
+        summary = _clean(_strip_label(await self._ask(llm, prompt)), SUMMARY_LIMIT)
+        if not summary:
+            return
+        with self._lock:
+            state = self._state()
+            current = state.get("open")
+            if not current or current.get("id") != session["id"]:
+                return                       # it ended meanwhile; its summary covers it
+            current["rolling"] = summary
+            current["rolled"] = fold[-1].get("n", current.get("rolled", 0))
+            self._save_state(state)
+
+    async def _sum_up(self, llm, session, now, name):
+        """Title, summary, mood and memory changes for an ended conversation. Returns the number of
+        memories changed, or None if the conversation was forgotten meanwhile."""
+        turns = self.transcript(session["id"]) or self.session_turns(session["id"])
+        memories = self.memories()
+        text = " ".join("%s %s" % (t.get("user", ""), t.get("reply", "")) for t in turns)
+        index = Index([m["text"] for m in memories])
+        related = sorted(index.scores(text), reverse=True)[:40]
+        shown = [memories[i] for _, i in related]
+        shown += [m for m in memories if m.get("importance", 3) >= 4 and m not in shown][:15]
+        known = "\n".join("#%d %s: %s" % (m["id"], m.get("category", "other"), m["text"]) for m in shown) or "(none yet)"
+        start = datetime.datetime.fromtimestamp(session.get("start", now))
+        end = datetime.datetime.fromtimestamp(session.get("end", now))
+        conversation = _lines(turns[-80:])
+        if session.get("rolling") and len(turns) > 80:
+            conversation = "(Earlier: %s)\n%s" % (session["rolling"], conversation)
+        prompt = SUM_UP_PROMPT.format(name=name or "the character", known=known, date=start.strftime("%A %d %B %Y"),
+                                      start=start.strftime("%H:%M"), end=end.strftime("%H:%M"),
+                                      conversation=conversation or "(nothing was said)",
+                                      categories=", ".join(CATEGORIES), today=datetime.date.fromtimestamp(now).isoformat())
+        answer = await self._ask(llm, prompt)
+        result = parse_sum_up(answer)
+        with self._lock:
+            sessions = self.sessions()
+            target = next((s for s in sessions if s.get("id") == session["id"]), None)
+            if target is None:
+                return None
+            target["title"] = _clean(result["title"], TITLE_LIMIT)
+            target["summary"] = _clean(result["summary"] or session.get("rolling", ""), SUMMARY_LIMIT)
+            target["mood"] = _clean(result["mood"], 40)
+            target["done"] = True
+            target.pop("rolling", None)
+            _write_jsonl(self.sessions_path, sessions)
+        changed = 0
+        visible = {m["id"] for m in shown}
+        for op in result["ops"]:
+            if op["op"] == "add":
+                if self.add_memory(op["text"], op["category"], op["importance"], op.get("when"), source=session["id"],
+                                   now=now):
+                    changed += 1
+            elif op["op"] == "follow":
+                if self.add_memory(op["text"], "plans and events", 3, op.get("when"), follow_up=True,
+                                   source=session["id"], now=now):
+                    changed += 1
+            elif op["op"] == "update" and op["id"] in visible:
+                if self.edit_memory(op["id"], text=op["text"]):
+                    changed += 1
+            elif op["op"] == "forget" and op["id"] in visible:
+                if self.edit_memory(op["id"], status="retired"):
+                    changed += 1
+        return changed
+
+    def _diary_due(self, now):
+        """The day whose diary entry is due now (they talked that day, it has no entry yet, and the day
+        is over or it is evening and quiet), or None."""
+        state = self._state()
+        written = {e.get("day") for e in self.diary()}
+        today = talk_day(now)
+        quiet = (state.get("open") is None) or (now - (state.get("open") or {}).get("end", now) > 30 * 60)
+        days = sorted({talk_day(s.get("start", 0)) for s in self.sessions() if s.get("start")}, reverse=True)
+        for day in days[:3]:
+            if day.isoformat() in written or day.isoformat() <= state.get("diary_from", "") or (today - day).days > 3:
+                continue
+            if day < today or (day == today and quiet and datetime.datetime.fromtimestamp(now).hour >= DIARY_HOUR):
+                return day
+        return None
+
+    async def _write_diary(self, llm, day, now, name, persona):
+        sessions = [s for s in self.sessions() if talk_day(s.get("start", 0)) == day]
+        if not sessions:
+            return False
+        lines = []
+        for s in sessions:
+            start = datetime.datetime.fromtimestamp(s.get("start", 0)).strftime("%H:%M")
+            title = ("“%s”: " % s["title"]) if s.get("title") else ""
+            lines.append("- %s %s%s" % (start, title, s.get("summary", "")))
+        learnt = [m["text"] for m in self.memories() if talk_day(m.get("created", 0)) == day and m.get("source") != "owner"]
+        earlier = [e for e in self.diary() if e.get("day", "") < day.isoformat()]
+        previous = earlier[-1] if earlier else None
+        gap = ""
+        if previous:
+            days = (day - datetime.date.fromisoformat(previous["day"])).days
+            if days > 1:
+                gap = "Before today you had not talked with them for %d days.\n" % (days - 1)
+        prompt = DIARY_PROMPT.format(
+            persona=(persona or "").strip()[:1500], name=name or "the character", day=day.strftime("%A %d %B %Y"),
+            conversations="\n".join(lines), learnt="\n".join("- " + t for t in learnt[:10]) or "(nothing new)",
+            previous=("Your previous entry (%s): %s" % (previous["day"], _clean(previous.get("text", ""), 700))) if previous else
+            "This is your first diary entry.", gap=gap)
+        text = _strip_label(await self._ask(llm, prompt, system="You write a diary in your own voice.")).strip()[:DIARY_LIMIT]
+        if len(text) < 20:
+            return False
+        with self._lock:
+            entries = [e for e in self.diary() if e.get("day") != day.isoformat()]
+            entries.append({"day": day.isoformat(), "t": int(now), "text": text})
+            entries.sort(key=lambda e: e.get("day", ""))
+            _write_jsonl(self.diary_path, entries)
+        return True
+
+
+def _ago(seconds):
+    seconds = max(0, seconds)
+    if seconds < 90:
+        return "just now"
+    if seconds < 3600:
+        return "%d minutes ago" % round(seconds / 60)
+    if seconds < 2 * 86400:
+        hours = round(seconds / 3600)
+        return "%d hour%s ago" % (hours, "" if hours == 1 else "s")
+    return "%d days ago" % round(seconds / 86400)
+
+
+def _days_since(day, now):
+    """Days from an ISO date to the talk day of `now` (a large number for a date that cannot be read)."""
+    try:
+        return (talk_day(now) - datetime.date.fromisoformat(day or "")).days
+    except ValueError:
+        return 10 ** 6
+
+
+def _lines(turns):
+    out = []
+    for turn in turns:
+        if turn.get("user"):
+            out.append("Person: %s" % turn["user"])
+        if turn.get("reply"):
+            out.append("Character: %s" % turn["reply"])
+    return "\n".join(out)
+
+
+def _fit(parts, room):
+    """The parts' text, dropping whole parts (least needed first) and then memory lines until it fits."""
+    order = ["older", "follow", "memories", "last", "now", "notes"]
+    parts = list(parts)
+    text = "\n\n".join(p for _, p in parts if p)
+    for kind in order:
+        if len(text) <= room:
+            break
+        if kind == "memories":
+            # Shorten the memories from the end (the most recently learnt first goes last) rather than drop them all.
+            for k, (name, body) in enumerate(parts):
+                if name == "memories":
+                    lines = body.split("\n")
+                    while len(text) > room and len(lines) > 2:
+                        lines.pop(1)
+                        parts[k] = (name, "\n".join(lines))
+                        text = "\n\n".join(p for _, p in parts if p)
+            continue
+        parts = [(name, body) for name, body in parts if name != kind]
+        text = "\n\n".join(p for _, p in parts if p)
+    return text[:max(room, 0)] if len(text) > room else text
+
+
+def _strip_label(text):
+    """A model's answer without a label it may put first ("Summary:", "**Diary entry**")."""
+    text = (text or "").strip()
+    text = re.sub(r"^\s*(\*\*|#+\s*)?(summary|diary entry|entry|updated summary)\s*[:*]*\s*", "", text, flags=re.I)
+    return text.strip().strip("*").strip()
+
+
+ROLL_PROMPT = """A conversation is going on. Here is what you have summed up of its early part so far:
+{earlier}
+
+And the turns since, which are to be added to that summary:
+{conversation}
+
+Write the updated summary of the conversation so far, in two to five plain sentences, keeping names,
+facts, plans and how the person felt. Reply with the summary only."""
+
+SUM_UP_PROMPT = """You keep the long-term memory of {name}, a character, about the person they talk with.
+
+Memories so far that may matter here (number, category: memory):
+{known}
+
+The conversation ({date}, {start} to {end}; today is {today}):
+{conversation}
+
+Reply in exactly this form and nothing else:
+TITLE: a few words naming what it was about
+SUMMARY: one to three sentences, as the character would remember it: what was talked about, anything that happened or was planned, how the person felt
+MOOD: one or two words for how the person seemed
+Then changes to the memories, one per line, only if there are any:
+ADD category | importance 1-5 | the memory, one short sentence | the date it happens (YYYY-MM-DD) or -
+UPDATE #number | the memory as it is now
+FORGET #number | why (no longer true, or they asked you to forget)
+FOLLOW UP YYYY-MM-DD | what to ask them about after that date
+
+Categories: {categories}. "about me" is for what {name} said about themself, to stay consistent.
+Importance: 5 who they are (name, family), 4 what matters a lot to them, 3 useful, 2 minor, 1 trivial.
+Keep only lasting things (names, relationships, likes, plans and events with their dates, how they want
+to be treated, promises made). Not small talk. Never invent anything. If a memory above is now wrong,
+UPDATE or FORGET it rather than adding another."""
+
+DIARY_PROMPT = """{persona}
+
+You are {name}. Write your diary entry for {day}, in your own voice (first person, as yourself, in
+your own way of speaking), about your day with the person you talk with: what happened, what it meant
+to you, how you feel about it, anything you look forward to. 80 to 160 words. Plain text, no heading,
+no date.
+
+{gap}Today's conversations:
+{conversations}
+
+New things you learnt about them today:
+{learnt}
+
+{previous}"""
+
+ADD_LINE = re.compile(r"(?i)^add\b[\s:]*([^|]+)\|\s*([1-5])\s*\|\s*([^|]+?)\s*(?:\|\s*([0-9]{4}-[0-9]{2}-[0-9]{2}|-|none)?\s*)?$")
+UPDATE_LINE = re.compile(r"(?i)^update\b[\s:]*#?\s*(\d+)\s*\|\s*(.+)$")
+FORGET_LINE = re.compile(r"(?i)^(?:forget|remove|retire)\b[\s:]*#?\s*(\d+)\b")
+FOLLOW_LINE = re.compile(r"(?i)^follow[\s-]*up\b[\s:|]*([0-9]{4}-[0-9]{2}-[0-9]{2})?\s*\|?\s*(.+)$")
+FIELD_LINE = re.compile(r"(?i)^(title|summary|mood)\s*:\s*(.*)$")
+
+
+def parse_sum_up(text):
+    """The title, summary, mood and memory changes in the model's answer (allowing for markdown it adds)."""
+    out = {"title": "", "summary": "", "mood": "", "ops": []}
+    for raw in (text or "").splitlines():
+        line = re.sub(r"^[\s>*#_\-•]+", "", raw).replace("**", "").replace("__", "").strip()
+        if not line:
+            continue
+        m = FIELD_LINE.match(line)
+        if m:
+            out[m.group(1).lower()] = m.group(2).strip()
+            continue
+        m = ADD_LINE.match(line)
+        if m:
+            category = m.group(1).strip().strip("[]()").strip().lower()
+            category = next((c for c in CATEGORIES if c == category), next((c for c in CATEGORIES if category in c or c in category), "other"))
+            op = {"op": "add", "category": category, "importance": int(m.group(2)), "text": m.group(3).strip()}
+            if m.group(4) and m.group(4)[0].isdigit() and _valid_date(m.group(4)):
+                op["when"] = m.group(4)
+            out["ops"].append(op)
+            continue
+        m = UPDATE_LINE.match(line)
+        if m:
+            out["ops"].append({"op": "update", "id": int(m.group(1)), "text": m.group(2).strip()})
+            continue
+        m = FORGET_LINE.match(line)
+        if m:
+            out["ops"].append({"op": "forget", "id": int(m.group(1))})
+            continue
+        m = FOLLOW_LINE.match(line)
+        if m and m.group(2).strip():
+            op = {"op": "follow", "text": m.group(2).strip().lstrip("|").strip()}
+            if m.group(1) and _valid_date(m.group(1)):
+                op["when"] = m.group(1)
+            out["ops"].append(op)
+    return out
+
+
+def _valid_date(text):
+    try:
+        datetime.date.fromisoformat(text)
+        return True
+    except ValueError:
+        return False

@@ -211,19 +211,25 @@ class ConversationTest(unittest.TestCase):
                                          {"role": "user", "content": "and now?"}])
 
     def test_the_model_is_reminded_of_earlier_conversations_that_match(self):
-        day = 86400
-        now = 1_800_000_000
-        self.memory.add_episode(1, now - 90 * day, "They told me about their sourdough starter, Bubbles, and how it keeps dying.")
-        self.memory.add_episode(2, now - 30 * day, "We talked about Saturn's rings; they want a telescope for their birthday.")
-        self.memory.add_episode(3, now - 1 * day, "They had a rough day at work and wanted to vent about their boss.")
+        import time
+        from companion import memory as mem
+        day, now = 86400, time.time()
+        mem._write_jsonl(self.memory.sessions_path, [
+            {"id": 1, "start": now - 90 * day, "end": now - 90 * day + 600, "title": "Bubbles", "done": True,
+             "summary": "They told me about their sourdough starter, Bubbles, and how it keeps dying."},
+            {"id": 2, "start": now - 30 * day, "end": now - 30 * day + 600, "title": "Stargazing", "done": True,
+             "summary": "We talked about Saturn's rings; they want a telescope for their birthday."},
+            {"id": 3, "start": now - day, "end": now - day + 600, "title": "Work", "done": True,
+             "summary": "They had a rough day at work and wanted to vent about their boss."}])
         llm = FakeLLM("Sure.")
         run(self.make(llm=llm).respond("I finally baked bread with my starter!"))
         system = llm.calls[0][0]
-        self.assertIn("From earlier conversations", system)
+        self.assertIn("Earlier conversations that may matter now", system)
         self.assertIn("sourdough starter", system, "the matching conversation is recalled")
+        self.assertIn("Your last conversation with them was", system)
         self.assertIn("rough day at work", system, "and the most recent one")
         self.assertNotIn("Saturn", system, "but not the others")
-        self.assertLess(system.index("sourdough"), system.index("rough day"), "oldest first")
+        self.assertLess(system.index("sourdough"), system.index("rough day"), "the latest last, nearest what is said now")
 
     def certain_planner(self, conv):
         import random as rnd
@@ -464,143 +470,6 @@ class AudioTest(unittest.TestCase):
         self.assertEqual(len(found), 1)
         seconds = len(found[0]) / 2 / 16000
         self.assertTrue(0.8 <= seconds <= 1.4, seconds)
-
-
-class MemoryTest(unittest.TestCase):
-    def test_notes_are_updated_by_the_model_and_editable(self):
-        with tempfile.TemporaryDirectory() as d:
-            m = Memory(d)
-            m.add_turn("My cat is called Miso.", "What a lovely name!")
-            llm = FakeLLM("- Has a cat called Miso\n- Likes mornings\nnot a note\nEPISODE: They told me about their cat, Miso.")
-            count = run(m.update_notes(llm))
-            self.assertEqual(count, 2)
-            self.assertEqual(m.notes(), "- Has a cat called Miso\n- Likes mornings\n")
-            self.assertEqual([e["summary"] for e in m.episodes()], ["They told me about their cat, Miso."])
-            self.assertIn("Person: My cat is called Miso.", llm.calls[0][1][0]["content"])
-            m.set_notes("- Edited by the owner\n")
-            self.assertIn("Edited by the owner", m.update_prompt())
-            m.clear()
-            self.assertEqual((m.notes(), m.history(), m.episodes(), m.turns_since_update), ("", [], [], 0))
-
-    def test_each_turn_is_summed_up_once_even_after_a_restart_or_a_clock_change(self):
-        with tempfile.TemporaryDirectory() as d:
-            m = Memory(d)
-            for i in range(3):
-                m.add_turn("question %d" % i, "answer %d" % i)
-            self.assertEqual(Memory(d).turns_since_update, 3, "kept on disk")
-            run(m.update_notes(FakeLLM("- A note\nEPISODE: The first three questions.")))
-            self.assertEqual(Memory(d).turns_since_update, 0)
-            from unittest import mock
-            with mock.patch("companion.memory.time.time", return_value=1_000_000):   # the clock is wrong
-                m.add_turn("question 3", "answer 3")
-            self.assertEqual(m.turns_since_update, 1, "turns are numbered, not only timed")
-            llm = FakeLLM("- A note\nEPISODE: The fourth question.")
-            run(m.update_notes(llm))
-            self.assertIn("question 3", llm.calls[0][1][0]["content"])
-            self.assertEqual([e["id"] for e in m.episodes()], [3, 4])
-            self.assertEqual(run(m.update_notes(llm)), 0, "nothing new, nothing asked")
-            self.assertEqual(len(llm.calls), 1)
-
-    def test_one_summary_per_conversation_extended_as_it_goes_on(self):
-        from unittest import mock
-        with tempfile.TemporaryDirectory() as d:
-            m = Memory(d)
-
-            def talk(at, *words):
-                with mock.patch("companion.memory.time.time", return_value=at):
-                    for w in words:
-                        m.add_turn(w, "ok")
-            start = 1_800_000_000
-            talk(start, "my cat Miso is ill", "she sees the vet tomorrow")
-            run(m.update_notes(FakeLLM("- Cat Miso is ill\nEPISODE: Their cat Miso is ill.")))
-            talk(start + 600, "the vet called back")
-            llm = FakeLLM("- Cat Miso is ill\nEPISODE: Their cat Miso is ill; the vet called back with good news.")
-            run(m.update_notes(llm))
-            prompt = llm.calls[0][1][0]["content"]
-            self.assertIn("Earlier in this same conversation (already summed up): Their cat Miso is ill.", prompt)
-            self.assertNotIn("she sees the vet tomorrow", prompt, "turns already summed up are not sent again")
-            self.assertEqual([(e["id"], e["summary"]) for e in m.episodes()],
-                             [(3, "Their cat Miso is ill; the vet called back with good news.")])
-            talk(start + 4 * 3600, "guess what, I got the job")
-            llm = FakeLLM("- Got a new job\nEPISODE: They got the job they wanted.")
-            run(m.update_notes(llm))
-            self.assertNotIn("Earlier in this same conversation", llm.calls[0][1][0]["content"])
-            self.assertNotIn("Miso", llm.calls[0][1][0]["content"].split("Recent conversation:")[1],
-                             "only the new conversation is summed up")
-            self.assertEqual([e["id"] for e in m.episodes()], [3, 4], "a later conversation gets its own summary")
-
-    def test_the_summary_line_is_found_however_the_model_dresses_it(self):
-        from companion.memory import parse_update
-        for line in ("EPISODE: We met.", "**EPISODE:** We met.", "Episode: We met.", "- EPISODE: We met.",
-                     "## Episode: We met.", "*Episode*: *We met.*", "  episode : We met."):
-            self.assertEqual(parse_update("- A note\n" + line), (["- A note"], "We met."), line)
-        self.assertEqual(parse_update("- Episodes of their favourite show are long"),
-                         (["- Episodes of their favourite show are long"], ""))
-
-    def test_forgetting_during_an_update_is_not_undone_by_it(self):
-        with tempfile.TemporaryDirectory() as d:
-            m = Memory(d)
-            m.add_turn("My secret is X.", "I'll keep it.")
-
-            class ForgetMidway(FakeLLM):
-                async def stream(self, system, messages):
-                    m.clear()
-                    yield "- Their secret is X\nEPISODE: They told me a secret."
-            self.assertEqual(run(m.update_notes(ForgetMidway())), 0)
-            self.assertEqual((m.notes(), m.episodes()), ("", []))
-
-    def test_summaries_can_be_changed_and_forgotten(self):
-        with tempfile.TemporaryDirectory() as d:
-            m = Memory(d)
-            m.add_episode(5, 1_800_000_000, "We talked about   the weather.")
-            m.add_episode(9, 1_800_000_100, "We planned a picnic.")
-            self.assertEqual(m.episodes()[0]["summary"], "We talked about the weather.")
-            self.assertTrue(m.edit_episode(5, "We talked about the storm coming on Friday."))
-            self.assertIn("storm", m.recall("Is the storm still coming?")[0]["summary"])
-            self.assertTrue(m.delete_episode(5))
-            self.assertFalse(m.delete_episode(5))
-            self.assertEqual([e["id"] for e in m.episodes()], [9])
-            self.assertEqual(m.recall("anything at all"), m.episodes(), "the latest is always recalled")
-
-    def test_recall_prefers_rare_words_and_matches_word_forms(self):
-        with tempfile.TemporaryDirectory() as d:
-            m = Memory(d)
-            m.add_episode(1, 1_800_000_000, "They baked cookies for their mum's birthday party.")
-            for i in range(2, 8):
-                m.add_episode(i, 1_800_000_000 + i, "They talked about work and their weekend plans (%d)." % i)
-            m.add_episode(8, 1_800_000_100, "They are learning to play the guitar.")
-            m.add_episode(9, 1_800_000_200, "Last chat: a film night.")
-            got = [e["id"] for e in m.recall("Do you remember the cookie I baked? Work was busy.", limit=1)]
-            self.assertEqual(got, [1, 9], "'cookie' and 'baked' are rarer than 'work'")
-            self.assertEqual([e["id"] for e in m.recall("Birthdays and parties!", limit=3)], [1, 9])
-            self.assertEqual(len(m.recall("work weekend plans", limit=3)), 4)
-
-    def test_recall_is_quick_with_years_of_summaries(self):
-        import random
-        import time as clock
-        rng = random.Random(3)
-        vocabulary = ["word%d" % i for i in range(5000)]
-        with tempfile.TemporaryDirectory() as d:
-            m = Memory(d)
-            m._write_episodes([{"id": i, "t": 1_800_000_000 + i, "summary": " ".join(rng.choice(vocabulary) for _ in range(45))}
-                               for i in range(1, 3001)])
-            m.recall("warm up the index")
-            start = clock.perf_counter()
-            for _ in range(10):
-                m.recall("word12 word345 and word4000 again")
-            self.assertLess((clock.perf_counter() - start) / 10, 0.05, "per reply, once the summaries are read")
-
-    def test_dates_in_words(self):
-        from companion.memory import when
-        import datetime
-        now = datetime.datetime(2026, 11, 18, 15, 0).timestamp()
-        self.assertEqual(when(now - 3600, now), "today")
-        self.assertEqual(when(now - 86400, now), "yesterday")
-        self.assertEqual(when(now - 3 * 86400, now), "3 days ago")
-        self.assertEqual(when(datetime.datetime(2026, 3, 2, 9, 0).timestamp(), now), "2 March 2026")
-        prompt = conversation.system_prompt("You are Aria.", "", now=datetime.datetime(2026, 11, 18, 15, 0),
-                                            recalled=[{"t": now - 86400, "summary": "We met."}])
-        self.assertIn("- yesterday: We met.", prompt)
 
 
 class CharactersTest(unittest.TestCase):

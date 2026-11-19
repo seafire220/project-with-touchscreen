@@ -173,17 +173,39 @@
 
   <section id="memory" class="tab" hidden>
     <h2>Memory of <span id="mem-name"></span></h2>
-    <label>Notes the character keeps about you (you can edit them)
-      <textarea id="mem-notes" rows="10"></textarea></label>
-    <p><button id="btn-save-notes">Save notes</button> <button id="btn-clear-memory" class="danger">Forget everything</button></p>
-    <h3>Earlier conversations</h3>
-    <p class="muted">After every few exchanges, and when a conversation goes quiet, the character writes itself a short
-      summary. When you talk, it is reminded of the latest one and of those that match what you say. Change or forget
-      any of them here.</p>
-    <p id="mem-episode-count" class="muted"></p>
-    <ol id="mem-episodes" class="log"></ol>
-    <h3>Recent conversation</h3>
-    <ol id="mem-history" class="log"></ol>
+    <p class="muted">The character remembers as a person does: each conversation as a whole, lasting things about
+      you, and a diary in its own words. It all stays on this device.</p>
+    <p><button id="btn-new-conversation">Start a new conversation</button> <span id="mem-now" class="muted"></span></p>
+
+    <h3>Always remember</h3>
+    <p class="muted">Whatever you write here, the character keeps in mind in every conversation (&ldquo;call me
+      Sam&rdquo;, &ldquo;I'm vegetarian&rdquo;). It never changes this itself.</p>
+    <textarea id="mem-notes" rows="4"></textarea>
+    <p><button id="btn-save-notes">Save</button></p>
+
+    <h3>What it remembers about you</h3>
+    <p class="muted">Learnt from your conversations, or added by you. Pinned ones are always in mind; the others come
+      up when they matter. A plan with a date is asked about once the day has passed.</p>
+    <div class="sliders" id="mem-add">
+      <label>About <select id="mem-add-category"></select></label>
+      <label>Memory <input id="mem-add-text" size="40" placeholder="e.g. Their sister Kim lives in Perth"></label>
+      <label>Date (if it is a plan) <input id="mem-add-when" type="date"></label>
+      <button id="btn-add-memory">Add</button> <span id="mem-add-msg"></span>
+    </div>
+    <p id="mem-item-count" class="muted"></p>
+    <div id="mem-items"></div>
+
+    <h3>Conversations</h3>
+    <p class="muted">A conversation ends after 20 quiet minutes, a few minutes after a goodbye, when a new day starts,
+      or when you start a new one above. Each is then summed up, and what it learnt is added to its memories.</p>
+    <p id="mem-session-count" class="muted"></p>
+    <ol id="mem-sessions" class="log"></ol>
+
+    <h3>Diary</h3>
+    <p class="muted">Each day you talk, the character writes a diary entry in its own voice, at night or the next day.</p>
+    <ol id="mem-diary" class="log"></ol>
+
+    <p><button id="btn-clear-memory" class="danger">Forget everything</button></p>
   </section>
 
   <section id="services" class="tab" hidden>
