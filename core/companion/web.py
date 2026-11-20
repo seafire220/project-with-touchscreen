@@ -170,11 +170,16 @@ class Console:
         if not isinstance(changes, dict):
             raise web.HTTPBadRequest(text="settings must be an object")
         old = self.device.store.settings()
+        if old.get("family_safe", {}).get("on") and (changes.get("family_safe") or {}).get("on") is False:
+            raise web.HTTPForbidden(text="turning family-safe mode off needs the password again")
+        if self.device.mic_switch and (changes.get("microphone") or {}).get("muted") is False:
+            raise web.HTTPBadRequest(text="the mute switch is on: slide it to turn the microphone on")
         try:
             merged = self.device.store.update_settings(changes)
         except ValueError as error:
             raise web.HTTPBadRequest(text=str(error))
         self.device.conversation = None
+        self.device.settings_changed(old, merged)
         if merged.get("character_format") != old.get("character_format"):
             self.device.show_character()          # the other drawing of the same character, if it has one
         random_now = merged["conversation"].get("random_gestures", True)
@@ -895,6 +900,32 @@ class Console:
         self.device.interrupt()
         return web.json_response({"ok": True})
 
+    async def microphone(self, request):
+        """Turn the microphone off or on (a mute switch, while on, wins)."""
+        body = await request.json()
+        muted = body.get("muted")
+        if not isinstance(muted, bool):
+            raise web.HTTPBadRequest(text="muted must be true or false")
+        if self.device.mic_switch and not muted:
+            raise web.HTTPBadRequest(text="the mute switch is on: slide it to turn the microphone on")
+        self.device.set_muted(muted)
+        return web.json_response({"muted": self.device.muted, "switch": self.device.mic_switch})
+
+    async def family_safe(self, request):
+        """Family-safe mode on, or (with the settings-page password again) off."""
+        body = await request.json()
+        on = body.get("on")
+        if not isinstance(on, bool):
+            raise web.HTTPBadRequest(text="on must be true or false")
+        if not on and not self.device.store.check_password(str(body.get("password", ""))):
+            raise web.HTTPUnauthorized(text="the password is wrong")
+        old = self.device.store.settings()
+        merged = self.device.store.update_settings({"family_safe": {"on": on}})
+        self.device.conversation = None
+        self.device.settings_changed(old, merged)
+        self.device.emit("device", {"family_safe": on})
+        return web.json_response({"on": on})
+
     # ----- Wi-Fi
     async def wifi_status(self, request):
         wifi = self.device.wifi
@@ -956,6 +987,8 @@ def make_app(device):
     r.add_get("/api/animation", console.animation)
     r.add_get("/api/settings", console.get_settings)
     r.add_put("/api/settings", console.put_settings)
+    r.add_post("/api/microphone", console.microphone)
+    r.add_post("/api/family-safe", console.family_safe)
     r.add_get("/api/keys", console.get_keys)
     r.add_put("/api/keys/{name}", console.put_key)
     r.add_post("/api/test/{which}", console.test_provider)

@@ -941,10 +941,12 @@ class Memory:
             return True
         return self._diary_due(now) is not None
 
-    async def process(self, llm, now=None, name="", persona="", limit=3, keep=KEEP_VERBATIM):
+    async def process(self, llm, now=None, name="", persona="", limit=3, keep=KEEP_VERBATIM, rules=""):
         """Do what is due: end a conversation that is over; sum up the early part of a long one (all but
         its latest `keep` turns); for each ended conversation, a title, a summary and changes to the
-        memories; the diary. Returns what was done: {"summed": n, "memories": n, "diary": day or None}."""
+        memories; the diary. `rules` are added to every instruction (family-safe mode).
+        Returns what was done: {"summed": n, "memories": n, "diary": day or None}."""
+        self._rules = rules or ""
         now = now or time.time()
         done = {"summed": 0, "memories": 0, "diary": None}
         self.close_stale(now)
@@ -963,6 +965,9 @@ class Memory:
         return done
 
     async def _ask(self, llm, prompt, system="You keep a character's memory. Follow the format exactly."):
+        rules = getattr(self, "_rules", "")
+        if rules:
+            system = system + "\n" + rules
         text = ""
         async for piece in llm.stream(system, [{"role": "user", "content": prompt}]):
             text += piece

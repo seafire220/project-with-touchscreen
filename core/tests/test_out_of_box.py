@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from aiohttp.test_utils import TestClient, TestServer  # noqa: E402
 
 from companion import package, screen  # noqa: E402
-from companion.__main__ import EVENT, LONG_PRESS, read_button  # noqa: E402
+from companion.__main__ import EVENT, read_inputs  # noqa: E402
 from companion.audio import Speaker, detect_card  # noqa: E402
 from companion.device import Device  # noqa: E402
 from companion.network import WiFi  # noqa: E402
@@ -150,25 +150,35 @@ class OutOfBoxTest(unittest.IsolatedAsyncioTestCase):
             finally:
                 await client.close()
 
-    async def test_short_and_long_presses_are_told_apart(self):
+    async def test_the_button_going_down_and_up_and_the_mute_switch_are_read(self):
+        class Device:
+            def __init__(self):
+                self.calls = []
+
+            def button_down(self):
+                self.calls.append("down")
+
+            def button_up(self, held):
+                self.calls.append(("up", round(held, 1)))
+
+            def set_switch(self, on):
+                self.calls.append(("switch", on))
+
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "event")
             events = []
-            for t, value in ((100.0, 1), (100.3, 0), (200.0, 1), (205.0, 0), (300.0, 1), (300.0 + LONG_PRESS + 1, 0)):
-                events.append(EVENT.pack(int(t), int((t % 1) * 1e6), 1, 148, value))
+            for t, key, value in ((100.0, 148, 1), (100.3, 148, 0), (200.0, 148, 1), (200.5, 148, 2), (205.0, 148, 0),
+                                  (250.0, 248, 1), (260.0, 248, 0), (300.0, 30, 1)):
+                events.append(EVENT.pack(int(t), int(round((t % 1) * 1e6)), 1, key, value))
                 events.append(EVENT.pack(int(t), 0, 0, 0, 0))            # a sync event, ignored
             with open(path, "wb") as f:
                 f.write(b"".join(events))
-            short, long_ = [], []
-
-            async def on_long():
-                long_.append(1)
-
-            task = asyncio.ensure_future(read_button(path, 148, lambda: short.append(1), on_long))
+            device = Device()
+            task = asyncio.ensure_future(read_inputs(path, device))
             await asyncio.sleep(0.5)
             task.cancel()
-            self.assertEqual(short, [1], "a quick press is a press; a 5-second hold is ignored")
-            self.assertEqual(long_, [1], "a hold of 12 seconds or more resets setup")
+            self.assertEqual(device.calls, ["down", ("up", 0.3), "down", ("up", 5.0), ("switch", True), ("switch", False)],
+                             "the hold's length goes to the device, repeats and other keys are ignored")
 
     def test_setup_cards_carry_qr_codes(self):
         self.assertEqual(screen.wifi_qr("My;Net", "pa:ss"), r"WIFI:T:WPA;S:My\;Net;P:pa\:ss;;")

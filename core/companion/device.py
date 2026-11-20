@@ -10,8 +10,9 @@ import shutil
 import subprocess
 import time
 
-from . import animations, package, providers
+from . import animations, family, package, providers
 from .audio import Detector, Microphone, Speaker, tone
+from .backlight import Backlight
 from .characters import Characters, split_persona
 from .conversation import Conversation
 from .memory import Memory
@@ -19,6 +20,7 @@ from . import motions, screen, speech_text, temperament
 from . import meaning as meaning_module
 from . import updates as updates_module
 from .network import NetworkError, WiFi
+from .overlays import CAPTION, HEARD, HINT, Overlays
 from .providers import ProviderError
 from .stage_link import StageLink
 from .store import Store, redact, write_atomic
@@ -35,6 +37,18 @@ ANSWER_WINDOW = 30.0
 PRESENCE_SECONDS = 0.8
 MEMORY_TEMPERATURE = 0.3      # the background memory work: summing up, memories, the diary
 MEMORY_MAX_TOKENS = 700
+
+# The button, held: from MUTE_HOLD seconds the microphone goes off (or on) when it is let go; from
+# RESET_WARN the screen warns that holding on forgets the Wi-Fi and the settings-page password, which
+# happens when it is let go after RESET_HOLD.
+MUTE_HOLD = 2.0
+RESET_WARN = 7.0
+RESET_HOLD = 12.0
+
+# The screen at night (docs/28-user-guide.md): it sleeps in its hours once nothing has happened for
+# SCREEN_IDLE seconds, and wakes for the button, the wake word, an alarm or speech.
+SCREEN_IDLE = 90.0
+DIM_BACKLIGHT = 0.12          # how bright a dimmed screen's backlight is, where it can be set
 
 # Memory is kept up to date in the background (memory.Memory.process): a conversation is summed up, and
 # its memories changed, once it is over; a long one's early part as it goes; the diary at night.
@@ -95,6 +109,16 @@ class Device:
         self.last_greeting = 0.0            # when the character last spoke first
         self.answer_until = 0.0             # after speaking first, it listens for an answer until then
         self.updating = False               # an update is being fetched or handed to the installer
+        # Pictures over the character, made in the folder beside the stage's socket (in memory on the device).
+        socket = stage_socket or (None if stage is not None else "/run/companion/stage.sock")
+        self.overlays = Overlays(os.path.join(os.path.dirname(socket), "overlays") if socket
+                                 else os.path.join(data_dir, "overlays"), self.stage)
+        self.mic_switch = None              # a mute switch's position: None with no switch, True for off
+        self._mute_choice = bool(self.store.settings().get("microphone", {}).get("muted"))
+        self._hold = None                   # the button's hold hints, while it is held
+        self.backlight = Backlight()
+        self.screen_mode = "on"             # "on", "dim" or "off"
+        self.last_activity = time.time()    # the button, speech, the wake word: someone is there
 
     # ----- events for the console
     def emit(self, kind, data=None):
@@ -133,8 +157,16 @@ class Device:
         lost = kind == "lost" and time.time() - self.stage_restarted > 10.0 and time.time() - self.stage_ready_at < 60.0
         if kind == "fatal" or lost:
             self._stage_failed(event.get("message") or "the screen program stopped")
+        if kind in ("ready", "size") and event.get("width") and event.get("height"):
+            self.overlays.screen = (int(event["width"]), int(event["height"]))
         if kind == "ready":
             self.stage_ready_at = time.time()
+            # A stage that started again has nothing over the character and a lit screen.
+            self.overlays.shown.clear()
+            if self.muted:
+                self.overlays.microphone(True)
+            if self.screen_mode != "on":
+                self.stage.send({"screen": self.screen_mode})
         if event.get("event") in ("error", "fatal"):
             self.emit("stage_error", {"message": event.get("message", "")})
         elif event.get("event") == "ready":
@@ -436,7 +468,8 @@ class Device:
             persona=self.characters.persona(cid),
             history_turns=int(settings["conversation"].get("history_turns", 12)),
             on_event=self._conversation_event, on_action=self.action, search=self._search_function(settings),
-            gestures=None if settings["conversation"].get("gestures", True) else [])
+            gestures=None if settings["conversation"].get("gestures", True) else [], on_caption=self._caption,
+            family_safe=bool(settings.get("family_safe", {}).get("on")))
         # A reserved character's words call for fewer gestures; an expressive one's for more.
         conversation.planner.expressiveness = temperament.for_stage(
             self.characters.device_settings(cid).get("temperament"))[1]
@@ -455,15 +488,30 @@ class Device:
         return TavilySearch(key).search
 
     def _conversation_event(self, kind, data):
+        if kind in ("heard", "speaking first", "saying"):
+            self.activity()
         if kind == "heard":
             self.set_state("thinking")
+            captions = self.store.settings().get("captions", {})
+            if captions.get("on") and captions.get("heard") and (data or {}).get("text"):
+                self.overlays.heard(data["text"])
         elif kind == "saying":
             self.set_state("speaking")
         elif kind == "replied":
             self.last_talk = time.time()
+            self.last_activity = time.time()
             self.set_state("listening" if self.listening else "idle")
+            self.overlays.caption_done()
             asyncio.ensure_future(self.keep_memory())
         self.emit(kind, data)
+
+    def _caption(self, text):
+        """A sentence's sound starts: write it on the screen, if the owner wants captions."""
+        settings = self.store.settings()
+        captions = settings.get("captions", {})
+        if captions.get("on") and text:
+            self.overlays.caption(text, size=captions.get("size", "normal"),
+                                  speed=float(settings["tts"].get("speed") or 1.0))
 
     async def keep_memory(self, cid=None, now=None, force=False):
         """Bring a character's memory up to date if anything is due: a conversation that is over summed
@@ -492,7 +540,8 @@ class Device:
                 llm.temperature = min(llm.temperature, MEMORY_TEMPERATURE)
             if isinstance(getattr(llm, "max_tokens", None), int):
                 llm.max_tokens = max(llm.max_tokens, MEMORY_MAX_TOKENS)
-            done = await memory.process(llm, now=now, name=name, persona=persona, keep=keep)
+            rules = family.MEMORY_RULE if self.store.settings().get("family_safe", {}).get("on") else ""
+            done = await memory.process(llm, now=now, name=name, persona=persona, keep=keep, rules=rules)
             if done["summed"] or done["diary"]:
                 self.emit("memory", dict(done, character=cid))
             return done
@@ -608,11 +657,10 @@ class Device:
         turned it on, outside quiet hours, at most once a while, and never over a conversation."""
         now = now or time.time()
         opts = self.store.settings().get("speak_first", {})
-        if not opts.get("on") or self.state not in ("idle",) or (self.conversation is not None and self.conversation.busy):
+        if not opts.get("on") or self.muted or self.state not in ("idle",) or \
+                (self.conversation is not None and self.conversation.busy):
             return None
-        hour = datetime.datetime.fromtimestamp(now).hour
-        start, end = int(opts.get("quiet_from", 22)), int(opts.get("quiet_to", 8))
-        if (start <= hour or hour < end) if start > end else (start <= hour < end):
+        if within_hours(now, opts.get("quiet_from", 22), opts.get("quiet_to", 8)):
             return None
         cid = self.active_id()
         if not cid:
@@ -672,11 +720,16 @@ class Device:
     def button(self):
         """One press. Interrupts speech; otherwise turns listening on or off (or ends a push-to-talk recording)."""
         mode = self.store.settings()["listening"].get("mode", "auto")
+        self.activity()
         if hasattr(self.stage, "poke"):
             self.stage.poke()                 # someone is there
         if self.conversation is not None and self.conversation.busy:
             self.interrupt()
             self.emit("button", {"did": "interrupt"})
+            return
+        if self.muted:
+            self.overlays.hint(self._mute_hint(), seconds=4.0)
+            self.emit("button", {"did": "nothing: the microphone is off"})
             return
         if mode == "push":
             if self.recording is None:
@@ -703,8 +756,14 @@ class Device:
         # Someone seems to be there (for speaking first): speech-like sound, from its loudness alone.
         presence = Detector(0.6, 8.0)
         while True:
+            if self.muted:
+                await asyncio.sleep(0.25)       # nothing is recorded while the microphone is off
+                continue
+            frames = self.microphone.frames()
             try:
-                async for frame in self.microphone.frames():
+                async for frame in frames:
+                    if self.muted:
+                        break                   # stops the recording program (below)
                     if self.recording is not None:
                         self.recording.append(frame)
                         self._heard(detector.loudness(frame))
@@ -740,11 +799,147 @@ class Device:
                         asyncio.ensure_future(self.hear(pcm))
             except Exception as error:
                 self.emit("error", {"message": "microphone: %s" % error})
-            await asyncio.sleep(2.0)
+            finally:
+                try:
+                    await frames.aclose()
+                except Exception:
+                    pass
+            if not self.muted:
+                await asyncio.sleep(2.0)
 
     def _heard(self, level):
         if hasattr(self.stage, "heard"):
             self.stage.heard(level)
+
+    # ----- the button held: the microphone off or on, or a setup reset
+    def button_down(self):
+        """The button went down. While it is held, the screen says what letting go will do."""
+        self.activity()
+        if self._hold is not None:
+            self._hold.cancel()
+        self._hold = asyncio.ensure_future(self._hold_hints())
+
+    async def _hold_hints(self):
+        try:
+            await asyncio.sleep(MUTE_HOLD)
+            self.overlays.hint("Let go to turn the microphone %s" % ("on" if self.muted else "off"))
+            await asyncio.sleep(RESET_WARN - MUTE_HOLD)
+            self.overlays.hint("Keep holding to forget the Wi-Fi and the settings-page password")
+            await asyncio.sleep(RESET_HOLD - RESET_WARN)
+            self.overlays.hint("Let go now to forget the Wi-Fi and the settings-page password")
+        except asyncio.CancelledError:
+            pass
+
+    def button_up(self, held):
+        """The button was let go after `held` seconds: a press; from MUTE_HOLD the microphone off or on;
+        from RESET_HOLD a setup reset; in between, nothing."""
+        if self._hold is not None:
+            self._hold.cancel()
+            self._hold = None
+        if held < MUTE_HOLD:
+            self.overlays.hide(HINT)
+            self.button()
+        elif held < RESET_WARN:
+            self.overlays.hide(HINT)
+            if self.mic_switch:
+                self.overlays.hint("The mute switch is on: slide it to turn the microphone on", seconds=4.0)
+            else:
+                self.set_muted(not self._mute_choice)
+                self.overlays.hint("Microphone off" if self.muted else "Microphone on", seconds=2.0)
+        elif held < RESET_HOLD:
+            self.overlays.hint("Nothing was changed", seconds=2.0)
+        else:
+            self.overlays.hide(HINT)
+            asyncio.ensure_future(self.setup_reset())
+
+    # ----- the microphone off (docs/28-user-guide.md)
+    @property
+    def muted(self):
+        return bool(self.mic_switch) or self._mute_choice
+
+    def _mute_hint(self):
+        if self.mic_switch:
+            return "The microphone is off. Slide the mute switch to turn it on."
+        return "The microphone is off. Hold the button for two seconds to turn it on."
+
+    def set_muted(self, muted):
+        """Turn the microphone off or on, as the owner asks (a mute switch, while on, wins). Kept across
+        restarts."""
+        self._mute_choice = bool(muted)
+        self.store.update_settings({"microphone": {"muted": self._mute_choice}})
+        self._apply_mute()
+
+    def set_switch(self, on):
+        """The mute switch moved (True: the microphone off)."""
+        self.mic_switch = bool(on)
+        self._apply_mute()
+        self.overlays.hint("Microphone off" if self.muted else "Microphone on", seconds=2.0)
+
+    def _apply_mute(self):
+        muted = self.muted
+        if muted:
+            # Nothing is heard from now on: listening stops, and so does the recording program.
+            self.listening = False
+            self.recording = None
+            self.answer_until = 0.0
+            if self.state == "listening":
+                self.set_state("idle")
+                self.stage.state("idle")
+        self.overlays.microphone(muted)
+        self.emit("microphone", {"muted": muted, "switch": self.mic_switch})
+
+    # ----- the screen at night (docs/28-user-guide.md)
+    def activity(self):
+        """Someone is there (the button, speech, the wake word, an alarm): a sleeping screen wakes."""
+        self.last_activity = time.time()
+        if self.screen_mode != "on":
+            self.set_screen("on")
+
+    def set_screen(self, mode):
+        """Light the screen, dim it or darken it: the stage draws a veil, and the backlight follows where
+        it can be set."""
+        self.screen_mode = mode
+        self.stage.send({"screen": mode})
+        brightness = float(self.store.settings().get("screen", {}).get("brightness", 100)) / 100.0
+        self.backlight.set({"on": brightness, "dim": DIM_BACKLIGHT, "off": 0.0}[mode])
+        self.emit("screen", {"screen": mode})
+
+    def screen_step(self, now=None):
+        """Sleep in the screen's hours once nothing has happened for a while; otherwise stay lit."""
+        now = now or time.time()
+        opts = self.store.settings().get("screen", {})
+        want = "on"
+        if opts.get("sleep") and within_hours(now, opts.get("sleep_from", 23), opts.get("sleep_to", 7)):
+            busy = self.state != "idle" or self.listening or (self.conversation is not None and self.conversation.busy)
+            if not busy and now - self.last_activity >= SCREEN_IDLE:
+                want = opts.get("how", "off")
+        if want != self.screen_mode:
+            self.set_screen(want)
+        return want
+
+    async def screen_watch(self, every=15.0):
+        while True:
+            await asyncio.sleep(every)
+            try:
+                self.screen_step()
+            except Exception:
+                log.exception("screen watch failed")
+
+    def settings_changed(self, old, new):
+        """Put changed settings into effect (the settings page saved them)."""
+        if old.get("microphone") != new.get("microphone"):
+            self._mute_choice = bool(new.get("microphone", {}).get("muted"))
+            self._apply_mute()
+        if old.get("screen") != new.get("screen"):
+            if self.screen_mode == "on":
+                self.backlight.set(float(new["screen"].get("brightness", 100)) / 100.0)
+            self.screen_step()
+        captions = new.get("captions", {})
+        if not captions.get("on"):
+            self.overlays.hide(CAPTION)
+            self.overlays.hide(HEARD)
+        elif not captions.get("heard"):
+            self.overlays.hide(HEARD)
 
     # ----- timers and alarms
     def action(self, action):
@@ -814,6 +1009,10 @@ class Device:
             "uptime": round(time.time() - self.started),
             "stage_connected": getattr(self.stage, "writer", True) is not None,
             "timezone": self.timezone(),
+            "muted": self.muted,
+            "mute_switch": self.mic_switch,
+            "screen": self.screen_mode,
+            "backlight": self.backlight.available,
             # timedatectl needs systemd running (true on the device, not in every test machine)
             "can_set_timezone": shutil.which("timedatectl") is not None and os.path.isdir("/run/systemd/system"),
         }
@@ -838,6 +1037,8 @@ class Device:
         asyncio.ensure_future(self.memory_watch())
         asyncio.ensure_future(self.clock_watch())
         asyncio.ensure_future(self.update_watch())
+        asyncio.ensure_future(self.screen_watch())
+        self.backlight.set(float(self.store.settings().get("screen", {}).get("brightness", 100)) / 100.0)
 
     # ----- Wi-Fi
     async def network_watch(self, wait=40.0, retry=180.0, busy=120.0):
@@ -905,6 +1106,14 @@ class Device:
         await self._connected()
         if self.active_id():
             self.show_character()
+
+
+def within_hours(now, start, end):
+    """Whether the hour at `now` is from `start` until `end` o'clock (which may pass midnight; equal
+    hours mean never)."""
+    hour = datetime.datetime.fromtimestamp(now).hour
+    start, end = int(start), int(end)
+    return (start <= hour or hour < end) if start > end else (start <= hour < end)
 
 
 async def _run_command(*args, timeout=30):

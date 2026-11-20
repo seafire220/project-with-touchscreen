@@ -15,6 +15,7 @@ import functools
 import logging
 import random
 
+from . import family
 from .audio import FRAME, tone
 from .characters import split_persona
 from .performance import Planner, SyllableMarks, even_timing, guess_feeling, syllable_offsets
@@ -33,13 +34,16 @@ MOOD_LINGER = 6.0            # seconds a feeling stays after a reply ends, befor
 REPLY_TIMEOUT = 90.0         # longest a whole reply may take
 
 
-def system_prompt(persona, remembered="", now=None, search_tag=False, gestures=("nod", "shake", "bow", "tilt")):
+def system_prompt(persona, remembered="", now=None, search_tag=False, gestures=("nod", "shake", "bow", "tilt"),
+                  family_safe=False):
     """The model's instructions: the persona, how to speak, the time, and what the character remembers
-    for this reply (memory.Memory.context: the owner's notes, its memories, the last conversation ...)."""
+    for this reply (memory.Memory.context: the owner's notes, its memories, the last conversation ...).
+    In family-safe mode, its rules follow the persona and a reminder ends the instructions."""
     body, _ = split_persona(persona)
     now = now or datetime.datetime.now()
     rules = speech_rules(gestures) + ("\n" + SEARCH_RULE if search_tag else "")
-    parts = [body, rules, "It is now %s." % now.strftime("%A %d %B %Y, %H:%M"), (remembered or "").strip()]
+    parts = [body, family.RULES if family_safe else "", rules, "It is now %s." % now.strftime("%A %d %B %Y, %H:%M"),
+             (remembered or "").strip(), family.REMINDER if family_safe else ""]
     return "\n\n".join(p for p in parts if p)
 
 
@@ -59,7 +63,8 @@ class Reply:
 
 class Conversation:
     def __init__(self, *, llm, tts, speaker, stage, memory, persona, history_turns=12,
-                 on_event=None, on_action=None, on_audio=None, search=None, gestures=None):
+                 on_event=None, on_action=None, on_audio=None, search=None, gestures=None, on_caption=None,
+                 family_safe=False):
         self.llm = llm
         self.tts = tts
         self.speaker = speaker
@@ -73,6 +78,10 @@ class Conversation:
         self.search = search            # async query -> results, for models without their own search
         # Gestures the character can make (told to the model); by default whatever the stage reports.
         self.gestures = gestures
+        # Called with each sentence as its sound starts to be heard (captions on the screen).
+        self.on_caption = on_caption
+        # Family-safe mode: its rules in the instructions, and strong swearing taken out of what is said.
+        self.family_safe = family_safe
         self.current = None
         self._task = None
         self.mood_linger = MOOD_LINGER
@@ -120,11 +129,13 @@ class Conversation:
         self.stage.state("thinking")
         gestures = self.gestures if self.gestures is not None else getattr(self.stage, "gestures", ("nod", "shake", "bow", "tilt"))
         gestures = [g for g in gestures if g not in getattr(self.stage, "disabled", ())]
-        base = system_prompt(self.persona, "", search_tag=self.search is not None, gestures=gestures)
+        base = system_prompt(self.persona, "", search_tag=self.search is not None, gestures=gestures,
+                             family_safe=self.family_safe)
         asked = prompt or heard
         remembered, past = self.memory.context(heard, room=self.room(len(base) + len(asked)), verbatim=self.history_turns)
         messages = past + [{"role": "user", "content": prompt or heard}]
-        system = system_prompt(self.persona, remembered, search_tag=self.search is not None, gestures=gestures)
+        system = system_prompt(self.persona, remembered, search_tag=self.search is not None, gestures=gestures,
+                               family_safe=self.family_safe)
         writer = None
         try:
             queries = []
@@ -219,6 +230,8 @@ class Conversation:
                 item, first, tagged, feeling = first_item, True, False, None
                 while item is not None:
                     text, emotion, actions = item
+                    if self.family_safe and text:
+                        text = family.soften(text)
                     if emotion:
                         tagged = True
                     elif text and not tagged:
@@ -282,6 +295,8 @@ class Conversation:
                     reply.spoken.append(value)
                     self.on_event("saying", {"text": value})
                     self.stage.state("speaking")
+                    if self.on_caption is not None:      # shown as the sentence's sound starts
+                        yield functools.partial(self.on_caption, value)
 
         try:
             def heard(level):

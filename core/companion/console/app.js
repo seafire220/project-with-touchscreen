@@ -107,7 +107,28 @@ function onEvent(e) {
   else if (e.kind === "memory" || e.kind === "replied") api("GET", "/api/status").then(setStatus).catch(() => {});
   else if (e.kind === "character") { refreshCharacters(); api("GET", "/api/status").then(setStatus).catch(() => {}); }
   else if (e.kind === "button") text($("btn-listen"), e.did === "listen on" ? "Stop listening" : "Start listening");
+  else if (e.kind === "microphone") showMicrophone(e);
+  else if (e.kind === "wake word") addLog("Heard its name:", e.phrase || "");
 }
+
+// The microphone: on, off from here or the button, or off by the mute switch.
+function showMicrophone(s) {
+  if (s.muted === undefined) return;
+  const bySwitch = !!(s.mute_switch ?? s.switch);
+  $("home-muted").hidden = !s.muted;
+  $("btn-unmute").hidden = bySwitch;
+  text($("mic-status"), !s.muted ? "On." : bySwitch ? "Off, by the mute switch on the device." : "Off.");
+  text($("btn-mic"), s.muted ? "Turn the microphone on" : "Turn the microphone off");
+  $("btn-mic").hidden = bySwitch;
+  state.muted = !!s.muted;
+}
+
+async function setMicrophone(muted, where) {
+  try { showMicrophone(Object.assign(await api("POST", "/api/microphone", { muted }), { muted })); text(where, ""); }
+  catch (err) { text(where, err.message); }
+}
+$("btn-mic").addEventListener("click", () => setMicrophone(!state.muted, $("mic-msg")));
+$("btn-unmute").addEventListener("click", () => setMicrophone(false, $("mic-msg")));
 
 // ----- the live view of the character's movement
 const PARTS = { head: "Head", torso: "Body", eyes: "Eyes", brows: "Brows", expression: "Face", arm_left: "Left arm",
@@ -360,6 +381,8 @@ async function loadAnimation() {
 function setStatus(s) {
   text($("home-state"), s.state);
   text($("btn-listen"), s.listening ? "Stop listening" : "Start listening");
+  showMicrophone(s);
+  if (s.backlight !== undefined) $("dev-brightness-row").hidden = !s.backlight;
   if (s.providers) showSteps(s);
   if (s.timezone !== undefined) text($("tz-device"), s.timezone || "not set");
 }
@@ -972,6 +995,22 @@ async function loadSettings() {
   $("dev-speak-after").value = String(first.after_hours || 3);
   $("dev-quiet-from").value = first.quiet_from ?? 22;
   $("dev-quiet-to").value = first.quiet_to ?? 8;
+  const wake = s.wake_word || {};
+  $("dev-wake").checked = !!wake.on;
+  $("dev-wake-phrase").value = wake.phrase || "";
+  $("dev-wake-sens").value = wake.sensitivity || "normal";
+  const captions = s.captions || {};
+  $("dev-captions").checked = !!captions.on;
+  $("dev-captions-heard").checked = !!captions.heard;
+  $("dev-captions-size").value = captions.size || "normal";
+  const screen = s.screen || {};
+  $("dev-sleep").checked = !!screen.sleep;
+  $("dev-sleep-how").value = screen.how || "off";
+  $("dev-sleep-from").value = screen.sleep_from ?? 23;
+  $("dev-sleep-to").value = screen.sleep_to ?? 7;
+  $("dev-brightness").value = screen.brightness ?? 100;
+  $("dev-family").checked = !!(s.family_safe || {}).on;
+  $("dev-family-pw-row").hidden = true;
   renderKeys(await api("GET", "/api/keys"));
 }
 
@@ -1114,6 +1153,10 @@ $("btn-voices").addEventListener("click", async () => {
 });
 
 // ----- device
+$("dev-family").addEventListener("change", () => {
+  // Turning family-safe mode off asks for the password again (a child may have the page open).
+  $("dev-family-pw-row").hidden = $("dev-family").checked || !(state.settings.family_safe || {}).on;
+});
 $("btn-save-device").addEventListener("click", async () => {
   try {
     await api("PUT", "/api/settings", {
@@ -1125,7 +1168,17 @@ $("btn-save-device").addEventListener("click", async () => {
       character_format: $("dev-format").value,
       speak_first: { on: $("dev-speak-first").checked, after_hours: Number($("dev-speak-after").value),
                      quiet_from: Number($("dev-quiet-from").value), quiet_to: Number($("dev-quiet-to").value) },
+      wake_word: { on: $("dev-wake").checked, phrase: $("dev-wake-phrase").value.trim(), sensitivity: $("dev-wake-sens").value },
+      captions: { on: $("dev-captions").checked, heard: $("dev-captions-heard").checked, size: $("dev-captions-size").value },
+      screen: { sleep: $("dev-sleep").checked, how: $("dev-sleep-how").value, sleep_from: Number($("dev-sleep-from").value),
+                sleep_to: Number($("dev-sleep-to").value), brightness: Number($("dev-brightness").value) },
     });
+    const family = $("dev-family").checked;
+    if (family !== !!(state.settings.family_safe || {}).on) {
+      await api("POST", "/api/family-safe", family ? { on: true } : { on: false, password: $("dev-family-pw").value });
+      $("dev-family-pw").value = "";
+    }
+    await loadSettings();
     text($("device-msg"), "Saved.");
   } catch (err) { text($("device-msg"), err.message); }
 });

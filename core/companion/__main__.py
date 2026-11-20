@@ -3,9 +3,9 @@
     python -m companion --data /var/lib/companion --port 80
 
 The button is read from a Linux input device: the Pi's `gpio-key` overlay
-turns a GPIO press into a key press (see docs/13-build-and-install.md). On a desktop,
-any keyboard device and key code can be used instead, and the console's
-"button" does the same job.
+turns a GPIO press into a key press (see docs/13-build-and-install.md). A mute
+switch, if fitted, is a second one (key 248). On a desktop, any keyboard device
+and key code can be used instead, and the console's "button" does the same job.
 """
 import argparse
 import asyncio
@@ -24,18 +24,35 @@ EVENT = struct.Struct("llHHi")   # struct input_event on 64-bit Linux
 EV_KEY = 1
 
 
-LONG_PRESS = 12.0       # seconds held to reset setup (forgotten password or Wi-Fi)
-SHORT_PRESS = 2.5       # a press longer than this and shorter than LONG_PRESS does nothing
+KEY_PROG1 = 148         # the listen button (the gpio-key overlay on GPIO17)
+KEY_MICMUTE = 248       # a mute switch, if the device has one (the gpio-key overlay on GPIO27)
+EVIOCGBIT_KEY = 0x80604521   # which keys an input device has (96 bytes of bits)
+EVIOCGKEY = 0x80604518       # which of its keys are down now
 
 
-async def read_button(path, code, press, long_press=None):
-    """Call `press` for each short press of `code` on an input device, and `long_press` after a
-    hold of LONG_PRESS seconds; reopen the device if it goes away."""
+def _key_bits(fd, request):
+    import fcntl
+    try:
+        return bytes(fcntl.ioctl(fd, request, bytearray(96)))
+    except OSError:
+        return b""
+
+
+def _has_bit(bits, key):
+    return len(bits) > key // 8 and bool(bits[key // 8] >> (key % 8) & 1)
+
+
+async def read_inputs(path, device, button_key=KEY_PROG1, mute_key=KEY_MICMUTE):
+    """The button and the mute switch, from a Linux input device: the button going down and up (the
+    device tells a press from a hold, device.button_down and button_up), and the switch's position, read
+    when the device is opened and then as it moves (device.set_switch). Reopens the device if it goes away."""
     log = logging.getLogger("companion.button")
     while True:
         try:
             with open(path, "rb", buffering=0) as f:
-                log.info("reading the button from %s (key %d)", path, code)
+                log.info("reading the button and switch from %s", path)
+                if _has_bit(_key_bits(f.fileno(), EVIOCGBIT_KEY), mute_key):
+                    device.set_switch(_has_bit(_key_bits(f.fileno(), EVIOCGKEY), mute_key))
                 loop = asyncio.get_running_loop()
                 down = None
                 while True:
@@ -43,27 +60,27 @@ async def read_button(path, code, press, long_press=None):
                     if len(data) < EVENT.size:
                         break
                     sec, usec, kind, key, value = EVENT.unpack(data)
-                    if kind != EV_KEY or key != code:
+                    if kind != EV_KEY or value == 2:          # 2 is a key repeating while held
                         continue
-                    when = sec + usec / 1e6          # the kernel's own time stamp of the press
-                    if value == 1:
-                        down = when
-                    elif value == 0 and down is not None:
-                        held, down = when - down, None
-                        if held >= LONG_PRESS and long_press is not None:
-                            asyncio.ensure_future(long_press())
-                        elif held < SHORT_PRESS:
-                            press()
+                    when = sec + usec / 1e6          # the kernel's own time stamp
+                    if key == mute_key:
+                        device.set_switch(value == 1)
+                    elif key == button_key:
+                        if value == 1:
+                            down = when
+                            device.button_down()
+                        elif down is not None:
+                            held, down = when - down, None
+                            device.button_up(held)
         except OSError as error:
             log.warning("button device unavailable (%s); retrying", error)
         await asyncio.sleep(2.0)
 
 
-def find_button():
-    """The input device the gpio-key overlay creates, if there is one."""
-    for path in sorted(glob.glob("/dev/input/by-path/*button*-event")) + sorted(glob.glob("/dev/input/by-path/*gpio*-event")):
-        return path
-    return ""
+def find_inputs():
+    """The input devices the gpio-key overlays create (the button, and a mute switch if fitted)."""
+    paths = sorted(glob.glob("/dev/input/by-path/*button*-event")) + sorted(glob.glob("/dev/input/by-path/*gpio*-event"))
+    return list(dict.fromkeys(paths))
 
 
 def main():
@@ -88,9 +105,9 @@ def main():
         wifi = WiFi() if shutil.which("nmcli") else None
         device = Device(args.data, stage_socket=args.stage_socket, speaker=speaker, microphone=microphone, wifi=wifi)
         device.start()
-        button = find_button() if args.button == "auto" else ("" if args.button == "none" else args.button)
-        if button:
-            asyncio.ensure_future(read_button(button, args.button_key, device.button, device.setup_reset))
+        inputs = find_inputs() if args.button == "auto" else ([] if args.button == "none" else [args.button])
+        for path in inputs:
+            asyncio.ensure_future(read_inputs(path, device, args.button_key))
         runner = web.AppRunner(make_app(device), access_log=None)
         await runner.setup()
         await web.TCPSite(runner, args.host, args.port).start()

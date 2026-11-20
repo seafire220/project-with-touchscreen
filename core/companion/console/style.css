@@ -66,3 +66,4 @@ svg.graph { width: 100%; max-width: 600px; height: auto; background: #fff; borde
 table.tracks { border-collapse: collapse; width: 100%; max-width: 760px; }
 table.tracks td, table.tracks th { padding: 0.2em 0.4em; text-align: left; }
 table.tracks td:nth-child(2) input { width: 100%; box-sizing: border-box; }
+.notice { background: var(--card); border: 1px solid var(--bad); border-radius: 10px; padding: 6px 10px; }

@@ -40,6 +40,8 @@
       <div>
         <h2 id="home-name">No character yet</h2>
         <p>State: <strong id="home-state">idle</strong></p>
+        <p id="home-muted" class="notice" hidden>The microphone is off: nothing is heard or recorded.
+          <button type="button" id="btn-unmute" class="small">Turn it on</button></p>
         <p><button id="btn-listen">Start listening</button> <button id="btn-interrupt">Stop speaking</button></p>
       </div>
     </div>
@@ -350,6 +352,23 @@
     <label>…after being apart for <select id="dev-speak-after"><option value="1">an hour</option><option value="3">3 hours</option>
       <option value="8">8 hours</option><option value="24">a day</option></select>, but never between
       <input type="number" id="dev-quiet-from" min="0" max="23" step="1"> and <input type="number" id="dev-quiet-to" min="0" max="23" step="1"> o'clock</label>
+    <label><input type="checkbox" id="dev-wake"> Wake word: start listening when I say its name, as well as with the button</label>
+    <label>…the words <input id="dev-wake-phrase" maxlength="40" placeholder="hey, then its name"> how readily it
+      hears them <select id="dev-wake-sens"><option value="low">less (fewer false starts)</option>
+      <option value="normal">usual</option><option value="high">more (for a quiet voice)</option></select></label>
+    <label><input type="checkbox" id="dev-captions"> Captions: write what the character says on the screen</label>
+    <label><input type="checkbox" id="dev-captions-heard"> …and what it heard, at the top</label>
+    <label>Caption size <select id="dev-captions-size"><option value="normal">normal</option>
+      <option value="large">large</option></select></label>
+    <label><input type="checkbox" id="dev-sleep"> Screen at night: <select id="dev-sleep-how"><option value="off">dark</option>
+      <option value="dim">dim</option></select> from <input type="number" id="dev-sleep-from" min="0" max="23" step="1">
+      to <input type="number" id="dev-sleep-to" min="0" max="23" step="1"> o'clock while nobody is talking to it (the
+      button, its name or an alarm lights it again)</label>
+    <label id="dev-brightness-row" hidden>Screen brightness <input type="range" id="dev-brightness" min="10" max="100" step="5"></label>
+    <label><input type="checkbox" id="dev-family"> Family-safe: every reply suitable for children, whatever the
+      character's description says</label>
+    <label id="dev-family-pw-row" hidden>To turn family-safe mode off, the settings-page password
+      <input type="password" id="dev-family-pw" autocomplete="current-password"></label>
     <label>Character drawing <select id="dev-format">
       <option value="live2d">Live2D-format copy when the character has one (recommended)</option>
       <option value="inochi2d">Inochi2D puppet when the character has one</option></select></label>
@@ -362,6 +381,11 @@
         trained on LibriTTS-R (CC BY 4.0; Koizumi et al., 2023), with phonemes from espeak-ng (GPL-3.0).
         The full list is in THIRD_PARTY.md in the device's software.</p>
     </details>
+    <h3>Microphone</h3>
+    <p><span id="mic-status">On.</span> <button type="button" id="btn-mic">Turn the microphone off</button>
+      <span id="mic-msg"></span></p>
+    <p class="muted">Holding the device's button for two seconds also turns it off or on. While it is off, a crossed-out
+      microphone shows on the screen and the recording program is stopped: nothing is heard, recorded or sent.</p>
     <h3>Wi-Fi</h3>
     <p id="wifi-status">Checking…</p>
     <form id="wifi-form">
