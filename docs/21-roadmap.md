@@ -21,6 +21,11 @@ Done and tested in software (not yet on real hardware):
   Live2D-format models as a zipped model folder.
 - Measuring and review tools: `studio/reveal.py` (uncovered area, gaps,
   made-up filler shown, outline movement), `stage/tools/pose_strips.py`.
+- Sold devices update themselves from updates signed with the owner's key
+  (`32-updates.md`); backup and restore, and a support report, on the Device
+  tab; speaking first as an option, and memory matching by meaning
+  (`31-memory.md`); owners' own Inochi2D models as well as Live2D ones.
+  What else would finish the product: `33-finishing.md`.
 - Conversations and memory (`31-memory.md`): conversations with clear
   ends, each summed up; lasting memories the model keeps up to date; plans
   followed up; a diary; all shown and editable on the Memory tab. The

@@ -68,6 +68,26 @@ lives elsewhere. That separation is what lets updates replace the software
 without touching characters, keys or memories, and lets a reset remove the
 owner's things without removing the software.
 
+## How much storage it needs
+
+No separate storage module: the microSD card is the device's storage. On the Radxa Zero 3W, it is the board's own 16 GB.
+
+| What | Size |
+|---|---|
+| Raspberry Pi OS Lite and the packages the device adds | about 3 GB (the image is 5.2 GB, with 2 GB left free for growth; the card's partition grows to fill the card at first start) |
+| The device's software: core, settings page, stage program (5 MB), animations | under 15 MB a version; two versions are kept for going back, plus one update waiting (30 to 50 MB) |
+| Models: speech recognition 120 MB, voice 80 MB, matching by meaning 30 MB | 230 MB |
+| Logs (capped) | at most 40 MB |
+| **A 2D character** (picture-made, Live2D or Inochi2D) | 5 to 50 MB each |
+| **A 3D avatar** (VRM, after import shrinks its textures) | 10 to 160 MB each, typically 20 to 60 |
+| **Memory**: conversations, every word, memories, diary | about 5 MB per character per year of daily talk |
+| While making a backup | a temporary copy of the characters and memories |
+
+So the software takes about 3.5 GB:
+- **A 16 GB card** leaves about 12 GB, room for well over a hundred 3D avatars, or decades of memory.
+- **The 32 GB A1 card** in the parts list (`05-hardware-and-bom.md`) leaves plenty of headroom, and a name-brand A1 or A2 card matters more than its size.
+- A buyer who wants a bigger card can move everything with **Backup** and **Restore**.
+
 ## The first power-on, as the buyer sees it
 
 1. **Power on.** The screen goes straight to the setup screen: no rainbow,
