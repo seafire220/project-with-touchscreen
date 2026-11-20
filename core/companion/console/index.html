@@ -337,6 +337,11 @@
     <label><input type="checkbox" id="dev-memory"> Keep long-term memory (notes and summaries of conversations)</label>
     <label><input type="checkbox" id="dev-gestures"> Let the character choose gestures as it speaks (nods, waves, shrugs...)</label>
     <label><input type="checkbox" id="dev-random-gestures"> Gestures by itself now and then, when its mood fits</label>
+    <label><input type="checkbox" id="dev-speak-first"> Speak first: greet me when I come back after a while, and ask how
+      my plans went (it notices speech-like sound in the room; nothing is recorded or sent anywhere), then listen for my answer</label>
+    <label>…after being apart for <select id="dev-speak-after"><option value="1">an hour</option><option value="3">3 hours</option>
+      <option value="8">8 hours</option><option value="24">a day</option></select>, but never between
+      <input type="number" id="dev-quiet-from" min="0" max="23" step="1"> and <input type="number" id="dev-quiet-to" min="0" max="23" step="1"> o'clock</label>
     <label>Character drawing <select id="dev-format">
       <option value="live2d">Live2D-format copy when the character has one (recommended)</option>
       <option value="inochi2d">Inochi2D puppet when the character has one</option></select></label>

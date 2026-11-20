@@ -770,6 +770,9 @@ class Memory:
                 break
             messages = pair + messages
             left -= size
+        if messages and messages[0]["role"] == "assistant":
+            # The character spoke first (some services need the first message to be the person's).
+            messages = [{"role": "user", "content": "(You spoke first.)"}] + messages
         self._mark_asked(asked)
         return text, messages
 

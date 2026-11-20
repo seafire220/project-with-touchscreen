@@ -757,3 +757,23 @@ rejected. Settled entries are not reopened without new evidence.
   survives an update that breaks the Python packages. New Python packages
   come as wheels inside the update, never from the internet at install time.
   System packages need a new image.
+
+## D-053 — Speaking first is an option, by sound alone
+
+- Date: 2026-11-20. Status: built (owner: "have that as an option that can be
+  toggled on or off"; `31-memory.md`).
+- **Off by default.** The owner turns it on, chooses how long apart counts
+  (3 hours by default) and the quiet hours (10 pm to 8 am by default).
+- **Presence is speech-like sound** of a second or more, from the
+  microphone's loudness only, with nothing recorded, recognised or sent. A
+  camera or a presence sensor would know better, but would add hardware and
+  worry; the button and a reply already show someone is there.
+- **What it says comes from memory**: how long it has been and plans whose
+  day has come. That makes it a check-in, not just a "hello". The greeting
+  is kept as a turn where only the character spoke. The next message to the
+  model begins with a placeholder, because some services need the person's
+  turn first.
+- **It listens for half a minute afterwards**, so the person can just
+  answer, then stops listening as before.
+- A television can set it off: hence the gap, the quiet hours, once per
+  gap, and off by default.

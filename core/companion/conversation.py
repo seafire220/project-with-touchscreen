@@ -104,22 +104,26 @@ class Conversation:
         if self._task is not None and not self._task.done():
             self._task.cancel()
 
-    def start(self, heard):
-        """Begin replying to what was heard, in the background. Returns the task."""
+    def start(self, heard, prompt=None):
+        """Begin replying to what was heard (or, with `prompt` and nothing heard, speaking first), in the
+        background. Returns the task."""
         self.interrupt()
-        self._task = asyncio.ensure_future(self.respond(heard))
+        self._task = asyncio.ensure_future(self.respond(heard, prompt=prompt))
         return self._task
 
-    async def respond(self, heard):
+    async def respond(self, heard, prompt=None):
+        """Reply to what was heard. With `prompt`, nothing was heard: the character speaks first, the
+        model being told why in `prompt` (kept in memory as a turn where only the character spoke)."""
         self._stop_calming()
         reply = self.current = Reply(heard)
-        self.on_event("heard", {"text": heard})
+        self.on_event("speaking first" if prompt else "heard", {"text": heard})
         self.stage.state("thinking")
         gestures = self.gestures if self.gestures is not None else getattr(self.stage, "gestures", ("nod", "shake", "bow", "tilt"))
         gestures = [g for g in gestures if g not in getattr(self.stage, "disabled", ())]
         base = system_prompt(self.persona, "", search_tag=self.search is not None, gestures=gestures)
-        remembered, past = self.memory.context(heard, room=self.room(len(base) + len(heard)), verbatim=self.history_turns)
-        messages = past + [{"role": "user", "content": heard}]
+        asked = prompt or heard
+        remembered, past = self.memory.context(heard, room=self.room(len(base) + len(asked)), verbatim=self.history_turns)
+        messages = past + [{"role": "user", "content": prompt or heard}]
         system = system_prompt(self.persona, remembered, search_tag=self.search is not None, gestures=gestures)
         writer = None
         try:

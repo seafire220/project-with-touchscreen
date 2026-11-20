@@ -217,6 +217,13 @@ The **Memory** tab shows all of it:
 
 **Forget everything** clears that character's memory.
 
+### Speaking first
+
+Turn on **Device → Speak first** and the character greets you when you come back after a while. It asks how your plans went, then listens for half a minute so you can just answer.
+- It notices speech-like sound in the room; nothing is recorded or sent.
+- Choose how long apart counts (3 hours by default) and the quiet hours when it never speaks first (10 pm to 8 am by default).
+- A television left talking can set it off, so it is off unless you turn it on.
+
 ## AI services
 
 Under **AI services**, in three parts:

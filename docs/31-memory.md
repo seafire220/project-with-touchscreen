@@ -129,6 +129,28 @@ It writes about you, not to you, and only from what it heard: it can't see you.
 
 The next day's first conversation gets the latest entry, so the character can pick up where it left off. An entry more than a week old isn't news, and is left out.
 
+## Speaking first (an option, off unless turned on)
+
+With **Device → Speak first** on, the character greets you when you come back after a while, like CODE27's greetings and check-ins. It uses what it remembers:
+- how long it has been;
+- plans whose day has come.
+
+From a real model, four days after Sam mentioned their driving test: "Good morning, Sam! It is so good to see you again. How did your driving test go on Friday, and was it wonderful seeing Kim after she flew in from Perth?"
+
+**How it knows someone is there:** a second or more of speech-like sound in the room. A cough or a door isn't enough. It goes only by how loud the room is: nothing is recorded, recognised or sent anywhere, and nothing at all happens with the option off.
+
+**When it greets:**
+- only after you have been apart for a while (3 hours by default; or an hour, 8 hours, or a day);
+- at most once in that time;
+- never in quiet hours (10 pm to 8 am by default);
+- never while it is talking, listening or thinking.
+
+Afterwards it listens for 30 seconds, so you can simply answer. If nobody does, it stops listening, as before.
+
+The model is told: "Nothing has been said yet. You hear someone nearby, most likely them, after about 4 days without talking. Speak first: greet them warmly and briefly…". The greeting is kept as a turn where only the character spoke.
+
+**A limit:** a television left talking can count as someone there. That's one more reason for the gap and quiet hours, and why the option is off by default.
+
 ## What the model reads for each reply
 
 In this order, the latest last, nearest what is said now:
@@ -229,7 +251,7 @@ From CODE27's website and manual, November 2026:
 | A nightly diary in the character's voice | The same, from 9 pm or the next day |
 | Chat history with dates | Every conversation titled, summed up, with your mood; its words on request |
 | *Reset Context* | *Start a new conversation* |
-| A greeting when you come back, and check-ins after long silences | Partly. It knows when you last talked and whether it is the day's first conversation, and asks after plans, but only once you speak. Speaking first is not done yet |
+| A greeting when you come back, and check-ins after long silences | Done, as an option: it greets you when it hears someone after a while apart, mentioning the time apart and asking after plans |
 | Bring your own model: "coming soon" | Done: cloud services, or a model on your own computer (`28-user-guide.md`) |
 | Stored with AES-256 encryption | Not encrypted at rest (below) |
 
@@ -303,7 +325,7 @@ Most of the guards above came from these runs, and the summing-up step is now th
 
 ## Not done yet
 
-- **Speaking first**: greeting you when you come into the room, or checking in after a long silence.
+- **Knowing it is you**: speaking first goes by speech-like sound, so a television can set it off; telling voices apart would fix that.
 - **Matching by meaning**: today matching is by words, with their forms ("baked", "baking"); "my pup" won't find "their dog". A small on-device embedding model would add this.
 - **Questions by date**: "what did we talk about last Monday?" isn't matched by its date.
 - **More than one person**: memory assumes one person; telling voices apart isn't done.

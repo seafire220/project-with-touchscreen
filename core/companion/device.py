@@ -25,6 +25,13 @@ from .store import Store, redact, write_atomic
 log = logging.getLogger("companion")
 
 UPDATE_CHECK_EVERY = 12 * 3600
+# Speaking first: what the model is told, how long it listens for an answer, and how much speech-like
+# sound means someone is there.
+GREETING_PROMPT = ("(Nothing has been said yet. You hear someone nearby, most likely them, after %s without "
+                   "talking. Speak first: greet them warmly and briefly, one or two short sentences, in your own "
+                   "way. If a plan of theirs has had its day, you may ask how it went.)")
+ANSWER_WINDOW = 30.0
+PRESENCE_SECONDS = 0.8
 MEMORY_TEMPERATURE = 0.3      # the background memory work: summing up, memories, the diary
 MEMORY_MAX_TOKENS = 700
 
@@ -84,6 +91,8 @@ class Device:
         self.summarising = False            # a memory update is under way
         self.memory_retry = 0.0             # after a failed memory update, wait until then
         self.updates = updates_module.Updates(data_dir)
+        self.last_greeting = 0.0            # when the character last spoke first
+        self.answer_until = 0.0             # after speaking first, it listens for an answer until then
         self.updating = False               # an update is being fetched or handed to the installer
 
     # ----- events for the console
@@ -590,6 +599,45 @@ class Device:
             return None
         return await self.conversation.start(text)
 
+    # ----- speaking first (docs/31-memory.md)
+    async def greet(self, now=None):
+        """Speak first, when someone seems to be back after a while: a short greeting, from what the
+        character remembers (how long it has been, plans whose day has come). Only when the owner has
+        turned it on, outside quiet hours, at most once a while, and never over a conversation."""
+        now = now or time.time()
+        opts = self.store.settings().get("speak_first", {})
+        if not opts.get("on") or self.state not in ("idle",) or (self.conversation is not None and self.conversation.busy):
+            return None
+        hour = datetime.datetime.fromtimestamp(now).hour
+        start, end = int(opts.get("quiet_from", 22)), int(opts.get("quiet_to", 8))
+        if (start <= hour or hour < end) if start > end else (start <= hour < end):
+            return None
+        cid = self.active_id()
+        if not cid:
+            return None
+        apart = now - max(self.memory(cid).last_turn_time(), self.last_greeting)
+        if apart < float(opts.get("after_hours", 3)) * 3600:
+            return None
+        try:
+            self.conversation = self.conversation or self.make_conversation()
+        except ProviderError:
+            return None
+        self.last_greeting = now
+        days = apart / 86400
+        gap = ("about %d days" % round(days)) if days >= 1.5 else ("about %d hours" % max(1, round(apart / 3600))) \
+            if apart < 30 * 86400 else "a long time"
+        self.emit("speaking first", {"apart": round(apart)})
+        task = self.conversation.start("", prompt=GREETING_PROMPT % gap)
+        reply = await task
+        if reply is not None and not reply.error and not reply.interrupted and \
+                self.store.settings()["listening"].get("mode", "auto") == "auto" and not self.listening:
+            # Listen a little while for an answer, so they can just reply.
+            self.listening = True
+            self.answer_until = time.time() + ANSWER_WINDOW
+            self.set_state("listening")
+            self.stage.state("listening")
+        return reply
+
     async def hear(self, pcm):
         """Recognise a recording and reply to it."""
         self.set_state("thinking")
@@ -650,6 +698,8 @@ class Device:
             return
         settings = self.store.settings()["listening"]
         detector = Detector(float(settings.get("end_silence", 0.8)), float(settings.get("max_turn", 30.0)))
+        # Someone seems to be there (for speaking first): speech-like sound, from its loudness alone.
+        presence = Detector(0.6, 8.0)
         while True:
             try:
                 async for frame in self.microphone.frames():
@@ -659,9 +709,22 @@ class Device:
                         continue
                     busy = self.state in ("thinking", "speaking")
                     barge_in = self.store.settings()["listening"].get("voice_interrupt", False)
+                    if self.answer_until and self.listening and not detector.speaking and time.time() > self.answer_until:
+                        self.answer_until = 0.0     # no answer to its greeting: stop listening, as before it spoke
+                        self.listening = False
+                        self.set_state("idle")
+                        self.stage.state("idle")
                     if not self.listening or (busy and not barge_in):
                         detector.reset()          # without echo cancellation, ignore our own voice
+                        if not busy and self.store.settings().get("speak_first", {}).get("on"):
+                            sound = presence.feed(frame)
+                            if sound and len(sound) / 2 / 16000 >= PRESENCE_SECONDS:
+                                asyncio.ensure_future(self.greet())
+                        else:
+                            presence.reset()
                         continue
+                    if detector.speaking:
+                        self.answer_until = 0.0     # they answered: carry on as usual
                     was_speaking = detector.speaking
                     pcm = detector.feed(frame)
                     if self.state == "listening":

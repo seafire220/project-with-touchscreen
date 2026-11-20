@@ -967,6 +967,11 @@ async function loadSettings() {
   $("dev-gestures").checked = s.conversation.gestures !== false;
   $("dev-random-gestures").checked = s.conversation.random_gestures !== false;
   $("dev-format").value = s.character_format || "live2d";
+  const first = s.speak_first || {};
+  $("dev-speak-first").checked = !!first.on;
+  $("dev-speak-after").value = String(first.after_hours || 3);
+  $("dev-quiet-from").value = first.quiet_from ?? 22;
+  $("dev-quiet-to").value = first.quiet_to ?? 8;
   renderKeys(await api("GET", "/api/keys"));
 }
 
@@ -1118,6 +1123,8 @@ $("btn-save-device").addEventListener("click", async () => {
       conversation: { memory: $("dev-memory").checked, web_search: $("dev-search").checked,
                       gestures: $("dev-gestures").checked, random_gestures: $("dev-random-gestures").checked },
       character_format: $("dev-format").value,
+      speak_first: { on: $("dev-speak-first").checked, after_hours: Number($("dev-speak-after").value),
+                     quiet_from: Number($("dev-quiet-from").value), quiet_to: Number($("dev-quiet-to").value) },
     });
     text($("device-msg"), "Saved.");
   } catch (err) { text($("device-msg"), err.message); }

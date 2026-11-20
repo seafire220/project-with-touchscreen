@@ -32,6 +32,9 @@ DEFAULT_SETTINGS = {
     # with Ayagami) or "inochi2d" (the Inochi2D puppet). Either is used when it is the only one.
     "character_format": "live2d",
     "volume": 0.8,
+    # Speaking first (docs/31-memory.md): when someone seems to be back after `after_hours`, the character
+    # greets them, outside quiet hours (from `quiet_from` to `quiet_to` o'clock). Off unless the owner turns it on.
+    "speak_first": {"on": False, "after_hours": 3, "quiet_from": 22, "quiet_to": 8},
     # Software updates (docs/32-updates.md): look for them now and then, and install them at night.
     "updates": {"check": True, "auto_install": True},
 }
@@ -98,6 +101,13 @@ class Store:
                 raise ValueError("%s must be an object" % key)
         if changes.get("character_format", "live2d") not in ("live2d", "inochi2d"):
             raise ValueError("character_format must be live2d or inochi2d")
+        first = changes.get("speak_first") or {}
+        if "on" in first and not isinstance(first["on"], bool):
+            raise ValueError("speak_first.on must be true or false")
+        for name, low, high in (("after_hours", 0.5, 168), ("quiet_from", 0, 23), ("quiet_to", 0, 23)):
+            if name in first and (not isinstance(first[name], (int, float)) or isinstance(first[name], bool)
+                                  or not low <= first[name] <= high):
+                raise ValueError("speak_first.%s must be a number from %s to %s" % (name, low, high))
         with self._lock:
             merged = _merge(self.settings(), changes)
             write_atomic(self.settings_path, json.dumps(merged, indent=1))
