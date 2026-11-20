@@ -86,7 +86,8 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           cd "$RUNNER_TEMP"
-          sudo chown "$(id -u)" "companion-$VERSION.img"
+          # The image was made by root: hand it (owner and group) to this user, or xz can't copy its group.
+          sudo chown "$(id -u):$(id -g)" "companion-$VERSION.img"
           xz -T0 "companion-$VERSION.img"
           sha256sum "companion-$VERSION.img.xz" > "companion-$VERSION.img.xz.sha256"
           ls -l "companion-$VERSION.img.xz"
