@@ -65,7 +65,7 @@ Provisional choices made where the answers were open. Each can be overturned.
 |---|---|---|
 | A1 | Portrait screen, 720 × 1280, 5" for the prototype. | The 5" and 7" versions of the same display share a resolution, so size can change later with no software change. |
 | A2 | 30 frames per second is the floor; 60 where the hardware allows. | Anime-style animation reads well at 24–30. |
-| A3 | No wake word in version 1. | The owner asked for button activation. A wake word can be added later without redesign. |
+| A3 | ~~No wake word in version 1.~~ Superseded 2026-11-20: a wake word is an option (D-057); the button stays. | The owner asked for button activation first, then for the wake word (`33-finishing.md`). It was added without redesign, as expected. |
 | A4 | The character can be interrupted by voice only when echo cancellation is present. Otherwise the button interrupts. | Without echo cancellation the device hears itself. |
 | A5 | The software must fit in 1 GB of RAM. | Memory is the dominant cost in 2026 board prices. See the hardware document. |
 | A6 | The seller runs no cloud service. Lite characters are generated from the device's web UI on the buyer's own AI keys. Standard characters are made with a tool chain on the buyer's laptop. | Avoids hosting cost, liability and an ongoing dependency on the seller. |
