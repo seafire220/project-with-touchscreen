@@ -168,6 +168,11 @@ So the software takes about 3.5 GB:
 
 ## What has been tested
 
+On 2026-11-20, again, with power-cut protection: a 5.8 GB image with three partitions (the read-only
+system, and a 512 MB data partition labelled `companion-data`), the wake-word model and the USB
+connection installed; `device/check-image.sh` passed all 51 checks, the seven power-cut checks among
+them (the fstab is also read correctly by systemd's own fstab generator). Not yet started on a Pi.
+
 On 2026-11-17, in this development environment (not on a Pi):
 
 - **The image was built from the official Raspberry Pi OS Lite image**
