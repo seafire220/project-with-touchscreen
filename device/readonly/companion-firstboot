@@ -2,7 +2,8 @@
 # The first start of a device with a read-only system (docs/33-finishing.md, "Power cuts"): the data
 # partition grows to fill the card, and the device keeps its identity (machine-id) from now on. Runs once.
 set -u
-DEV="$(findmnt -n -o SOURCE /data || true)"
+DATA="${COMPANION_DATA_MOUNT:-/data}"         # tests use another mount point, and skip the machine-id
+DEV="$(findmnt -n -o SOURCE "$DATA" || true)"
 if [ -n "$DEV" ]; then
     DISK="/dev/$(lsblk -no pkname "$DEV")"
     PART="$(cat "/sys/class/block/$(basename "$DEV")/partition")"
@@ -14,11 +15,13 @@ if [ -n "$DEV" ]; then
         echo "the data partition could not be grown; it keeps its size"
     fi
 fi
-if findmnt -n -o OPTIONS / | tr ',' '\n' | grep -qx ro; then
+if [ -n "${COMPANION_DATA_MOUNT:-}" ]; then
+    :
+elif findmnt -n -o OPTIONS / | tr ',' '\n' | grep -qx ro; then
     mount -o remount,rw / && systemd-machine-id-setup --commit
     sync
     mount -o remount,ro /
 else
     systemd-machine-id-setup --commit
 fi
-touch /data/system/first-boot-done
+mkdir -p "$DATA/system" && touch "$DATA/system/first-boot-done"
