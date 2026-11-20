@@ -173,17 +173,38 @@ made; it has no login at all, by design.
 The screen should show *Hello!* with the device's address (it already has
 your Wi-Fi from Imager). Carry on at step 5.
 
-### Units for sale: the ready-made image
+### Units for sale (and the easiest first card): the ready-made image
 
-One image, flashed to every card, with nothing secret in it
-(`18-out-of-the-box.md`). It is built on a Linux computer from the official
-Raspberry Pi OS Lite image, with `device/build-image.sh`; Claude can build it
-in a cloud session too (it was built that way on 2026-11-17, 5.2 GB, and again with
-power-cut protection on 2026-11-20). Its system partition is read-only and a third partition holds
-what the device saves (`33-finishing.md`). Flash
-it with Raspberry Pi Imager (*Choose OS → Use custom*), **without** Imager's
-customisation. At first power-on the unit shows *Set up Wi-Fi*, as a buyer
-sees it (`28-user-guide.md`).
+One image, flashed to every card, with everything on it: Raspberry Pi OS, the device's software, its
+models and voices. Nothing secret is in it (`18-out-of-the-box.md`). Its system partition is read-only,
+and a third partition holds what the device saves (`33-finishing.md`).
+
+**Get the image (no Linux computer needed).** On GitHub, in this repository:
+1. **Actions → Make a device image → Run workflow.** Give a version, such as `2026.11.21` (updates you
+   publish later must be newer). It takes about half an hour.
+2. On the finished run's page, under *Artifacts*, download `companion-image-<version>` (about 1.5 GB)
+   and unzip it. You get `companion-<version>.img.xz` and its checksum. Keep it zipped as `.img.xz`:
+   Imager reads it as it is.
+
+(On a Linux computer, `device/build-image.sh` makes the same image; `--help` says how.)
+
+**Write it to the card**, on a Mac or PC:
+1. Install **Raspberry Pi Imager** from raspberrypi.com/software, and put the microSD card in the
+   computer (a USB card reader if it has no slot).
+2. **Choose Device**: Raspberry Pi 4 (or 5).
+3. **Choose OS**: scroll to the bottom, **Use custom**, and pick `companion-<version>.img.xz`.
+4. **Choose Storage**: the card. Check it is the card, by its size: everything on it is erased.
+5. **Next.** When Imager asks *"Would you like to apply OS customisation settings?"*, choose **No**. The
+   device sets itself up from its own screen; customisation would change that.
+6. **Yes** to erase the card. Imager writes and then checks it: about ten minutes. Eject the card.
+
+**Start it.** Put the card in the Pi (contacts towards the board), connect everything (step 3), and
+plug in the power. The first start takes a little longer (the data partition grows to fill the card).
+After about a minute the screen shows *Set up Wi-Fi*, as a buyer sees it (`28-user-guide.md`). Carry on
+at step 5, then the tests in `15-hardware-test-plan.md`.
+
+Every card for sale gets the same image. After that, the devices update themselves from your update
+repository (`32-updates.md`); you never flash them again.
 
 ## 5. First start and first checks
 

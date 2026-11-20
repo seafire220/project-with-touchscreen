@@ -16,6 +16,9 @@ power-on, how units are made, and how they are reset and recovered.
    sudo ./device/build-image.sh 2026-10-06-raspios-trixie-arm64-lite.img.xz companion.img --compress
    ```
 
+   Or, with no Linux computer: the **Make a device image** workflow on GitHub builds the same image and
+   attaches it to the run (`.github/workflows/make-image.yml`; steps in `29-hardware-setup.md`).
+
    It starts from the official Raspberry Pi OS Lite (64-bit) image and
    installs everything inside it: system packages, the core service, the
    character program, the on-device speech model, the services, the button
