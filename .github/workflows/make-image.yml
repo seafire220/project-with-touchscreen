@@ -62,8 +62,8 @@ jobs:
 
       - name: Download Raspberry Pi OS Lite
         run: |
-          curl -fsSL -o raspios.img.xz "$RASPIOS_URL"
-          echo "$RASPIOS_SHA256  raspios.img.xz" | sha256sum -c -
+          curl -fsSL -o "$RUNNER_TEMP/raspios.img.xz" "$RASPIOS_URL"
+          echo "$RASPIOS_SHA256  $RUNNER_TEMP/raspios.img.xz" | sha256sum -c -
 
       - name: Build the image
         env:
@@ -72,20 +72,31 @@ jobs:
         run: |
           extra=""
           if [ "$WRITABLE" = true ]; then extra="--writable-system"; fi
-          sudo ./device/build-image.sh raspios.img.xz "companion-$VERSION.img" --version "$VERSION" \
-              --stage-binary stage/target/release/stage --compress $extra
+          sudo ./device/build-image.sh "$RUNNER_TEMP/raspios.img.xz" "$RUNNER_TEMP/companion-$VERSION.img" \
+              --version "$VERSION" --stage-binary stage/target/release/stage $extra
+          sudo rm -f "$RUNNER_TEMP/raspios.img.xz"
 
       - name: Check the image
         env:
           VERSION: ${{ inputs.version }}
-        run: sudo ./device/check-image.sh "companion-$VERSION.img"
+        run: sudo ./device/check-image.sh "$RUNNER_TEMP/companion-$VERSION.img"
+
+      - name: Compress it
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          cd "$RUNNER_TEMP"
+          sudo chown "$(id -u)" "companion-$VERSION.img"
+          xz -T0 "companion-$VERSION.img"
+          sha256sum "companion-$VERSION.img.xz" > "companion-$VERSION.img.xz.sha256"
+          ls -l "companion-$VERSION.img.xz"
 
       - uses: actions/upload-artifact@v4
         with:
           name: companion-image-${{ inputs.version }}
           path: |
-            companion-${{ inputs.version }}.img.xz
-            companion-${{ inputs.version }}.img.xz.sha256
+            ${{ runner.temp }}/companion-${{ inputs.version }}.img.xz
+            ${{ runner.temp }}/companion-${{ inputs.version }}.img.xz.sha256
           compression-level: 0
           retention-days: 14
           if-no-files-found: error
