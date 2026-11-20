@@ -811,5 +811,6 @@ rejected. Settled entries are not reopened without new evidence.
   on their own. That gives owners a free, open-source rigging route. The
   model's name, artist and licence come from its header; its abilities and
   controls come from its parameter names, Inochi2D's or Live2D's.
-- Stretchy Studio was looked at too (`25-product-review.md`); it exports to
-  formats the device does not play.
+- Stretchy Studio was looked at too (`23-drawing-workflow.md`): its Live2D
+  model export does not yet carry the deformers that move a face, and its other
+  exports are formats the device does not play. To watch.

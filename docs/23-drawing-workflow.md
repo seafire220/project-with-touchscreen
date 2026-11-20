@@ -133,6 +133,31 @@ original artwork (a character made or commissioned for testing).
 4. Only then try a local open model for one alternate arm drawing, as a
    transparent part.
 
+## Stretchy Studio (looked at 2026-11-20)
+
+The owner asked whether [Stretchy Studio](https://github.com/MangoLion/stretchystudio) could be an option. It is a free, MIT-licensed rigging and animation tool that runs in the browser (2026). It is built around See-Through's layered output, the same first step as our Character Studio:
+- it imports the layered PSD and fits a skeleton with a pose detector (DWPose);
+- it warps meshes, with shape keys and a timeline.
+
+**What it exports, and whether the device can play it** (from its own documentation and code, read 2026-11-20):
+
+| Export | On the device? |
+|---|---|
+| Spine 4.0 JSON | No: a third 2D format, and Spine's own players need a Spine licence |
+| Spritesheets, GIFs | No: pictures, not a rig |
+| Live2D runtime model (`.moc3`, written by its own code) | It would load. But its documentation lists "no rotation deformers, no mesh deformation… limited to opacity animation", so the head, eyes and mouth would not move |
+| Live2D Cubism Editor project (`.cmo3`) | Not directly. Opened in Cubism Editor and published from there, it becomes a normal Live2D model, which the device plays (a zip on Characters → Add a character), but that needs Cubism Editor |
+
+**Verdict:** not an option today, but one to watch.
+- It is young and moving fast: its notes record thirty working sessions in April 2026, and its latest work is on Live2D warp deformers.
+- It names its parameters as Live2D does (ParamAngleX, ParamEyeLOpen, ParamMouthOpenY, ParamArmLA…), which the device maps by itself.
+- So the day its `.moc3` carries its deformers, a model rigged in it will play on the device through the Live2D upload, with no work on our side.
+
+Until then:
+- **Hand-rigging, free:** Inochi Creator, whose `.inp` files the device now takes on their own.
+- **Rigging in Live2D Cubism:** export the model's folder as a zip.
+- **Automatic, from one picture:** Character Studio.
+
 ## Sources
 
 Checked on 2026-11-17 (repositories cloned shallowly; Hugging Face records
