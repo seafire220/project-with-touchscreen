@@ -22,6 +22,8 @@ from aiohttp import web
 from . import animations, cards, motions, package, persona, providers, screen, speech_text, temperament, vrm
 from . import memory as memory_module
 from .memory import when
+from . import backup as backup_module
+from . import support as support_module
 from . import updates as updates_module
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
@@ -829,6 +831,56 @@ class Console:
                                                        "auto_install": body.get("auto_install", current.get("auto_install", True))}})
         return await self.get_update(request)
 
+    # ----- support report, backup and restore
+    async def support_report(self, request):
+        data = await asyncio.get_running_loop().run_in_executor(None, support_module.report, self.device)
+        name = "companion-support-%s.zip" % time.strftime("%Y%m%d-%H%M")
+        return web.Response(body=data, content_type="application/zip",
+                            headers={"Content-Disposition": 'attachment; filename="%s"' % name})
+
+    async def get_backup(self, request):
+        """Everything the owner made, in one file (keys, the password and Wi-Fi are never in it)."""
+        path = os.path.join(self.device.data_dir, ".backup-out.zip")
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, backup_module.make, self.device, path)
+            response = web.StreamResponse(headers={
+                "Content-Type": "application/zip", "Content-Length": str(os.path.getsize(path)),
+                "Content-Disposition": 'attachment; filename="companion-backup-%s.zip"' % time.strftime("%Y%m%d")})
+            await response.prepare(request)
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    await response.write(chunk)
+            await response.write_eof()
+            return response
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    async def put_backup(self, request):
+        """Restore a backup: its characters, memories, choices and settings (keys are put in again)."""
+        path = os.path.join(self.device.data_dir, ".backup-in.zip")
+        size = 0
+        try:
+            with open(path, "wb") as f:
+                async for chunk in request.content.iter_chunked(1024 * 1024):
+                    size += len(chunk)
+                    if size > backup_module.MAX_BACKUP:
+                        raise web.HTTPRequestEntityTooLarge(max_size=backup_module.MAX_BACKUP, actual_size=size)
+                    f.write(chunk)
+            try:
+                done = await asyncio.get_running_loop().run_in_executor(None, backup_module.restore, self.device, path)
+            except backup_module.BackupError as error:
+                raise web.HTTPBadRequest(text=str(error))
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+        self.device.conversation = None
+        cid = self.device.active_id()
+        if cid:
+            self.device.activate(cid)
+        self.device.emit("backup", {"did": "restored", "characters": [c["id"] for c in done["characters"]]})
+        return web.json_response(done)
+
     # ----- talking from the console
     async def say(self, request):
         body = await request.json()
@@ -954,6 +1006,9 @@ def make_app(device):
     r.add_post("/api/timezone", console.set_timezone)
     r.add_post("/api/reset", console.reset)
     r.add_get("/api/health", console.health)
+    r.add_get("/api/support-report", console.support_report)
+    r.add_get("/api/backup", console.get_backup)
+    r.add_put("/api/backup", console.put_backup)
     r.add_get("/api/update", console.get_update)
     r.add_post("/api/update/check", console.check_update)
     r.add_post("/api/update/install", console.install_update)

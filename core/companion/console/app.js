@@ -1235,3 +1235,19 @@ $("upd-file").addEventListener("change", async () => {
   $("upd-file").value = "";
   loadUpdate().catch(() => {});
 });
+
+// ----- backup
+$("restore-file").addEventListener("change", async () => {
+  const file = $("restore-file").files[0];
+  if (!file) return;
+  if (!confirm("Restore this backup? Characters in it replace those with the same name, with their memory.")) { $("restore-file").value = ""; return; }
+  text($("backup-msg"), "Restoring…");
+  try {
+    const r = await api("PUT", "/api/backup", undefined, file);
+    const names = r.characters.map((c) => c.id).join(", ") || "none";
+    text($("backup-msg"), "Restored: " + names + "." + (r.skipped.length ? " Not restored: " + r.skipped.join("; ") : "") +
+      " Put your keys in again under AI services.");
+    refreshCharacters();
+  } catch (err) { text($("backup-msg"), err.message); }
+  $("restore-file").value = "";
+});

@@ -71,7 +71,7 @@ say "Creating the service user"
 if ! id companion >/dev/null 2>&1; then
     useradd --system --home-dir "$DATA" --shell /usr/sbin/nologin companion
 fi
-for group in video render audio input; do
+for group in video render audio input systemd-journal; do
     getent group "$group" >/dev/null && usermod -aG "$group" companion
 done
 install -d -o companion -g companion -m 0750 "$DATA"

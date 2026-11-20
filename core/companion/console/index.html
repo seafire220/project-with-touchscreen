@@ -385,6 +385,15 @@
     <p class="muted">Updates come from the device's maker, signed so that the device installs nothing else. Characters,
       memories, keys and settings are kept. If an update does not start properly, the device goes back to the version
       before by itself. Without internet, choose an update file: <input type="file" id="upd-file" accept=".update"></p>
+    <h3>Backup</h3>
+    <p>A backup holds every character with its memory, choices and animations, and the settings: to keep, or to move
+      to another device or a bigger card. Keys, the password and Wi-Fi are never in it (put them in again after
+      restoring).</p>
+    <p><a class="button" id="btn-backup" href="/api/backup" download>Download a backup</a>
+      Restore from a backup: <input type="file" id="restore-file" accept=".zip"> <span id="backup-msg"></span></p>
+    <h3>Help</h3>
+    <p>If something is wrong, a support report helps whoever looks into it: versions, settings, recent problems and logs,
+      with no keys, no passwords and nothing anyone said. <a class="button" href="/api/support-report" download>Download a support report</a></p>
     <h3>Change password</h3>
     <form id="pw-form">
       <label>Current <input type="password" id="pw-old" autocomplete="current-password"></label>

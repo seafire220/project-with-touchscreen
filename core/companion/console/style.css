@@ -11,6 +11,7 @@ main { max-width: 760px; margin: 0 auto; padding: 16px; }
 button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
 button.danger { background: var(--bad); border-color: var(--bad); }
 button.small { padding: 2px 8px; font-size: 0.85rem; }
+a.button { display: inline-block; font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; text-decoration: none; }
 .muted { color: var(--muted); font-size: 0.95rem; }
 input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); max-width: 100%; }
 textarea { width: 100%; }

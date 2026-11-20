@@ -293,6 +293,16 @@ The device keeps itself up to date. It looks for updates from its maker twice a 
 - go back to the previous version;
 - install an update file you were sent (for a device without internet).
 
+## Backup, and help
+
+**Device → Backup → Download a backup** saves every character, with its memory, choices and animations, and the settings, in one file.
+- Keep it somewhere safe, or restore it on a new device or a bigger card: **Restore from a backup**.
+- Keys, the password and Wi-Fi are never in a backup, so put your keys in again afterwards.
+
+If something is wrong, **Device → Help → Download a support report** and send it to the device's maker.
+- It has versions, settings, recent problems and logs.
+- It has no keys, no passwords, and nothing anyone said.
+
 ## Rights
 
 Use only pictures, models, character cards and voices you have the right to
