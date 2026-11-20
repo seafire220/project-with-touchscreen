@@ -383,6 +383,12 @@ function setStatus(s) {
   text($("btn-listen"), s.listening ? "Stop listening" : "Start listening");
   showMicrophone(s);
   if (s.backlight !== undefined) $("dev-brightness-row").hidden = !s.backlight;
+  if (s.wake_word) {
+    const w = s.wake_word;
+    text($("dev-wake-status"), w.error ? "The wake word cannot listen: " + w.error :
+      w.words.length ? "It listens for: " + w.words.join(", ") + (w.ready ? "." : " (getting ready).") +
+        " Say it clearly, then what you want, in one breath or after it looks up. Names with clear consonants work best." : "");
+  }
   if (s.providers) showSteps(s);
   if (s.timezone !== undefined) text($("tz-device"), s.timezone || "not set");
 }

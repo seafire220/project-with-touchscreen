@@ -14,6 +14,8 @@ device").
 | sherpa-onnx | Runs the on-device speech recognition and voice | Apache-2.0 | Python package |
 | Moonshine tiny, English, 8-bit (Useful Sensors), packaged for sherpa-onnx | On-device speech recognition | MIT | Downloaded at install (`device/install.sh`) |
 | Model2Vec potion-base-8M (Minish Lab), distilled from bge-base-en-v1.5 (BAAI), with its tokenizer | Matching memories and conversations by meaning (`core/companion/meaning.py`, read with numpy; the model2vec library is not used) | MIT (both) | Downloaded at install |
+| sherpa-onnx English keyword-spotting model, zipformer 3.3M (k2-fsa project, trained with icefall on GigaSpeech XL) | The wake word (`core/companion/wakeword.py`) | Apache-2.0 | Downloaded at install from the sherpa-onnx releases |
+| SentencePiece (Google) | Spelling the wake words as the wake-word model's word pieces | Apache-2.0 | Python package, installed at install |
 | Piper voice "LibriTTS-R medium", packaged for sherpa-onnx | The free on-device voice (904 speakers) | CC BY 4.0: trained on LibriTTS-R (Y. Koizumi, H. Zen, S. Karita, Y. Ding, K. Yatabe, N. Morioka, M. Bacchiani, Y. Zhang, W. Han, A. Bapna, 2023), voice by the Piper project | Downloaded at install |
 | espeak-ng | Turns text into phonemes for the voice | GPL-3.0; installed from the operating system's packages and run as a separate program | Operating system |
 | Raspberry Pi OS and its packages (Linux, Mesa, cage, NetworkManager, ALSA...) | The operating system | Their own licences (mostly GPL, LGPL, MIT) | Operating system |

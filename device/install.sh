@@ -39,6 +39,9 @@ VOICE_FILES="en_US-libritts_r-medium.onnx en_US-libritts_r-medium.onnx.json toke
 # bge-base-en-v1.5, MIT). A table of word-piece vectors read with numpy; about 30 MB.
 MEANING_URL="https://huggingface.co/minishlab/potion-base-8M/resolve/main"
 MEANING_FILES="model.safetensors tokenizer.json config.json README.md"
+# The wake word: sherpa-onnx's English keyword-spotting model (zipformer, 3.3 million parameters, trained
+# on GigaSpeech by the k2-fsa project; Apache-2.0). About 5 MB of it is kept.
+WAKE_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.bz2"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -141,8 +144,9 @@ if [ ! -x "$APP/venv/bin/python" ]; then
     python3 -m venv --system-site-packages "$APP/venv"
 fi
 "$APP/venv/bin/pip" install -q --upgrade pip
-# sherpa-onnx: on-device speech recognition. anthropic: only loaded if Claude is chosen.
-"$APP/venv/bin/pip" install -q sherpa-onnx anthropic || echo "warning: optional Python packages did not install" >&2
+# sherpa-onnx: on-device speech recognition and the wake word; sentencepiece spells the wake words as
+# the wake-word model's word pieces. anthropic: only loaded if Claude is chosen.
+"$APP/venv/bin/pip" install -q sherpa-onnx sentencepiece anthropic || echo "warning: optional Python packages did not install" >&2
 
 if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/stt" ]; then
     say "Downloading the on-device speech model"
@@ -193,6 +197,23 @@ if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/meaning" ]; then
         echo "warning: could not download the meaning model; memory will match by words alone" >&2
         rm -rf "$tmp"
     fi
+fi
+
+if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/wake" ]; then
+    say "Downloading the wake-word model"
+    tmp="$(mktemp -d)"
+    if curl -fsSL "$WAKE_URL" -o "$tmp/wake.tar.bz2" && tar -xjf "$tmp/wake.tar.bz2" -C "$tmp"; then
+        src="$(find "$tmp" -maxdepth 1 -type d -name 'sherpa-onnx-kws-*' | head -n 1)"
+        install -d -o companion -g companion "$DATA/models"
+        install -d "$tmp/wake"
+        cp "$src"/encoder-*.int8.onnx "$src"/decoder-*.int8.onnx "$src"/joiner-*.int8.onnx \
+            "$src/tokens.txt" "$src/bpe.model" "$src/README.md" "$tmp/wake/"
+        mv "$tmp/wake" "$DATA/models/wake"
+        chown -R companion:companion "$DATA/models"
+    else
+        echo "warning: could not download the wake-word model; the wake word will be unavailable" >&2
+    fi
+    rm -rf "$tmp"
 fi
 
 say "Preparing the first screen"

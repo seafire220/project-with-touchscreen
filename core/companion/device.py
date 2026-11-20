@@ -19,6 +19,7 @@ from .memory import Memory
 from . import motions, screen, speech_text, temperament
 from . import meaning as meaning_module
 from . import updates as updates_module
+from . import wakeword
 from .network import NetworkError, WiFi
 from .overlays import CAPTION, HEARD, HINT, Overlays
 from .providers import ProviderError
@@ -49,6 +50,11 @@ RESET_HOLD = 12.0
 # SCREEN_IDLE seconds, and wakes for the button, the wake word, an alarm or speech.
 SCREEN_IDLE = 90.0
 DIM_BACKLIGHT = 0.12          # how bright a dimmed screen's backlight is, where it can be set
+
+# The wake word (docs/28-user-guide.md): after it, how long it listens for the request; after the reply,
+# how long it listens for more without the wake word again.
+WAKE_WINDOW = 8.0
+FOLLOW_UP_WINDOW = 10.0
 
 # Memory is kept up to date in the background (memory.Memory.process): a conversation is summed up, and
 # its memories changed, once it is over; a long one's early part as it goes; the diary at night.
@@ -119,6 +125,13 @@ class Device:
         self.backlight = Backlight()
         self.screen_mode = "on"             # "on", "dim" or "off"
         self.last_activity = time.time()    # the button, speech, the wake word: someone is there
+        self.wake_model_dir = os.path.join(data_dir, "models", "wake")
+        self._wake = None                   # the wake-word listener, once built for the words set now
+        self._wake_for = None               # what it was built for (words, sensitivity)
+        self._wake_building = False
+        self.wake_error = ""
+        self._wake_session = False          # listening because of the wake word (follow-ups, then stop)
+        self._strip_wake = False            # the next utterance starts with the wake words
 
     # ----- events for the console
     def emit(self, kind, data=None):
@@ -326,6 +339,7 @@ class Device:
         self._link_puppet(cid)
         self.use_emotion_map(cid)
         self.conversation = None
+        self.reload_wake()                   # its name is the wake word
         self.restart_stage()                 # the service manager starts it again with the new puppet
         self.emit("character", {"id": cid})
 
@@ -500,6 +514,8 @@ class Device:
         elif kind == "replied":
             self.last_talk = time.time()
             self.last_activity = time.time()
+            if self._wake_session and self.listening:
+                self.answer_until = time.time() + FOLLOW_UP_WINDOW     # a follow-up without the wake word
             self.set_state("listening" if self.listening else "idle")
             self.overlays.caption_done()
             asyncio.ensure_future(self.keep_memory())
@@ -700,6 +716,13 @@ class Device:
             self.stage.state("listening" if self.listening else "idle")
             await self.notice()
             return None
+        if self._strip_wake and text:
+            # It woke in the middle of this: "hey Mika, what time is it?" asks the question at once;
+            # "hey Mika" alone waits for it.
+            self._strip_wake = False
+            text = wakeword.after_wake(text, self._wake_for[0] if self._wake_for else [])
+            if not text:
+                self.answer_until = time.time() + WAKE_WINDOW
         if not text:
             self.set_state("listening" if self.listening else "idle")
             self.stage.state("listening" if self.listening else "idle")
@@ -743,6 +766,8 @@ class Device:
                 asyncio.ensure_future(self.hear(pcm))
             return
         self.listening = not self.listening
+        self._wake_session = False
+        self.answer_until = 0.0
         self.set_state("listening" if self.listening else "idle")
         self.stage.state("listening" if self.listening else "idle")
         self.emit("button", {"did": "listen on" if self.listening else "listen off"})
@@ -770,19 +795,29 @@ class Device:
                         continue
                     busy = self.state in ("thinking", "speaking")
                     barge_in = self.store.settings()["listening"].get("voice_interrupt", False)
-                    if self.answer_until and self.listening and not detector.speaking and time.time() > self.answer_until:
-                        self.answer_until = 0.0     # no answer to its greeting: stop listening, as before it spoke
+                    if self.answer_until and self.listening and not detector.speaking and time.time() > self.answer_until \
+                            and self.state == "listening":
+                        self.answer_until = 0.0     # nothing more said: stop listening, as before
+                        self._wake_session = False
                         self.listening = False
                         self.set_state("idle")
                         self.stage.state("idle")
                     if not self.listening or (busy and not barge_in):
                         detector.reset()          # without echo cancellation, ignore our own voice
-                        if not busy and self.store.settings().get("speak_first", {}).get("on"):
+                        wake = self.wake_listener() if not busy and not self.listening else None
+                        speak_first = not busy and self.store.settings().get("speak_first", {}).get("on")
+                        if wake is not None or speak_first:
+                            # The sound in the room, utterance by utterance (presence, and what was
+                            # being said when the wake words came).
                             sound = presence.feed(frame)
-                            if sound and len(sound) / 2 / 16000 >= PRESENCE_SECONDS:
+                            if speak_first and sound and len(sound) / 2 / 16000 >= PRESENCE_SECONDS:
                                 asyncio.ensure_future(self.greet())
                         else:
                             presence.reset()
+                        if wake is not None and wake.feed(frame):
+                            detector = self._woken(presence)
+                            presence = Detector(0.6, 8.0)
+                            wake.reset()
                         continue
                     if detector.speaking:
                         self.answer_until = 0.0     # they answered: carry on as usual
@@ -810,6 +845,69 @@ class Device:
     def _heard(self, level):
         if hasattr(self.stage, "heard"):
             self.stage.heard(level)
+
+    # ----- the wake word (docs/28-user-guide.md)
+    def wake_words(self):
+        """The words the wake word listens for now ([] when it is off)."""
+        opts = self.store.settings().get("wake_word", {})
+        cid = self.active_id()
+        if not opts.get("on") or not cid:
+            return []
+        return wakeword.phrases(self.characters.manifest(cid).get("name", ""), opts.get("phrase", ""))
+
+    def wake_listener(self):
+        """The wake-word listener, or None (off, the microphone off, or not ready yet). Built in the
+        background the first time, and again when the words or the sensitivity change."""
+        if self.muted or self._wake_for is False:
+            return None
+        if self._wake is not None and self._wake_for is not None:
+            return self._wake
+        if self._wake_for is None and not self._wake_building:
+            self._wake_building = True
+            asyncio.ensure_future(self._build_wake())
+        return None
+
+    async def _build_wake(self):
+        try:
+            words = self.wake_words()
+            sensitivity = self.store.settings().get("wake_word", {}).get("sensitivity", "normal")
+            if not words:
+                self._wake, self._wake_for, self.wake_error = None, False, ""
+                return
+            try:
+                self._wake = await asyncio.get_running_loop().run_in_executor(
+                    None, lambda: wakeword.WakeWord(self.wake_model_dir, words, sensitivity))
+                self._wake_for, self.wake_error = (words, sensitivity), ""
+                self.emit("device", {"wake_word": "listening for " + ", ".join(w.title() for w in words)})
+            except wakeword.WakeWordError as error:
+                self._wake, self._wake_for, self.wake_error = None, False, str(error)
+                self.emit("error", {"message": "the wake word cannot listen: %s" % error})
+        finally:
+            self._wake_building = False
+
+    def reload_wake(self):
+        """The wake word's settings, or the character (its name), changed: build it again when next needed."""
+        self._wake, self._wake_for = None, None
+
+    def _woken(self, presence):
+        """The wake words were heard: listen. What was being said goes on (in one breath, "hey Mika, what
+        time is it?"); the words themselves are taken off what was heard (hear). Returns the detector to
+        carry on with."""
+        self.emit("wake word", {"phrase": " / ".join(w.title() for w in (self._wake_for or [[]])[0])})
+        self.activity()
+        if hasattr(self.stage, "poke"):
+            self.stage.poke()
+        self.listening = True
+        self._wake_session = True
+        self.answer_until = time.time() + WAKE_WINDOW
+        self.set_state("listening")
+        self.stage.state("listening")
+        settings = self.store.settings()["listening"]
+        detector = Detector(float(settings.get("end_silence", 0.8)), float(settings.get("max_turn", 30.0)))
+        if presence.speaking:
+            detector.speaking, detector.frames, detector.noise = True, list(presence.frames), presence.noise
+            self._strip_wake = True
+        return detector
 
     # ----- the button held: the microphone off or on, or a setup reset
     def button_down(self):
@@ -934,6 +1032,8 @@ class Device:
             if self.screen_mode == "on":
                 self.backlight.set(float(new["screen"].get("brightness", 100)) / 100.0)
             self.screen_step()
+        if old.get("wake_word") != new.get("wake_word") or old.get("active_character") != new.get("active_character"):
+            self.reload_wake()
         captions = new.get("captions", {})
         if not captions.get("on"):
             self.overlays.hide(CAPTION)
@@ -1013,6 +1113,8 @@ class Device:
             "mute_switch": self.mic_switch,
             "screen": self.screen_mode,
             "backlight": self.backlight.available,
+            "wake_word": {"words": [w.title() for w in self.wake_words()],
+                          "ready": self._wake is not None, "error": self.wake_error},
             # timedatectl needs systemd running (true on the device, not in every test machine)
             "can_set_timezone": shutil.which("timedatectl") is not None and os.path.isdir("/run/systemd/system"),
         }
