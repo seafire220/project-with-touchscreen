@@ -1,6 +1,6 @@
 # Roadmap: what is done, what comes next, how to resume
 
-Status: 2026-11-18. A living plan: update the status column as items are
+Status: 2026-11-20. A living plan: update the status column as items are
 finished. Work in this order unless the owner says otherwise; each item
 lists what "done" means.
 
@@ -26,6 +26,10 @@ Done and tested in software (not yet on real hardware):
   tab; speaking first as an option, and memory matching by meaning
   (`31-memory.md`); owners' own Inochi2D models as well as Live2D ones.
   What else would finish the product: `33-finishing.md`.
+- 2026-11-20, second round: power-cut protection (a read-only system and a data partition, D-056),
+  a wake word (D-057), captions, the screen at night, family-safe mode, the microphone off shown on the
+  screen, a USB connection to a computer (D-059), and updates built on GitHub and signed on the owner's
+  Mac (`32-updates.md`). Update address: `seafire220/update-repo`.
 - Conversations and memory (`31-memory.md`): conversations with clear
   ends, each summed up; lasting memories the model keeps up to date; plans
   followed up; a diary; all shown and editable on the Memory tab. The
@@ -49,7 +53,7 @@ Done and tested in software (not yet on real hardware):
 | 6 | **Drawing workflow, built**: one-click laptop app (`studio/app.py`): picture in, completed hidden areas, jointed arms and alternate part drawings for the gesture library, review page, send to device; free and local (a GPU makes it faster; without one, the slower path or today's fills) | A buyer-style run on an ordinary laptop, no paid services | started (2026-11-18): `studio/app.py` and `studio/start.sh` make a character from a dropped picture with progress, a software-drawn preview of it moving, arm choices, the personality form, and send it to the device over the home network (checked into the virtual device). Still to come: See-through's completed layers and alternate part drawings, a Windows launcher, a run on the owner's own laptop |
 | 7 | **90° turns**: generated profile artwork (side nose, lips, fill), ±50/±60 keys, corner tilt transfer, masks and draw-order changes (`20-head-turns.md`) | Strips at ±60 look like a profile, with no folds | |
 | 8 | **Hardware bring-up** on the boards bought in item 1 (step by step: `29-hardware-setup.md`; tests: `15-hardware-test-plan.md`), including the device image with the new stage (`build-image.sh`, `check-image.sh`), frame rate with our characters and with mask-heavy imported models | Measurements filled in `16-measurements.md` | |
-| 9 | **Before selling**: original default character (needs commissioned art), ~~signed updates from the settings page~~ (done 2026-11-20, `32-updates.md`; make the update key and set the address before building sale images), support access, user guide (first version: `28-user-guide.md`), the six lawyer questions in `19` (do not advertise Live2D-model import before the Cubism Editor question is answered) | | |
+| 9 | **Before selling**: original default character (needs commissioned art), ~~signed updates from the settings page~~ (done 2026-11-20, `32-updates.md`; make the update key and set the address before building sale images), support access, user guide (first version: `28-user-guide.md`), the seven lawyer questions in `19` (do not advertise Live2D-model import before the Cubism Editor question is answered) | | |
 
 ## How to resume in a fresh session
 

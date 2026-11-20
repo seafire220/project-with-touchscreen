@@ -286,10 +286,12 @@ that no paid service is needed.
 | API keys | Separate file readable only by the core service | Write-only in the console (shown as last four characters); masked in all logs; excluded from every export and backup |
 | Logs | Journal, size-capped | Rotated automatically |
 
-Planned, not yet built (`33-finishing.md`, item 3): a read-only system partition and
-a separate data partition, so pulling the plug cannot damage the system. Today the card is
-one writable partition. Every file the device writes is written whole or not at all, the
-file system is journaled, the logs are small, and the power button shuts down cleanly.
+Built 2026-11-20 (D-056, `33-finishing.md`): the system partition is read-only and a separate data
+partition (`companion-data`, at `/data`) holds the device's data, saved Wi-Fi and time zone; /var's
+changes and the logs are kept in memory; updates make the system writable only while they install.
+Every file the device writes is written whole or not at all, the data partition is journaled and
+checked at each start (made again, empty, if it cannot be repaired), and the power button shuts down
+cleanly.
 
 Encrypting keys on a device with no secure element would only move the
 problem, since the decryption key would sit beside them. File permissions,
@@ -328,7 +330,7 @@ chip is a hardware test item.
 | Start-up | Quiet boot with a splash image, then the stage's own loading animation. No text console, desktop or login is shown. |
 | Autostart | Two supervised services, core and stage, started at boot and restarted on failure with back-off. Stage waits for core; core does not wait for the network. |
 | Buttons | Listen: short press toggles listening or interrupts; hold 12 s forgets the settings-page password and saved Wi-Fi and shows the setup screens again. Power: press to shut down cleanly, press again to start. (A visible microphone mute is suggested in `33-finishing.md`.) |
-| Unplugging | Files are written whole or not at all, and an update cut short is finished or undone at the next start. A read-only system partition is planned (`33-finishing.md`). |
+| Unplugging | The system partition is read-only (D-056); what the device saves is written whole or not at all on its own partition, checked at each start; an update cut short is finished or undone at the next start. |
 | Updates | Signed with the owner's key; checked twice a day and installed at night, or started from the console (fetch, or choose an update file). Installed alongside the running version; after restart a health check must pass, otherwise the previous version is restored automatically (`32-updates.md`). |
 | Operating system | Packages pinned to the versions the release was tested with. No unattended upgrades. |
 | Reproducibility | Python dependencies locked with hashes; Rust dependencies locked; the stage is shipped as a pre-built program so nothing is compiled on the device. A script builds a ready-to-flash image. |

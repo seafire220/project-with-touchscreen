@@ -62,6 +62,8 @@ One JSON object per line, on standard input or the local socket:
 | `{"define": {"name": "little_dance", "kind": "gesture", "needs": ["head_roll"], "tracks": {...}}}` | Add a gesture, idle action or reaction to the library, or change one, as the library writes it. |
 | `{"undefine": "little_dance"}` | Put a changed clip back as built, or take an added one away. |
 | `{"describe": true}` | Send the whole library (a `library` event with `clips`). |
+| `{"overlay": {"slot": "caption", "image": "caption-3.png", "anchor": "bottom"}}` | Show a picture from the overlay folder (`--overlays`, by default `overlays` beside the socket) over the character, in a slot (one picture each, fading in and out); `"image": null` fades it out. Anchors: `top`, `bottom`, `center`, `top_left`, `top_right`, `bottom_left`, `bottom_right`. The core draws captions, the microphone-off sign and hints this way (`src/overlay.rs`) |
+| `{"screen": "dim"}` | `on`, `dim` or `off`: a dark veil over everything; `off` also stops moving and drawing the character, to save power |
 | `{"quit": true}` | Exit. |
 
 Several fields can share one line.
