@@ -23,7 +23,7 @@ PrivateTmp=yes
 ReadWritePaths=/var/lib/companion /run/companion
 RuntimeDirectory=companion
 RuntimeDirectoryPreserve=yes
-SupplementaryGroups=audio input
+SupplementaryGroups=audio input video
 MemoryMax=450M
 
 [Install]

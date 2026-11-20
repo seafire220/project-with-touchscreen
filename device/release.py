@@ -52,6 +52,10 @@ SYSTEM_FILES = {
     "companion-update-boot.service": "device/systemd/companion-update-boot.service",
     "50-companion.rules": "device/config/polkit-companion.rules",
     "companion-update.py": "device/updater/companion-update.py",
+    "companion-usb.service": "device/systemd/companion-usb.service",
+    "companion-usb-dhcp.service": "device/systemd/companion-usb-dhcp.service",
+    "99-companion-backlight.rules": "device/config/99-companion-backlight.rules",
+    "companion-usb.nmconnection": "device/config/companion-usb.nmconnection",
 }
 
 
@@ -181,6 +185,8 @@ def _payload(version, stage_binary, requirements=None, wheels=None, models=None,
         _add(tar, "core/companion/VERSION", (version + "\n").encode())
         with open(stage_binary, "rb") as f:
             _add(tar, "bin/stage", f.read(), 0o755)
+        with open(os.path.join(REPO, "device", "usb", "companion-usb-gadget"), "rb") as f:
+            _add(tar, "bin/companion-usb-gadget", f.read(), 0o755)
         vrma = os.path.join(REPO, "stage", "motions", "vrma")
         for name in sorted(os.listdir(vrma)):
             if name.endswith(".vrma"):

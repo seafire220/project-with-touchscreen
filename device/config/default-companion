@@ -5,3 +5,7 @@
 # example:
 #COMPANION_ALSA_PLAYBACK=plughw:CARD=Lite
 #COMPANION_ALSA_CAPTURE=plughw:CARD=Lite
+#
+# The USB connection to a computer: ncm (the usual; Windows 11, macOS and Linux have its driver built in),
+# ecm (macOS and Linux), rndis (older Windows), or off.
+#COMPANION_USB=ncm

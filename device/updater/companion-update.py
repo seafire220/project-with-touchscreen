@@ -48,6 +48,11 @@ SYSTEM_FILES = {
     "companion-update.path": "etc/systemd/system/companion-update.path",
     "companion-update-boot.service": "etc/systemd/system/companion-update-boot.service",
     "50-companion.rules": "etc/polkit-1/rules.d/50-companion.rules",
+    "companion-usb.service": "etc/systemd/system/companion-usb.service",
+    "companion-usb-dhcp.service": "etc/systemd/system/companion-usb-dhcp.service",
+    "99-companion-backlight.rules": "etc/udev/rules.d/99-companion-backlight.rules",
+    # NetworkManager reads only connection files that nobody but root can read (see below).
+    "companion-usb.nmconnection": "usr/lib/NetworkManager/system-connections/companion-usb.nmconnection",
 }
 MAX_UPDATE = 700 * 1024 * 1024
 
@@ -206,7 +211,7 @@ def install_system_files(release):
                 continue
             os.makedirs(os.path.dirname(target), exist_ok=True)
             shutil.copyfile(source, target + ".new")
-            os.chmod(target + ".new", 0o644)
+            os.chmod(target + ".new", 0o600 if name.endswith(".nmconnection") else 0o644)
             os.replace(target + ".new", target)
             changed = True
         updater = os.path.join(folder, "companion-update.py")

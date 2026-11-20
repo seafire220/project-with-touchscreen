@@ -1,0 +1,83 @@
+#!/bin/bash
+# The USB connection to a computer (docs/28-user-guide.md, "Connecting by USB").
+#
+# On the board's USB-C port (a Raspberry Pi 4 or 5; the micro-USB data port of a Zero), the device shows
+# itself to a computer as a USB network adapter. The computer gets an address from the device, with no
+# route through it (its own internet is untouched), and opens the settings page at http://10.12.194.1,
+# or http://companion.local. Run once at start by companion-usb.service; does nothing on a board without
+# a USB device port, or with COMPANION_USB=off in /etc/default/companion.
+#
+# COMPANION_USB: ncm (the default: Windows 11, macOS and Linux have its driver built in), ecm (macOS and
+# Linux), rndis (older Windows; may need a driver), or off.
+set -eu
+MODE="${COMPANION_USB:-ncm}"
+# Tests run it against stand-in folders.
+GADGET="${COMPANION_GADGET:-/sys/kernel/config/usb_gadget/companion}"
+UDC_DIR="${COMPANION_UDC_DIR:-/sys/class/udc}"
+SERIAL_FILE="${COMPANION_SERIAL_FILE:-/proc/device-tree/serial-number}"
+
+case "$MODE" in
+    off) echo "USB connection switched off"; exit 0 ;;
+    ncm|ecm|rndis) ;;
+    *) echo "COMPANION_USB must be ncm, ecm, rndis or off, not $MODE" >&2; exit 0 ;;
+esac
+[ -n "${COMPANION_GADGET:-}" ] || modprobe libcomposite 2>/dev/null || true
+UDC="$(ls "$UDC_DIR" 2>/dev/null | head -n 1 || true)"
+if [ -z "$UDC" ]; then
+    echo "this board has no USB device port (or dtoverlay=dwc2 is missing from config.txt)"
+    exit 0
+fi
+if [ -d "$GADGET" ]; then
+    echo "USB connection already set up"
+    exit 0
+fi
+if [ -z "${COMPANION_GADGET:-}" ]; then
+    mountpoint -q /sys/kernel/config || mount -t configfs none /sys/kernel/config
+fi
+
+SERIAL="$(tr -d '\0' < "$SERIAL_FILE" 2>/dev/null || cat /etc/machine-id)"
+HASH="$(printf '%s' "$SERIAL" | sha256sum | cut -c1-10)"
+mac() { printf '%s:%s:%s:%s:%s:%s' "$1" "${HASH:0:2}" "${HASH:2:2}" "${HASH:4:2}" "${HASH:6:2}" "${HASH:8:2}"; }
+
+mkdir -p "$GADGET"
+cd "$GADGET"
+echo 0x1d6b > idVendor          # Linux Foundation
+echo 0x0104 > idProduct         # Multifunction Composite Gadget
+echo 0x0100 > bcdDevice
+echo 0x0200 > bcdUSB
+# Device class "miscellaneous / interface association", so Windows reads the function's descriptors.
+echo 0xEF > bDeviceClass
+echo 0x02 > bDeviceSubClass
+echo 0x01 > bDeviceProtocol
+mkdir -p strings/0x409
+echo "$SERIAL" > strings/0x409/serialnumber
+echo "Character device" > strings/0x409/manufacturer
+echo "Character device (settings page at 10.12.194.1)" > strings/0x409/product
+mkdir -p configs/c.1/strings/0x409
+echo "Network" > configs/c.1/strings/0x409/configuration
+echo 250 > configs/c.1/MaxPower
+
+FUNCTION="$MODE.usb0"
+mkdir -p "functions/$FUNCTION"
+# The same addresses every time (from the board's serial number), so the computer keeps one adapter.
+mac 02 > "functions/$FUNCTION/host_addr"
+mac 06 > "functions/$FUNCTION/dev_addr"
+
+# Windows finds its built-in driver from these descriptors.
+case "$MODE" in
+    ncm) COMPAT=WINNCM; SUB="" ;;
+    rndis) COMPAT=RNDIS; SUB=5162001 ;;
+    *) COMPAT=""; SUB="" ;;
+esac
+INTERFACE="$(ls -d "functions/$FUNCTION"/os_desc/interface.* 2>/dev/null | head -n 1 || true)"
+if [ -n "$COMPAT" ] && [ -n "$INTERFACE" ]; then
+    echo 1 > os_desc/use
+    echo 0xcd > os_desc/b_vendor_code
+    echo MSFT100 > os_desc/qw_sign
+    echo "$COMPAT" > "$INTERFACE/compatible_id"
+    [ -n "$SUB" ] && echo "$SUB" > "$INTERFACE/sub_compatible_id"
+    ln -s configs/c.1 os_desc/
+fi
+ln -s "functions/$FUNCTION" configs/c.1/
+echo "$UDC" > UDC
+echo "USB connection ready ($MODE on $UDC): the settings page is at http://10.12.194.1"

@@ -1,0 +1,15 @@
+# Gives a computer connected by USB an address (10.12.194.2 to .14), and nothing else: no route and no
+# name server, so the computer's own internet connection is untouched.
+[Unit]
+Description=Character device: addresses for a computer connected by USB
+BindsTo=sys-subsystem-net-devices-usb0.device
+After=sys-subsystem-net-devices-usb0.device NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/dev/null --interface=usb0 --bind-dynamic --except-interface=lo --port=0 --dhcp-authoritative --dhcp-range=10.12.194.2,10.12.194.14,255.255.255.240,10m --dhcp-option=3 --dhcp-option=6 --dhcp-leasefile=/run/companion-usb.leases
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=sys-subsystem-net-devices-usb0.device

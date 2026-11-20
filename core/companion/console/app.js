@@ -383,6 +383,11 @@ function setStatus(s) {
   text($("btn-listen"), s.listening ? "Stop listening" : "Start listening");
   showMicrophone(s);
   if (s.backlight !== undefined) $("dev-brightness-row").hidden = !s.backlight;
+  if (s.usb) {
+    $("usb-status").hidden = !s.usb.available;
+    text($("usb-status"), s.usb.connected ? "A computer is connected by USB: it reaches this page at " + s.usb.address + "." :
+      "No Wi-Fi? A computer connected to the device's USB-C port by cable reaches this page at " + (s.usb.address || "") + ".");
+  }
   if (s.wake_word) {
     const w = s.wake_word;
     text($("dev-wake-status"), w.error ? "The wake word cannot listen: " + w.error :

@@ -1,0 +1,18 @@
+# The device's end of the USB connection to a computer (device/usb/companion-usb-gadget).
+[connection]
+id=companion-usb
+uuid=4f6b8a9e-3c1d-4e2a-9b7f-0c5d1e8a2b6c
+type=ethernet
+interface-name=usb0
+autoconnect=true
+autoconnect-priority=-10
+
+[ethernet]
+
+[ipv4]
+method=manual
+address1=10.12.194.1/28
+never-default=true
+
+[ipv6]
+method=link-local

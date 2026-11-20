@@ -74,6 +74,12 @@ check "no characters or memories inside" sh -c "! ls '$ROOT/var/lib/companion/ch
 check "no saved Wi-Fi networks inside" sh -c "! ls '$ROOT'/etc/NetworkManager/system-connections/* >/dev/null 2>&1"
 check "no build leftovers" sh -c "! test -e '$ROOT/tmp/companion-src' && ! test -e '$ROOT/usr/local/share/ca-certificates/build-extra-ca.crt'"
 check "buttons and display in the boot settings" sh -c "mtype -i '$IMG@@$BOOT_START' ::config.txt | grep -q 'gpio-key,gpio=17'"
+check "the USB-C port can be a USB device (dwc2)" sh -c "mtype -i '$IMG@@$BOOT_START' ::config.txt | grep -q '^dtoverlay=dwc2,dr_mode=peripheral'"
+check "the USB connection starts at boot" enabled multi-user.target companion-usb.service
+check "a computer on USB gets an address" sh -c "ls '$ROOT'/etc/systemd/system/sys-subsystem-net-devices-usb0.device.wants/companion-usb-dhcp.service && test -x '$ROOT/usr/sbin/dnsmasq'"
+check "the device's end of the USB connection (readable by root only)" sh -c "[ \"\$(stat -c %a '$ROOT/usr/lib/NetworkManager/system-connections/companion-usb.nmconnection')\" = 600 ]"
+check "the gadget program is installed" test -x "$ROOT/opt/companion/bin/companion-usb-gadget"
+check "the screen's brightness can be set by the service" test -f "$ROOT/etc/udev/rules.d/99-companion-backlight.rules"
 check "quiet boot" sh -c "mtype -i '$IMG@@$BOOT_START' ::cmdline.txt | grep -q logo.nologo"
 
 echo

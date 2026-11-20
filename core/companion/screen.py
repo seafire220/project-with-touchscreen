@@ -137,6 +137,7 @@ def hotspot_card(ssid, password):
         "Password:",
         "> %s" % password,
         "Then open http://10.42.0.1 and choose your home Wi-Fi.",
+        "Or connect a computer to the USB-C port with a cable and open http://10.12.194.1",
     ], qr=wifi_qr(ssid, password))
 
 

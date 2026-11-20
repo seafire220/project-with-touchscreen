@@ -1,0 +1,14 @@
+[Unit]
+Description=Character device: the USB connection to a computer (a network adapter on the USB-C port)
+After=sys-kernel-config.mount systemd-modules-load.service
+Before=NetworkManager.service
+ConditionPathIsDirectory=/sys/class/udc
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/default/companion
+ExecStart=/opt/companion/bin/companion-usb-gadget
+
+[Install]
+WantedBy=multi-user.target

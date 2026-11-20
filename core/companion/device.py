@@ -1113,6 +1113,7 @@ class Device:
             "mute_switch": self.mic_switch,
             "screen": self.screen_mode,
             "backlight": self.backlight.available,
+            "usb": usb_status(),
             "wake_word": {"words": [w.title() for w in self.wake_words()],
                           "ready": self._wake is not None, "error": self.wake_error},
             # timedatectl needs systemd running (true on the device, not in every test machine)
@@ -1208,6 +1209,22 @@ class Device:
         await self._connected()
         if self.active_id():
             self.show_character()
+
+
+USB_ADDRESS = "10.12.194.1"
+
+
+def usb_status(net="/sys/class/net/usb0"):
+    """The USB connection to a computer (device/usb/companion-usb-gadget): whether the board has one, and
+    whether a computer is connected now."""
+    if not os.path.isdir(net):
+        return {"available": False}
+    try:
+        with open(os.path.join(net, "carrier")) as f:
+            connected = f.read().strip() == "1"
+    except OSError:                  # the link is down: no computer
+        connected = False
+    return {"available": True, "connected": connected, "address": "http://%s" % USB_ADDRESS}
 
 
 def within_hours(now, start, end):
