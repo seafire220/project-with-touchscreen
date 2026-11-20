@@ -37,8 +37,11 @@ it again starts it.
   Linux PC, `device/build-image.sh` turns the official Raspberry Pi OS Lite
   image into a device image with everything installed. Flash it with
   Raspberry Pi Imager ("Use custom"), without Imager's customisation
-  settings, and skip to step 6. See `18-out-of-the-box.md`.
-- **By hand on the Pi (for development):** steps 3 to 5 below.
+  settings, and skip to step 6. See `18-out-of-the-box.md`. Such an image has
+  power-cut protection: a read-only system and a separate data partition
+  (`33-finishing.md`); `--writable-system` builds one without.
+- **By hand on the Pi (for development):** steps 3 to 5 below. A card set up
+  this way keeps one writable partition (no power-cut protection).
 
 ## 3. Prepare the microSD card
 

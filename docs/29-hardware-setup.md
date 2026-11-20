@@ -178,7 +178,9 @@ your Wi-Fi from Imager). Carry on at step 5.
 One image, flashed to every card, with nothing secret in it
 (`18-out-of-the-box.md`). It is built on a Linux computer from the official
 Raspberry Pi OS Lite image, with `device/build-image.sh`; Claude can build it
-in a cloud session too (it was built that way on 2026-11-17, 5.2 GB). Flash
+in a cloud session too (it was built that way on 2026-11-17, 5.2 GB, and again with
+power-cut protection on 2026-11-20). Its system partition is read-only and a third partition holds
+what the device saves (`33-finishing.md`). Flash
 it with Raspberry Pi Imager (*Choose OS → Use custom*), **without** Imager's
 customisation. At first power-on the unit shows *Set up Wi-Fi*, as a buyer
 sees it (`28-user-guide.md`).
