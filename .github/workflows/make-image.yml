@@ -1,0 +1,91 @@
+# Builds the ready-to-flash card image (docs/18-out-of-the-box.md) on GitHub, so it can be made without a
+# Linux computer. Run it from the Actions tab: "Make a device image" -> "Run workflow". About half an hour.
+# Then, on the finished run's page, download the artifact, unzip it, and write companion-<version>.img.xz to
+# a microSD card with Raspberry Pi Imager ("Use custom", and no customisation settings):
+# docs/29-hardware-setup.md, "Units for sale: the ready-made image".
+#
+# It runs on a 64-bit ARM machine, so the image is built natively, as on a Pi, without emulation. The image
+# carries the update key and address from this repository; nothing secret goes into it.
+name: Make a device image
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The software's version in the image: numbers with dots, such as 2026.11.21 (updates you publish later must be newer)"
+        required: true
+        type: string
+      writable_system:
+        description: "The earlier layout, without power-cut protection (leave off)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  # Raspberry Pi OS Lite (64-bit), the release the device is built and tested on, with its published checksum.
+  RASPIOS_URL: https://downloads.raspberrypi.com/raspios_lite_arm64/images/raspios_lite_arm64-2026-10-06/2026-10-06-raspios-trixie-arm64-lite.img.xz
+  RASPIOS_SHA256: 483db18a48da399b5b7022ffae9a07bc6d99daab30e593aedac09b69ff422843
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 150
+    steps:
+      - name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){0,4}$'; then
+            echo "::error::A version is numbers with dots, such as 2026.11.21"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Install the tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q mtools xz-utils file
+          if command -v rustup >/dev/null; then
+            rustup toolchain install stable --profile minimal
+            rustup default stable
+          else
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Build the screen program
+        run: cd stage && cargo build --release
+
+      - name: Download Raspberry Pi OS Lite
+        run: |
+          curl -fsSL -o raspios.img.xz "$RASPIOS_URL"
+          echo "$RASPIOS_SHA256  raspios.img.xz" | sha256sum -c -
+
+      - name: Build the image
+        env:
+          VERSION: ${{ inputs.version }}
+          WRITABLE: ${{ inputs.writable_system }}
+        run: |
+          extra=""
+          if [ "$WRITABLE" = true ]; then extra="--writable-system"; fi
+          sudo ./device/build-image.sh raspios.img.xz "companion-$VERSION.img" --version "$VERSION" \
+              --stage-binary stage/target/release/stage --compress $extra
+
+      - name: Check the image
+        env:
+          VERSION: ${{ inputs.version }}
+        run: sudo ./device/check-image.sh "companion-$VERSION.img"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-image-${{ inputs.version }}
+          path: |
+            companion-${{ inputs.version }}.img.xz
+            companion-${{ inputs.version }}.img.xz.sha256
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
