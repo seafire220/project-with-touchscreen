@@ -41,7 +41,7 @@ jobs:
 
       - name: Test the core service
         run: |
-          python3 -m pip install --quiet aiohttp numpy pillow qrcode
+          python3 -m pip install --quiet aiohttp numpy pillow qrcode anthropic
           cd core && python3 -m unittest discover -s tests
 
       - name: Install the tools for building the screen program for the Raspberry Pi
