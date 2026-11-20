@@ -26,6 +26,9 @@
 //! {"undefine": "wiggle"}
 //! {"describe": true}
 //! {"try_animation": "/var/lib/companion/characters/ada/animations/wave.vrma"}
+//! {"overlay": {"slot": "caption", "image": "caption-3.png", "anchor": "bottom"}}
+//! {"overlay": {"slot": "caption", "image": null}}
+//! {"screen": "dim"}
 //! {"quit": true}
 //! ```
 //!
@@ -46,6 +49,10 @@
 //! previews; `null` or `clear` hands them back to the built-in behaviour.
 //! `ease` is the blend time in seconds (default 0.25).
 //!
+//! `overlay` shows a picture from the overlay folder over the character, in a named slot (a caption,
+//! the microphone-off sign), or with `"image": null` fades the slot out; `screen` dims the screen or
+//! makes it dark (`"on"`, `"dim"`, `"off"`). See overlay.rs.
+//!
 //! A script line also carries `"at": seconds`.
 
 use std::io::{BufRead, BufReader, Write};
@@ -58,6 +65,7 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 
 use crate::behaviour::State;
+use crate::overlay::{self, Anchor, Screen};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
@@ -101,6 +109,10 @@ pub enum Command {
 	Describe,
 	/// Play a VRM Animation clip once from this file (a VRM avatar trying one before it is kept).
 	TryAnimation(std::path::PathBuf),
+	/// Show a picture from the overlay folder in a slot, or (None) fade the slot out.
+	Overlay { slot: String, image: Option<String>, anchor: Anchor },
+	/// Light the screen, dim it, or make it dark.
+	Screen(Screen),
 	Quit,
 }
 
@@ -228,6 +240,32 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 					return Err("\"try_animation\" names a .vrma file".into());
 				}
 				out.push(Command::TryAnimation(path.into()));
+			}
+			"overlay" => {
+				let slot = val
+					.get("slot")
+					.and_then(Value::as_str)
+					.filter(|s| overlay::valid_slot(s))
+					.ok_or("\"overlay\" needs a \"slot\": lower-case letters, digits and dashes")?;
+				let image = match val.get("image") {
+					None | Some(Value::Null) => None,
+					Some(v) => Some(
+						v.as_str()
+							.filter(|n| overlay::valid_name(n))
+							.ok_or("an overlay's \"image\" is the name of a .png file in the overlay folder")?
+							.to_string(),
+					),
+				};
+				let anchor = match val.get("anchor") {
+					None => Anchor::Bottom,
+					Some(v) => v.as_str().and_then(Anchor::parse).ok_or(
+						"\"anchor\" is top, bottom, center, top_left, top_right, bottom_left or bottom_right",
+					)?,
+				};
+				out.push(Command::Overlay { slot: slot.to_string(), image, anchor });
+			}
+			"screen" => {
+				out.push(Command::Screen(val.as_str().and_then(Screen::parse).ok_or("\"screen\" is on, dim or off")?))
 			}
 			"quit" => {
 				if val.as_bool() == Some(true) {
@@ -390,6 +428,28 @@ mod tests {
 		);
 		assert!(parse_line(r#"{"temperament": {"energy": 1}}"#).is_err());
 		assert_eq!(parse_line(r#"{"gestures_off": ["wave"]}"#).unwrap().1, vec![Command::GesturesOff(vec!["wave".into()])]);
+	}
+
+	#[test]
+	fn parses_overlay_and_screen_commands() {
+		assert_eq!(
+			parse_line(r#"{"overlay": {"slot": "caption", "image": "caption-3.png", "anchor": "bottom"}}"#).unwrap().1,
+			vec![Command::Overlay { slot: "caption".into(), image: Some("caption-3.png".into()), anchor: Anchor::Bottom }]
+		);
+		assert_eq!(
+			parse_line(r#"{"overlay": {"slot": "mic-off", "image": null}}"#).unwrap().1,
+			vec![Command::Overlay { slot: "mic-off".into(), image: None, anchor: Anchor::Bottom }]
+		);
+		assert_eq!(parse_line(r#"{"screen": "off"}"#).unwrap().1, vec![Command::Screen(Screen::Off)]);
+		for bad in [
+			r#"{"overlay": {"image": "a.png"}}"#,
+			r#"{"overlay": {"slot": "caption", "image": "../../etc/passwd"}}"#,
+			r#"{"overlay": {"slot": "caption", "image": "/run/x.png"}}"#,
+			r#"{"overlay": {"slot": "caption", "image": "a.png", "anchor": "middle"}}"#,
+			r#"{"screen": "sleep"}"#,
+		] {
+			assert!(parse_line(bad).is_err(), "{bad}");
+		}
 	}
 
 	#[test]

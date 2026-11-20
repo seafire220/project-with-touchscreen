@@ -12,6 +12,7 @@ mod director;
 mod live2d;
 mod mapping;
 mod motion;
+mod overlay;
 mod overrides;
 mod puppet_info;
 mod smooth;
@@ -58,6 +59,9 @@ Usage: stage CHARACTER [options]
                         (a missing file, or one this character cannot use, means
                         the automatic choice; the second is reported as a warning)
   --socket PATH         also accept commands and send events on this local socket
+  --overlays DIR        the folder of pictures the core asks to show over the character
+                        (captions, the microphone-off sign); default: \"overlays\" beside
+                        the socket
   --no-stdin            do not read commands from standard input
   --background RRGGBB   background colour (default 101014)
   --seed N              seed for blink timing (default 1)
@@ -103,6 +107,7 @@ struct Options {
 	gl: GlPreference,
 	map: Option<PathBuf>,
 	socket: Option<PathBuf>,
+	overlays: Option<PathBuf>,
 	stdin: bool,
 	background: [f32; 3],
 	seed: u64,
@@ -133,6 +138,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 		gl: GlPreference::Auto,
 		map: None,
 		socket: None,
+		overlays: None,
 		stdin: true,
 		background: [0x10 as f32 / 255.0, 0x10 as f32 / 255.0, 0x14 as f32 / 255.0],
 		seed: 1,
@@ -178,6 +184,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 			}
 			"--map" => o.map = Some(value("--map")?.into()),
 			"--socket" => o.socket = Some(value("--socket")?.into()),
+			"--overlays" => o.overlays = Some(value("--overlays")?.into()),
 			"--no-stdin" => o.stdin = false,
 			"--background" => {
 				let v = value("--background")?;
@@ -254,6 +261,9 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 		}
 	}
 	o.puppet = puppet.ok_or("no puppet file given")?;
+	if o.overlays.is_none() {
+		o.overlays = o.socket.as_ref().and_then(|s| s.parent()).map(|d| d.join("overlays"));
+	}
 	if !o.capture_at.is_empty() && o.capture_dir.is_none() {
 		return Err("--capture-at needs --capture-dir".into());
 	}
@@ -488,6 +498,8 @@ struct StageApp {
 	/// A VRM avatar's drawing, stepping down if frames come too slowly (None: not watched).
 	watchdog: Option<Watchdog>,
 	last_real: Instant,
+	/// Pictures over the character, and the screen's brightness (overlay.rs).
+	overlays: Option<overlay::Overlays>,
 }
 
 impl StageApp {
@@ -641,7 +653,102 @@ impl StageApp {
 				self.motion.set_face(index.is_none());
 			}
 			Command::TryAnimation(path) => self.try_animation(&path),
+			Command::Overlay { slot, image, anchor } => self.overlay(&slot, image.as_deref(), anchor),
+			Command::Screen(screen) => {
+				if let Some(overlays) = &mut self.overlays {
+					if overlays.screen() != screen {
+						overlays.set_screen(screen);
+						self.events.emit(json!({"event": "screen", "screen": screen.name()}));
+					}
+				}
+			}
 			Command::Quit => self.quit = true,
+		}
+	}
+
+	/// Show a picture from the overlay folder in a slot, or fade the slot out.
+	fn overlay(&mut self, slot: &str, image: Option<&str>, anchor: overlay::Anchor) {
+		let (Some(overlays), Some((_, aux))) = (&mut self.overlays, &self.on_window) else {
+			self.events.emit(json!({"event": "error", "message": "pictures cannot be shown over this character"}));
+			return;
+		};
+		let Some(name) = image else {
+			overlays.hide(slot);
+			return;
+		};
+		let Some(folder) = &self.opts.overlays else {
+			self.events.emit(json!({"event": "error", "message": "the stage has no overlay folder (--overlays)"}));
+			return;
+		};
+		let shown = overlay::load(folder, name).and_then(|picture| overlays.show(aux, slot, anchor, picture));
+		if let Err(e) = shown {
+			self.events.emit(json!({"event": "error", "message": e}));
+		}
+	}
+
+	/// What the character is doing, once a second, for the core (and the settings page).
+	fn heartbeat(&mut self, now: Instant) {
+		self.frames_since_beat += 1;
+		let since = now.duration_since(self.last_beat).as_secs_f32();
+		if since < 1.0 {
+			return;
+		}
+		let per_frame = |total: f64| (total * 1000.0 / self.frames_since_beat.max(1) as f64 * 100.0).round() / 100.0;
+		let (screen, showing) = match &self.overlays {
+			Some(o) => (o.screen().name(), o.showing()),
+			None => ("on", Vec::new()),
+		};
+		self.events.emit(json!({
+			"event": "heartbeat",
+			"fps": (self.frames_since_beat as f64 / since as f64 * 10.0).round() / 10.0,
+			"state": self.behaviour.state().name(),
+			"mood": self.motion.mood(),
+			"playing": self.motion.playing(),
+			"channels": self
+				.motion
+				.holders()
+				.into_iter()
+				.map(|(channel, name)| (channel.to_string(), json!(name)))
+				.collect::<serde_json::Map<String, serde_json::Value>>(),
+			"budget": {
+				"own": self.motion.budget_used().0,
+				"big": self.motion.budget_used().1,
+				"mood": self.motion.budget_used().2,
+				"idle": self.motion.budget_used().3,
+			},
+			"drives": {
+				"hour": (self.director.hour() * 100.0).round() / 100.0,
+				"energy": (self.director.energy * 100.0).round() / 100.0,
+				"attention": (self.director.attention * 100.0).round() / 100.0,
+				"boredom": (self.director.boredom * 100.0).round() / 100.0,
+				"sleepiness": (self.director.sleepiness * 100.0).round() / 100.0,
+				"dozing": self.director.dozing,
+			},
+			// Average milliseconds per frame on the processor: moving the character, and
+			// handing its drawing to the graphics chip (which then draws in parallel).
+			"update_ms": per_frame(self.update_time),
+			"draw_ms": per_frame(self.draw_time),
+			"screen": screen,
+			"overlays": showing,
+		}));
+		self.frames_since_beat = 0;
+		self.last_beat = now;
+		self.update_time = 0.0;
+		self.draw_time = 0.0;
+	}
+
+	/// Save frames that tests asked for, before the buffers are swapped.
+	fn capture(&mut self) {
+		let Some((_, aux)) = &self.on_window else { return };
+		while self.next_capture < self.opts.capture_at.len() && self.t >= self.opts.capture_at[self.next_capture] {
+			if let Some(dir) = &self.opts.capture_dir {
+				let path = dir.join(format!("frame_{:03}.png", self.next_capture));
+				match capture::save_frame(aux, self.width, self.height, &path) {
+					Ok(()) => self.events.emit(json!({"event": "captured", "file": path, "t": self.t})),
+					Err(e) => self.events.emit(json!({"event": "error", "message": e})),
+				}
+			}
+			self.next_capture += 1;
 		}
 	}
 
@@ -714,6 +821,13 @@ impl App for StageApp {
 				}
 				self.width = self.opts.width;
 				self.height = self.opts.height;
+				self.overlays = match overlay::Overlays::new(&aux) {
+					Ok(o) => Some(o),
+					Err(e) => {
+						self.warnings.push(format!("captions and signs cannot be shown: {e}"));
+						None
+					}
+				};
 				self.on_window = Some((renderer, aux));
 				self.fit_camera();
 				let controls: Vec<_> = self
@@ -751,6 +865,9 @@ impl App for StageApp {
 						.map(|(name, at)| (name, json!(at)))
 						.collect::<serde_json::Map<String, serde_json::Value>>(),
 					"expressions": self.info.expressions,
+					// The window's size, for pictures made to fit it (a "size" event follows any change).
+					"width": self.width,
+					"height": self.height,
 					"opengl": format!("{}{}.{}", if version.is_embedded { "ES " } else { "" }, version.major, version.minor),
 				}));
 				if let Some(warning) = self.map_warning.take() {
@@ -800,6 +917,9 @@ impl App for StageApp {
 	}
 
 	fn resize(&mut self, width: u32, height: u32) {
+		if (width, height) != (self.width, self.height) {
+			self.events.emit(json!({"event": "size", "width": width, "height": height}));
+		}
 		self.width = width;
 		self.height = height;
 		match &mut self.on_window {
@@ -829,6 +949,26 @@ impl App for StageApp {
 		}
 		for command in pending {
 			self.handle(command);
+		}
+		if let (Some(overlays), Some((_, aux))) = (&mut self.overlays, &self.on_window) {
+			overlays.update(aux, dt);
+		}
+		if self.overlays.as_ref().is_some_and(|o| o.dark()) {
+			// The screen is dark: nothing is moved or drawn, and frames come a few times a second.
+			if let Some((_, aux)) = &self.on_window {
+				unsafe {
+					aux.clear_color(0.0, 0.0, 0.0, 1.0);
+					aux.clear(glow::COLOR_BUFFER_BIT);
+					let [r, g, b] = self.opts.background;
+					aux.clear_color(r, g, b, 1.0);
+				}
+			}
+			self.capture();
+			self.heartbeat(now);
+			if self.opts.fixed_dt.is_none() {
+				std::thread::sleep(std::time::Duration::from_millis(100));
+			}
+			return !self.quit && !self.opts.exit_after.is_some_and(|limit| self.t >= limit);
 		}
 
 		let direction = self.director.update(dt);
@@ -926,20 +1066,13 @@ impl App for StageApp {
 			}
 			_ => unreachable!("the renderer is made for the puppet's format"),
 		}
+		if let Some(overlays) = &self.overlays {
+			overlays.draw(aux, self.width, self.height);
+		}
 		self.update_time += posed.duration_since(started).as_secs_f64();
 		self.draw_time += posed.elapsed().as_secs_f64();
 
-		// Save frames that tests asked for, before the buffers are swapped.
-		while self.next_capture < self.opts.capture_at.len() && self.t >= self.opts.capture_at[self.next_capture] {
-			if let Some(dir) = &self.opts.capture_dir {
-				let path = dir.join(format!("frame_{:03}.png", self.next_capture));
-				match capture::save_frame(aux, self.width, self.height, &path) {
-					Ok(()) => self.events.emit(json!({"event": "captured", "file": path, "t": self.t})),
-					Err(e) => self.events.emit(json!({"event": "error", "message": e})),
-				}
-			}
-			self.next_capture += 1;
-		}
+		self.capture();
 
 		// Too slow for this device: give something up, one step at a time, and say so.
 		let real = now.duration_since(self.last_real).as_secs_f32();
@@ -947,46 +1080,7 @@ impl App for StageApp {
 		if let Some(step) = self.watchdog.as_mut().and_then(|w| w.frame(real, self.t)) {
 			self.step_down(step);
 		}
-		self.frames_since_beat += 1;
-		let since = now.duration_since(self.last_beat).as_secs_f32();
-		if since >= 1.0 {
-			let per_frame = |total: f64| (total * 1000.0 / self.frames_since_beat.max(1) as f64 * 100.0).round() / 100.0;
-			self.events.emit(json!({
-				"event": "heartbeat",
-				"fps": (self.frames_since_beat as f64 / since as f64 * 10.0).round() / 10.0,
-				"state": self.behaviour.state().name(),
-				"mood": self.motion.mood(),
-				"playing": self.motion.playing(),
-				"channels": self
-					.motion
-					.holders()
-					.into_iter()
-					.map(|(channel, name)| (channel.to_string(), json!(name)))
-					.collect::<serde_json::Map<String, serde_json::Value>>(),
-				"budget": {
-					"own": self.motion.budget_used().0,
-					"big": self.motion.budget_used().1,
-					"mood": self.motion.budget_used().2,
-					"idle": self.motion.budget_used().3,
-				},
-				"drives": {
-					"hour": (self.director.hour() * 100.0).round() / 100.0,
-					"energy": (self.director.energy * 100.0).round() / 100.0,
-					"attention": (self.director.attention * 100.0).round() / 100.0,
-					"boredom": (self.director.boredom * 100.0).round() / 100.0,
-					"sleepiness": (self.director.sleepiness * 100.0).round() / 100.0,
-					"dozing": self.director.dozing,
-				},
-				// Average milliseconds per frame on the processor: moving the character, and
-				// handing its drawing to the graphics chip (which then draws in parallel).
-				"update_ms": per_frame(self.update_time),
-				"draw_ms": per_frame(self.draw_time),
-			}));
-			self.frames_since_beat = 0;
-			self.last_beat = now;
-			self.update_time = 0.0;
-			self.draw_time = 0.0;
-		}
+		self.heartbeat(now);
 
 		if let Some(limit) = self.opts.exit_after {
 			if self.t >= limit {
@@ -1158,6 +1252,7 @@ fn run(mut opts: Options) -> Result<(), String> {
 		warnings,
 		watchdog,
 		last_real: Instant::now(),
+		overlays: None,
 	};
 	frame.run(app).map_err(|e| format!("stage stopped: {e}"))
 }

@@ -37,6 +37,20 @@ DEFAULT_SETTINGS = {
     "speak_first": {"on": False, "after_hours": 3, "quiet_from": 22, "quiet_to": 8},
     # Software updates (docs/32-updates.md): look for them now and then, and install them at night.
     "updates": {"check": True, "auto_install": True},
+    # What the character says, written on the screen; `heard` also shows what it heard; `size` is
+    # "normal" or "large".
+    "captions": {"on": False, "heard": False, "size": "normal"},
+    # The microphone, off when the owner says so (the button held, or the settings page). A mute
+    # switch, if the device has one, wins over this.
+    "microphone": {"muted": False},
+    # The screen: dark (or dim) at night, from `sleep_from` to `sleep_to` o'clock, when nobody is
+    # talking to the character; `brightness` in per cent, where the screen's backlight can be set.
+    "screen": {"sleep": False, "sleep_from": 23, "sleep_to": 7, "how": "off", "brightness": 100},
+    # Rules for every reply, for homes with children (docs/28-user-guide.md).
+    "family_safe": {"on": False},
+    # Saying the character's name starts listening, as the button does; `phrase` "" means "hey" and
+    # its name; `sensitivity` "low", "normal" or "high".
+    "wake_word": {"on": False, "phrase": "", "sensitivity": "normal"},
 }
 
 # The secret names the device accepts: one key per provider.
@@ -108,6 +122,7 @@ class Store:
             if name in first and (not isinstance(first[name], (int, float)) or isinstance(first[name], bool)
                                   or not low <= first[name] <= high):
                 raise ValueError("speak_first.%s must be a number from %s to %s" % (name, low, high))
+        _check_choices(changes)
         with self._lock:
             merged = _merge(self.settings(), changes)
             write_atomic(self.settings_path, json.dumps(merged, indent=1))
@@ -163,6 +178,41 @@ class Store:
             return False
         digest = hashlib.scrypt(password.encode("utf-8"), salt=bytes.fromhex(salt_hex), n=2 ** 14, r=8, p=1)
         return hmac.compare_digest(digest.hex(), digest_hex)
+
+
+def _check_choices(changes):
+    """The newer settings' values: switches true or false, hours 0 to 23, choices from their lists."""
+    def switch(group, name):
+        value = (changes.get(group) or {}).get(name)
+        if value is not None and not isinstance(value, bool):
+            raise ValueError("%s.%s must be true or false" % (group, name))
+
+    def choice(group, name, allowed):
+        value = (changes.get(group) or {}).get(name)
+        if value is not None and value not in allowed:
+            raise ValueError("%s.%s must be one of: %s" % (group, name, ", ".join(allowed)))
+
+    def number(group, name, low, high):
+        value = (changes.get(group) or {}).get(name)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high):
+            raise ValueError("%s.%s must be a number from %s to %s" % (group, name, low, high))
+
+    for group, name in (("captions", "on"), ("captions", "heard"), ("microphone", "muted"), ("screen", "sleep"),
+                        ("family_safe", "on"), ("wake_word", "on")):
+        switch(group, name)
+    choice("captions", "size", ("normal", "large"))
+    choice("screen", "how", ("off", "dim"))
+    choice("wake_word", "sensitivity", ("low", "normal", "high"))
+    number("screen", "sleep_from", 0, 23)
+    number("screen", "sleep_to", 0, 23)
+    number("screen", "brightness", 10, 100)
+    phrase = (changes.get("wake_word") or {}).get("phrase")
+    if phrase is not None:
+        if not isinstance(phrase, str) or len(phrase) > 40:
+            raise ValueError("wake_word.phrase must be a few words")
+        letters = phrase.replace(" ", "").replace("'", "").replace("-", "")
+        if letters and not letters.isalpha():
+            raise ValueError("the wake phrase can only have letters")
 
 
 def redact(text, store):
