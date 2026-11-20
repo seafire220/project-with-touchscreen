@@ -286,7 +286,7 @@ From CODE27's website and manual, November 2026:
 
 ## Tested
 
-**Unit tests**, `core/tests/test_memory.py` (30):
+**Unit tests**, `core/tests/test_memory.py` (36):
 - where conversations end, and a clock that goes back;
 - the archive, and forgetting a conversation whole;
 - what the model reads within a conversation and in a new one;
