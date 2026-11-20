@@ -252,6 +252,9 @@ class Console:
             if package.is_live2d_zip(data):
                 # A buyer's own Live2D-format model, zipped as it comes for VTube Studio and the like.
                 data = package.from_live2d_zip(io.BytesIO(data), name=request.query.get("name") or None)
+            elif package.is_inochi(data):
+                # An Inochi2D puppet the owner rigged (in Inochi Creator, for example).
+                data = package.from_inochi(data, name=request.query.get("name") or None)
             elif vrm.is_vrm(data):
                 # A VRM avatar (3D): its textures are scaled down for this device, which takes a while.
                 data = await asyncio.get_running_loop().run_in_executor(

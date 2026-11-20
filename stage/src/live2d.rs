@@ -191,6 +191,9 @@ pub struct Live2dPuppet {
 	pub warnings: Vec<String>,
 	/// The model's own expressions.
 	pub expressions: Vec<Expression>,
+	/// Its pose file's groups of parts shown one at a time (two sets of arms, say): the opacity each
+	/// part keeps, the first of each group shown and the rest hidden, as Live2D's own player does.
+	pub pose_parts: Vec<(String, f32)>,
 }
 
 /// Which drawing features a model uses, for the log and for tests.
@@ -285,7 +288,17 @@ impl Live2dPuppet {
 			}
 		}
 
+		// Its pose file, if it names one: parts that take turns (a model drawn with two sets of arms).
+		let mut pose_parts = Vec::new();
+		if let Some(file) = index.get("FileReferences").and_then(|r| r.get("Pose")).and_then(|p| p.as_str()) {
+			match resolve(&base, file).and_then(|p| read_limited(&p)).and_then(|b| parse_pose(&b)) {
+				Ok(parts) => pose_parts = parts,
+				Err(e) => warnings.push(e),
+			}
+		}
+
 		let mut puppet = Self::describe(model, driver, physics, textures, path)?;
+		puppet.pose_parts = pose_parts;
 		puppet.warnings.extend(warnings);
 		puppet.info.expressions = expressions.iter().map(|e| e.name.clone()).collect();
 		puppet.expressions = expressions;
@@ -406,6 +419,7 @@ impl Live2dPuppet {
 			info,
 			warnings: Vec::new(),
 			expressions: Vec::new(),
+			pose_parts: Vec::new(),
 		})
 	}
 
@@ -445,6 +459,9 @@ impl Live2dPuppet {
 		let mut pose = Pose::new(&self.model);
 		for (name, value) in values {
 			pose.set(&Key::param(name), value.x);
+		}
+		for (part, opacity) in &self.pose_parts {
+			pose.set(&Key::part(part), *opacity);
 		}
 		if let Some(physics) = &mut self.physics {
 			if !self.settled {
@@ -1197,6 +1214,29 @@ fn fit_texture(picture: Picture, max_side: u32) -> Picture {
 	Picture { width: w, height: h, pixels: smaller.into_raw() }
 }
 
+/// A pose file's (`.pose3.json`) groups as the opacity each part keeps: in each group the first part (and
+/// the parts linked to it) shown, the others (and theirs) hidden. A model's motions could switch them;
+/// the device does not play those, so the model's first choice stands.
+fn parse_pose(bytes: &[u8]) -> Result<Vec<(String, f32)>, String> {
+	let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| format!("the pose file cannot be read: {e}"))?;
+	let groups = value.get("Groups").and_then(|g| g.as_array()).ok_or("the pose file has no groups")?;
+	let mut out = Vec::new();
+	for group in groups {
+		for (i, entry) in group.as_array().into_iter().flatten().enumerate() {
+			let opacity = if i == 0 { 1.0 } else { 0.0 };
+			if let Some(id) = entry.get("Id").and_then(|v| v.as_str()) {
+				out.push((id.to_string(), opacity));
+			}
+			for linked in entry.get("Link").and_then(|l| l.as_array()).into_iter().flatten() {
+				if let Some(id) = linked.as_str() {
+					out.push((id.to_string(), opacity));
+				}
+			}
+		}
+	}
+	Ok(out)
+}
+
 fn bytes_of<T: Copy>(values: &[T]) -> &[u8] {
 	// Only used for f32 and u32 slices, which have no padding.
 	unsafe { std::slice::from_raw_parts(values.as_ptr() as *const u8, std::mem::size_of_val(values)) }
@@ -1205,6 +1245,25 @@ fn bytes_of<T: Copy>(values: &[T]) -> &[u8] {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn a_pose_file_shows_one_part_of_each_group() {
+		let pose = br#"{"Type": "Live2D Pose", "FadeInTime": 0.5, "Groups": [
+			[{"Id": "PartArmA", "Link": ["PartHandA"]}, {"Id": "PartArmB", "Link": ["PartHandB"]}],
+			[{"Id": "PartHatOn", "Link": []}, {"Id": "PartHatOff"}]]}"#;
+		assert_eq!(
+			parse_pose(pose).unwrap(),
+			vec![
+				("PartArmA".to_string(), 1.0),
+				("PartHandA".to_string(), 1.0),
+				("PartArmB".to_string(), 0.0),
+				("PartHandB".to_string(), 0.0),
+				("PartHatOn".to_string(), 1.0),
+				("PartHatOff".to_string(), 0.0)
+			]
+		);
+		assert!(parse_pose(b"{}").is_err());
+	}
 
 	#[test]
 	fn recognises_model_descriptions() {

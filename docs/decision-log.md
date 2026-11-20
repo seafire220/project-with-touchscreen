@@ -798,3 +798,18 @@ rejected. Settled entries are not reopened without new evidence.
 - **Vectors are kept per memory and conversation**, keyed by a checksum of the
   text, made in the background (at most 64 during a reply), and removed when
   their memory or conversation is forgotten.
+
+## D-055 — Owners add their own rigged models in either open 2D format
+
+- Date: 2026-11-20. Status: built (owner: "allow users to upload their own
+  rigged live2D models"; `28-user-guide.md`).
+- Live2D models were already accepted (a zip of the model's folder). Testing
+  with Live2D's own sample model found that a model's pose file (parts shown
+  one at a time, such as two sets of arms) was ignored, so both showed. The
+  stage now shows each group's first part, as Live2D's player does at rest.
+- **Inochi2D models** (`.inp`, or Inochi Creator's `.inx`) can now be added
+  on their own. That gives owners a free, open-source rigging route. The
+  model's name, artist and licence come from its header; its abilities and
+  controls come from its parameter names, Inochi2D's or Live2D's.
+- Stretchy Studio was looked at too (`25-product-review.md`); it exports to
+  formats the device does not play.

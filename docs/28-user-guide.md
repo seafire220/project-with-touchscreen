@@ -115,15 +115,23 @@ Pictures that work best:
   face, wide sleeves, capes and long hair over the arms all keep the arms
   still (the rest of the character still moves).
 
-### A Live2D-format model you already have
+### A Live2D model you rigged, or bought
 
-On **Characters → Add a character**, choose a `.zip` of the model's folder
-(the folder with its `.model3.json`, as used by VTube Studio). The device
+On **Characters → Add a character**, choose a `.zip` of the model's folder: the folder with its `.model3.json`, as used by VTube Studio.
+- The device plays the model itself (with Ayagami), with its physics (hair and clothes swaying) and its expressions.
+- If the model shows alternate parts in turn (two sets of arms, say), its pose file is respected. The device
 works out which of its settings turn the head, blink, open the mouth and so
 on. If something moves wrongly, the **Movement** section under the
 character lets you choose the right setting for each movement and test it
 on the screen. **Feelings** maps the model's own expressions to the
 character's moods.
+
+### An Inochi2D model you rigged
+
+[Inochi Creator](https://inochi2d.com) is a free, open-source rigging program, similar to Live2D Cubism. Export your model as an `.inp` file and choose it on **Characters → Add a character**; Inochi Creator's own `.inx` project files work too.
+- The device reads the model's name, artist and licence from the file.
+- It works out which parameters turn the head, blink and open the mouth, from Inochi2D's standard names ("Head:: Yaw-Pitch", "Eye:: Left:: Blink", "Mouth:: Open") or Live2D's ("ParamAngleX").
+- If a movement is wrong, the **Movement** section under the character lets you choose the right parameter and test it on the screen.
 
 ### A 3D avatar (VRM) you already have
 

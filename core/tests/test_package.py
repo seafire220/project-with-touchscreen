@@ -273,3 +273,36 @@ class Live2DImportTest(unittest.TestCase):
             z.writestr(link, "/etc/passwd")
         with self.assertRaises(package.PackageError):
             package.from_live2d_zip(io.BytesIO(out.getvalue()))
+
+
+class InochiImportTest(unittest.TestCase):
+    """An Inochi2D puppet its owner rigged (Inochi Creator), added on its own."""
+
+    def test_a_puppet_becomes_a_character_with_its_name_artist_terms_and_abilities(self):
+        header = {"meta": {"name": "Mochi", "artist": "Rin", "rigger": "Kai", "copyright": "(c) Rin 2026",
+                           "licenseURL": "https://example.org/terms", "rights": {"allow_commercial": False}},
+                  "nodes": {"name": "Root"},
+                  "param": [{"name": "Head:: Yaw-Pitch"}, {"name": "Eye:: Left:: Blink"}, {"name": "Mouth:: Open"}]}
+        data = puppet_bytes(header)
+        self.assertTrue(package.is_inochi(data))
+        self.assertFalse(package.is_inochi(b"PK\x03\x04 a zip"))
+        pkg = package.open_package(io.BytesIO(package.from_inochi(data)))
+        m = pkg.manifest
+        self.assertEqual((m["id"], m["name"], m["author"]), ("mochi", "Mochi", "Rin, Kai"))
+        self.assertIn("Not for commercial use", m["licence"])
+        self.assertIn("https://example.org/terms", m["licence"])
+        self.assertEqual(m["capabilities"], {"blink": True, "speak": True, "head_turn": True, "arm_left": False,
+                                             "arm_right": False})
+        self.assertEqual(pkg.files["visual/puppet.inp"], data)
+        self.assertIn("You are Mochi", pkg.files["persona.md"].decode())
+        self.assertEqual(package.open_package(io.BytesIO(package.from_inochi(data, name="Pip"))).manifest["name"], "Pip")
+        live2d_names = puppet_bytes({"meta": {}, "nodes": {}, "param": [{"name": "ParamAngleX"}, {"name": "ParamEyeLOpen"},
+                                                                       {"name": "ParamMouthOpenY"}, {"name": "ParamArmLA"}]})
+        caps = package.open_package(io.BytesIO(package.from_inochi(live2d_names))).manifest["capabilities"]
+        self.assertEqual((caps["head_turn"], caps["blink"], caps["speak"], caps["arm_left"]), (True, True, True, True))
+
+    def test_a_damaged_puppet_or_one_with_a_key_is_refused(self):
+        for bad in (package.PUPPET_MAGIC + b"\x00\x00\x00\x10{", puppet_bytes({"meta": {}}),
+                    puppet_bytes({"meta": {"name": "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZ123456"}, "nodes": {}})):
+            with self.assertRaises(package.PackageError):
+                package.from_inochi(bad)

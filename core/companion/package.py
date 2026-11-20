@@ -536,6 +536,60 @@ def _shorten(text, limit):
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "\u2026"
 
 
+def is_inochi(data):
+    """An Inochi2D puppet on its own (.inp, or Inochi Creator's .inx), rather than a character package."""
+    return isinstance(data, (bytes, bytearray)) and data[:len(PUPPET_MAGIC)] == PUPPET_MAGIC
+
+
+def _inochi_capabilities(params):
+    """What a puppet's parameters let it do, by their names (Inochi2D's own, or Live2D's)."""
+    names = [str(p.get("name", "")).lower() for p in params if isinstance(p, dict)]
+
+    def has(*needles):
+        return any(all(n in name for n in needle.split("+")) for name in names for needle in needles)
+    return {"blink": has("blink", "eye+open", "eyelopen", "eyeropen"),
+            "speak": has("mouth+open", "mouthopen", "mouth+aa", "vowel"),
+            "head_turn": has("head+yaw", "anglex", "head+x"),
+            "arm_left": has("arm+left", "arm+:: l", "arml", "armla"),
+            "arm_right": has("arm+right", "arm+:: r", "armr", "armra")}
+
+
+def from_inochi(data, name=None):
+    """Make a character package from an Inochi2D puppet (.inp, or Inochi Creator's .inx), rigged by its
+    owner. Its name, artist and licence come from its own header; which parameter turns the head, blinks
+    or opens the mouth the device works out from their names (the Movement section changes that). Returns
+    package bytes. Raises PackageError."""
+    _check_puppet("the puppet", data)
+    length = int.from_bytes(data[8:12], "big")
+    header = json.loads(data[12:12 + length])
+    meta = header.get("meta") if isinstance(header.get("meta"), dict) else {}
+    params = header.get("param") if isinstance(header.get("param"), list) else []
+    name = (name or str(meta.get("name") or "") or "Character").strip()[:60] or "Character"
+    author = ", ".join(str(meta[k]).strip() for k in ("artist", "rigger") if str(meta.get(k) or "").strip())
+    terms = []
+    if str(meta.get("copyright") or "").strip():
+        terms.append(str(meta["copyright"]).strip())
+    if str(meta.get("licenseURL") or "").strip():
+        terms.append("Licence: %s" % str(meta["licenseURL"]).strip())
+    rights = meta.get("rights") if isinstance(meta.get("rights"), dict) else {}
+    if rights.get("allow_commercial") is False:
+        terms.append("Not for commercial use.")
+    if rights.get("require_attribution"):
+        terms.append("Credit the artist.")
+    manifest = {
+        "format": FORMAT,
+        "id": slug(name),
+        "name": name,
+        "kind": "puppet",
+        "author": author[:100],
+        "licence": _shorten(" ".join(terms), 400),
+        "capabilities": _inochi_capabilities(params),
+    }
+    files = {"visual/puppet.inp": bytes(data), "persona.md": IMPORT_PERSONA.format(name=name),
+             "voice.json": json.dumps({"note": "Choose the voice on the device. No keys are stored here."}, indent=1)}
+    return build(files, manifest)
+
+
 def from_vrm(data, name=None, texture_side=vrm_format.TEXTURE_SIDE):
     """Make a character package from a .vrm file. Its textures are scaled down to `texture_side`
     pixels once, here, so the device never holds a larger picture; its maker's licence terms go into

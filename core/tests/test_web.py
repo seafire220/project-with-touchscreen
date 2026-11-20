@@ -558,6 +558,18 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         await self.device.keep_memory("aria", force=True)
         self.assertTrue(q.empty(), "with memory off, nothing is asked")
 
+    async def test_an_inochi2d_model_is_added_on_its_own(self):
+        from test_package import puppet_bytes
+        await self.login()
+        data = puppet_bytes({"meta": {"name": "Mochi", "artist": "Rin"}, "nodes": {"name": "Root"},
+                             "param": [{"name": "Head:: Yaw-Pitch"}]})
+        r = await self.client.post("/api/characters", data=data, headers=H)
+        self.assertEqual(await r.json(), {"id": "mochi"})
+        listed = (await (await self.client.get("/api/characters")).json())["characters"]
+        self.assertEqual([c["name"] for c in listed], ["Mochi"])
+        r = await self.client.post("/api/characters", data=data[:20], headers=H)
+        self.assertEqual(r.status, 400, "a damaged puppet")
+
     async def test_the_button_toggles_listening(self):
         await self.login()
         r = await self.client.post("/api/button", headers=H)
