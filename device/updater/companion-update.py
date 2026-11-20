@@ -239,6 +239,25 @@ def install_wheels(release):
         raise ValueError("its Python packages did not install: %s" % done.stderr.strip()[-300:])
 
 
+def install_models(release):
+    """Models a version brings (models/<name>), for devices made before it needed them: put where the
+    device keeps its models, if not there already, and given to the service's user."""
+    folder = os.path.join(release, "models")
+    if not os.path.isdir(folder):
+        return
+    target_root = os.path.join(DATA, "models")
+    os.makedirs(target_root, exist_ok=True)
+    for name in sorted(os.listdir(folder)):
+        source, target = os.path.join(folder, name), os.path.join(target_root, name)
+        if os.path.isdir(source) and not os.path.exists(target):
+            shutil.copytree(source, target + ".new")
+            os.replace(target + ".new", target)
+            for root, dirs, files in os.walk(target):
+                for item in [root] + [os.path.join(root, f) for f in files]:
+                    _give_to_service(item)
+    shutil.rmtree(folder, ignore_errors=True)             # kept once, in the data folder
+
+
 def systemctl(*args):
     return subprocess.run([SYSTEMCTL] + list(args), capture_output=True, text=True, timeout=120)
 
@@ -314,6 +333,7 @@ def install(request):
         os.makedirs(staging)
         unpack(bundle, staging)
         install_wheels(staging)
+        install_models(staging)
         os.rename(staging, release)
     except Exception as error:
         shutil.rmtree(staging, ignore_errors=True)

@@ -16,6 +16,7 @@ from .characters import Characters, split_persona
 from .conversation import Conversation
 from .memory import Memory
 from . import motions, screen, speech_text, temperament
+from . import meaning as meaning_module
 from . import updates as updates_module
 from .network import NetworkError, WiFi
 from .providers import ProviderError
@@ -281,7 +282,8 @@ class Device:
 
     def memory(self, cid=None):
         cid = cid or self.active_id()
-        return Memory(os.path.join(self.memory_dir, cid or "_none"))
+        return Memory(os.path.join(self.memory_dir, cid or "_none"),
+                      meaning=meaning_module.load(os.path.join(self.data_dir, "models", "meaning")))
 
     def activate(self, cid):
         if cid not in self.characters.ids():

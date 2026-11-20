@@ -54,9 +54,10 @@ class Workshop:
         with open(self.stage, "wb") as f:
             f.write(b"\x7fELF fake stage for tests")
 
-    def make(self, version, notes="Fixes things.", out=None):
+    def make(self, version, notes="Fixes things.", out=None, models=None):
         out = out or os.path.join(self.folder, "dist-" + version)
-        return self.tool.build(version, self.stage, self.private, out, notes=notes, any_arch=True, public_key=self.public)
+        return self.tool.build(version, self.stage, self.private, out, notes=notes, any_arch=True, public_key=self.public,
+                               models=models)
 
 
 def fake_app(folder, version, public_key, url=""):
@@ -345,8 +346,8 @@ class InstallerTest(unittest.TestCase):
         with open(os.path.join(self.data, "updates", "status.json")) as f:
             return done.returncode, json.load(f)
 
-    def bundle(self, version):
-        built = self.shop.make(version)
+    def bundle(self, version, models=None):
+        built = self.shop.make(version, models=models)
         target = os.path.join(self.data, "updates", os.path.basename(built))
         os.replace(built, target)
         return target
@@ -380,6 +381,21 @@ class InstallerTest(unittest.TestCase):
         code, status = self.run_installer({"do": "rollback"})
         self.assertEqual((code, status["state"]), (0, "installed"), status)
         self.assertEqual((self.where("current"), self.where("previous")), ("releases/2026.11.20", "releases/2026.12.1"))
+
+    def test_models_an_update_brings_are_put_where_the_device_keeps_them(self):
+        models = os.path.join(self.dir.name, "models-src")
+        os.makedirs(os.path.join(models, "meaning"))
+        with open(os.path.join(models, "meaning", "model.safetensors"), "wb") as f:
+            f.write(b"vectors")
+        os.makedirs(os.path.join(self.data, "models", "stt"))
+        bundle = self.bundle("2026.12.1", models=models)
+        Health.version = "2026.12.1"
+        code, status = self.run_installer({"do": "install", "bundle": bundle})
+        self.assertEqual(status["state"], "installed", status)
+        with open(os.path.join(self.data, "models", "meaning", "model.safetensors"), "rb") as f:
+            self.assertEqual(f.read(), b"vectors")
+        self.assertTrue(os.path.isdir(os.path.join(self.data, "models", "stt")), "the device's other models are left alone")
+        self.assertFalse(os.path.exists(os.path.join(self.app, "releases", "2026.12.1", "models")), "kept once")
 
     def test_a_version_that_does_not_start_is_undone(self):
         bundle = self.bundle("2026.12.1")

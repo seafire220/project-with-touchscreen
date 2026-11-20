@@ -13,6 +13,7 @@ device").
 | Ayagami core, vendored | Plays Live2D-format models (independent implementation; no Live2D software) | MIT or Apache-2.0 | `stage/vendor/ayagami`, commit in `stage/vendor/PATCHES.md` |
 | sherpa-onnx | Runs the on-device speech recognition and voice | Apache-2.0 | Python package |
 | Moonshine tiny, English, 8-bit (Useful Sensors), packaged for sherpa-onnx | On-device speech recognition | MIT | Downloaded at install (`device/install.sh`) |
+| Model2Vec potion-base-8M (Minish Lab), distilled from bge-base-en-v1.5 (BAAI), with its tokenizer | Matching memories and conversations by meaning (`core/companion/meaning.py`, read with numpy; the model2vec library is not used) | MIT (both) | Downloaded at install |
 | Piper voice "LibriTTS-R medium", packaged for sherpa-onnx | The free on-device voice (904 speakers) | CC BY 4.0: trained on LibriTTS-R (Y. Koizumi, H. Zen, S. Karita, Y. Ding, K. Yatabe, N. Morioka, M. Bacchiani, Y. Zhang, W. Han, A. Bapna, 2023), voice by the Piper project | Downloaded at install |
 | espeak-ng | Turns text into phonemes for the voice | GPL-3.0; installed from the operating system's packages and run as a separate program | Operating system |
 | Raspberry Pi OS and its packages (Linux, Mesa, cage, NetworkManager, ALSA...) | The operating system | Their own licences (mostly GPL, LGPL, MIT) | Operating system |

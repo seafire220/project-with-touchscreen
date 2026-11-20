@@ -162,6 +162,8 @@ In this order, the latest last, nearest what is said now:
    - up to eight that share words with what was just said.
 
    Rarer words count for more. Greetings, times of day and words of feeling ("love", "morning") don't count, and "baked" matches "baking".
+
+   They also match **by meaning**: "my pup chewed my shoes" finds "They have a dog called Biscuit" (see below).
 3. **Earlier conversations that may matter now**: up to three whose title and summary share words with what was said.
 4. **On a conversation's first reply, plans whose day has come.**
 5. **When you last talked, and about what**: "Your last conversation with them was on Thursday evening (3 days ago), "Shopping list": …".
@@ -204,6 +206,32 @@ This is the first time you have talked today.
 From your diary (2026-11-19): Sam found the recipe for Saturday and I made them a shopping list. I love how much care they put into Kim's visit. I hope the lasagne turns out perfectly; I'll ask them how it went.
 ```
 
+## Matching by meaning
+
+Words alone miss a lot: "my pup", "a cuppa", "I visited Nan" share no words with "a dog called Biscuit", "oolong tea" or "their grandmother". So the device also turns what was said, and every memory and conversation, into vectors, and finds those whose meaning is close.
+
+**The model** is Model2Vec's potion-base-8M (MIT, Minish Lab; distilled from BAAI's bge-base-en-v1.5). It is a table of one vector per word piece, averaged over a text. No neural network runs:
+- the device reads it with numpy alone (`core/companion/meaning.py`), and its vectors are the same as the official library's;
+- a remark takes under a tenth of a millisecond;
+- about 15 MB of memory.
+
+It is chosen for a 1 GB board. Vectors are made once per memory and conversation, kept in `vectors.npz`, and dropped with what they stand for.
+
+**On 30 remarks whose memory shares few or no words with them** (`core/tests/test_meaning.py`):
+
+| | Right memory given to the model | Extra memories per remark | Per reply |
+|---|---|---|---|
+| Words alone (before) | 9 of 30 | 0 | 0.3 ms |
+| Words and meaning | 27 of 30 | about 1; at most 2 for small talk | 0.7 ms |
+
+Among the models tried, a transformer (all-MiniLM-L6-v2) did slightly better in a raw ranking: 30 of 30 in its top three, against 29. But it needs a neural network runtime and about 25 times the computing, so the static model was chosen.
+
+How it combines with words:
+- **Memories:** up to four close in meaning (at least 0.18 alike, and within 0.15 of the closest) are added to the word matches, the pinned and the important ones.
+- **Conversations:** ranked by words and meaning together.
+
+Without the model's files (`/var/lib/companion/models/meaning`, shipped in the image or brought by an update), memory matches by words alone, as before.
+
 ## The Memory tab
 
 | Section | What the owner can do |
@@ -228,6 +256,7 @@ In `/var/lib/companion/memory/<character>/`:
 | `diary.jsonl` | The diary |
 | `notes.md` | Your notes |
 | `state.json` | The conversation going on, and what has been done |
+| `vectors.npz` | One vector per memory and conversation, for matching by meaning |
 
 Memory kept by the first version, before 2026-11-19, is carried over once:
 - its notes, which the model wrote, become memories;
@@ -326,7 +355,6 @@ Most of the guards above came from these runs, and the summing-up step is now th
 ## Not done yet
 
 - **Knowing it is you**: speaking first goes by speech-like sound, so a television can set it off; telling voices apart would fix that.
-- **Matching by meaning**: today matching is by words, with their forms ("baked", "baking"); "my pup" won't find "their dog". A small on-device embedding model would add this.
 - **Questions by date**: "what did we talk about last Monday?" isn't matched by its date.
 - **More than one person**: memory assumes one person; telling voices apart isn't done.
 - **Encryption at rest**: memory is protected by file permissions. Encrypting it would need a key the device can keep secret, a secure element or your password at start-up, which a Pi lacks.

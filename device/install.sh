@@ -35,6 +35,10 @@ MODEL_FILES="preprocess.onnx encode.int8.onnx uncached_decode.int8.onnx cached_d
 # Phonemes come from espeak-ng (an operating-system package, run as a program).
 VOICE_URL="https://huggingface.co/csukuangfj/vits-piper-en_US-libritts_r-medium/resolve/main"
 VOICE_FILES="en_US-libritts_r-medium.onnx en_US-libritts_r-medium.onnx.json tokens.txt MODEL_CARD"
+# Matching memories by meaning: Model2Vec potion-base-8M (MIT, Minish Lab; distilled from BAAI's
+# bge-base-en-v1.5, MIT). A table of word-piece vectors read with numpy; about 30 MB.
+MEANING_URL="https://huggingface.co/minishlab/potion-base-8M/resolve/main"
+MEANING_FILES="model.safetensors tokenizer.json config.json README.md"
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -170,6 +174,23 @@ if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/tts" ]; then
         chown -R companion:companion "$DATA/models"
     else
         echo "warning: could not download the on-device voice; choose a voice service in the settings page" >&2
+        rm -rf "$tmp"
+    fi
+fi
+
+if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/meaning" ]; then
+    say "Downloading the model for matching memories by meaning"
+    tmp="$(mktemp -d)"
+    ok=1
+    for f in $MEANING_FILES; do
+        curl -fsSL "$MEANING_URL/$f" -o "$tmp/$f" || { ok=0; break; }
+    done
+    if [ "$ok" = 1 ]; then
+        install -d -o companion -g companion "$DATA/models"
+        mv "$tmp" "$DATA/models/meaning"
+        chown -R companion:companion "$DATA/models"
+    else
+        echo "warning: could not download the meaning model; memory will match by words alone" >&2
         rm -rf "$tmp"
     fi
 fi

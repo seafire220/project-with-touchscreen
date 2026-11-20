@@ -37,8 +37,14 @@ import os
 import re
 import threading
 import time
+import zlib
 
 from .store import write_atomic
+
+try:
+    import numpy as np
+except ImportError:
+    np = None
 
 KEEP_TURNS = 400              # word for word, in history.jsonl (all of them are in the archive)
 NOTES_LIMIT = 4000
@@ -60,6 +66,15 @@ ROLL_STEP = 12                # once this many more turns than that are not summ
 DIARY_HOUR = 21               # the day's diary is written from this hour, once it has gone quiet
 RECALL_MEMORIES = 8
 RECALL_SESSIONS = 3
+# Matching by meaning (meaning.py), as well as by words: up to MEANING_MEMORIES memories whose meaning is close
+# to what was said (at least MEANING_MIN alike, and within MEANING_SPREAD of the closest); conversations at
+# least MEANING_MIN_SESSION alike count with their words. At most LIVE_VECTORS new vectors are made during a
+# reply; the background work makes the rest.
+MEANING_MEMORIES = 4
+MEANING_MIN = 0.18                    # chosen on core/tests/test_meaning.py's remarks: 27 of 30 right, little noise
+MEANING_SPREAD = 0.15
+MEANING_MIN_SESSION = 0.25
+LIVE_VECTORS = 64
 
 SHOW_ORDER = ("notes", "memories", "older", "follow", "last", "now")
 
@@ -229,8 +244,11 @@ class Index:
 
 
 class Memory:
-    def __init__(self, folder):
+    def __init__(self, folder, meaning=None):
         self.folder = folder
+        self.meaning = meaning if np is not None else None       # a meaning.Meaning, or None: words alone
+        self.vectors_path = os.path.join(folder, "vectors.npz")
+        self._vectors = None
         os.makedirs(folder, exist_ok=True)
         self.history_path = os.path.join(folder, "history.jsonl")
         self.notes_path = os.path.join(folder, "notes.md")
@@ -481,6 +499,7 @@ class Memory:
             if not is_open and not any(s.get("id") == sid for s in sessions):
                 return False
             _write_jsonl(self.sessions_path, [s for s in sessions if s.get("id") != sid])
+            self._forget_vector("s", sid)
             if is_open:
                 state["open"] = None
                 self._save_state(state)
@@ -593,6 +612,7 @@ class Memory:
             if len(kept) == len(items):
                 return False
             self._save_memories(kept)
+            self._forget_vector("m", mid)
             return True
 
     def follow_ups(self, now=None):
@@ -648,8 +668,9 @@ class Memory:
     def clear(self):
         """Forget everything: conversations, memories, the diary and the owner's notes."""
         with self._lock:
+            self._vectors = None
             for path in (self.history_path, self.notes_path, self.sessions_path, self.memories_path, self.diary_path,
-                         self.state_path):
+                         self.state_path, self.vectors_path):
                 if os.path.exists(path):
                     os.remove(path)
             if os.path.isdir(self.archive_dir):
@@ -682,7 +703,8 @@ class Memory:
         if memories:
             question = heard + " " + " ".join(t.get("user", "") for t in history[-2:] if t.get("s") == (session or {}).get("id"))
             index = Index([m["text"] + " " + m.get("category", "") for m in memories])
-            matched = {i for _, i in sorted(index.scores(question), reverse=True)[:RECALL_MEMORIES]}
+            matched = [i for _, i in sorted(index.scores(question), reverse=True)[:RECALL_MEMORIES]]
+            matched += [i for i in self._meant(question, memories) if i not in matched]
             core = sorted(range(len(memories)), key=lambda i: (-memories[i].get("importance", 3), -memories[i].get("updated", 0)))
             chosen = [i for i in range(len(memories)) if memories[i].get("pinned")]
             chosen += [i for i in core if memories[i].get("importance", 3) >= 4 and i not in chosen][:10]
@@ -735,11 +757,10 @@ class Memory:
         # Older conversations that match.
         older = [s for s in sessions if s is not last]
         if older:
-            index = self._session_index(older)
-            best = sorted(index.scores(heard), reverse=True)[:RECALL_SESSIONS]
+            best = self._match_sessions(older, heard, RECALL_SESSIONS)
             if best:
                 lines = []
-                for _, i in sorted(best, key=lambda x: x[1]):
+                for i in sorted(best):
                     s = older[i]
                     title = (", “%s”" % s["title"]) if s.get("title") else ""
                     lines.append("- %s%s: %s" % (said_when(s.get("end") or s.get("start", 0), now), title, s.get("summary", "")))
@@ -790,13 +811,121 @@ class Memory:
         return cached[1]
 
     def recall(self, heard, limit=RECALL_SESSIONS):
-        """The conversations whose words best match `heard` (up to `limit`), and the last one, oldest first."""
+        """The conversations that best match `heard` (up to `limit`, by words and meaning), and the last one,
+        oldest first."""
         sessions = self.sessions()
         if not sessions:
             return []
         older = sessions[:-1]
-        best = sorted(self._session_index(older).scores(heard), key=lambda x: (-x[0], -x[1]))[:limit] if older else []
-        return [older[i] for i in sorted(i for _, i in best)] + [sessions[-1]]
+        best = self._match_sessions(older, heard, limit) if older else []
+        return [older[i] for i in sorted(best)] + [sessions[-1]]
+
+    def _match_sessions(self, sessions, heard, limit):
+        """Which conversations best match `heard`: by their words (rarer words counting for more), and by
+        meaning when the model is there. Returns their positions, best first."""
+        scores = {}
+        for words, i in self._session_index(sessions).scores(heard):
+            scores[i] = words / (words + 4.0)                  # words, made 0 to 1, to add to meaning
+        if self.meaning is not None and heard.strip():
+            sims = self._similarity(heard, "s", sessions, [_session_text(s) for s in sessions])
+            if sims is not None:
+                for i in np.argsort(-sims)[:limit * 2]:
+                    if sims[i] >= MEANING_MIN_SESSION:
+                        scores[int(i)] = scores.get(int(i), 0.0) + float(sims[i])
+        ranked = sorted(scores.items(), key=lambda x: (-x[1], -x[0]))
+        return [i for i, _ in ranked[:limit]]
+
+    def _meant(self, question, memories):
+        """Memories close in meaning to the question (positions, closest first), when the model is there."""
+        if self.meaning is None or not question.strip():
+            return []
+        sims = self._similarity(question, "m", memories, [m["text"] for m in memories])
+        if sims is None:
+            return []
+        order = np.argsort(-sims)[:MEANING_MEMORIES]
+        best = float(sims[order[0]]) if len(order) else 0.0
+        return [int(i) for i in order if sims[i] >= MEANING_MIN and sims[i] >= best - MEANING_SPREAD]
+
+    def _similarity(self, question, kind, items, texts, limit=LIVE_VECTORS):
+        """How alike in meaning the question is to each item (-1 to 1), or None if it has no known words."""
+        query = self.meaning.embed([question])[0]
+        if not query.any():
+            return None
+        return self._vectors_for(kind, [item["id"] for item in items], texts, limit) @ query
+
+    # ----- vectors for matching by meaning (vectors.npz: one per memory and conversation, made once)
+    def _vector_store(self):
+        if self._vectors is None:
+            self._vectors = {"m": {}, "s": {}}
+            try:
+                with np.load(self.vectors_path) as data:
+                    for kind in ("m", "s"):
+                        for i, k, v in zip(data[kind + "_ids"], data[kind + "_keys"], data[kind + "_vecs"]):
+                            self._vectors[kind][int(i)] = (int(k), v)
+            except (OSError, ValueError, KeyError):
+                pass
+        return self._vectors
+
+    def _vectors_for(self, kind, ids, texts, limit=None):
+        """The vectors for these items, making those missing or out of date (at most `limit` now; the rest
+        count as unlike anything until the background work makes them)."""
+        store = self._vector_store()[kind]
+        keys = [zlib.crc32(t.encode("utf-8")) for t in texts]
+        missing = [j for j, (i, k) in enumerate(zip(ids, keys)) if store.get(i, (None,))[0] != k]
+        if limit is not None:
+            missing = missing[:limit]
+        if missing:
+            made = self.meaning.embed([texts[j] for j in missing]).astype(np.float16)
+            for j, vector in zip(missing, made):
+                store[ids[j]] = (keys[j], vector)
+            self._save_vectors()
+        out = np.zeros((len(ids), self.meaning.size), dtype=np.float32)
+        for j, (i, k) in enumerate(zip(ids, keys)):
+            entry = store.get(i)
+            if entry is not None and entry[0] == k:
+                out[j] = entry[1]
+        return out
+
+    def refresh_vectors(self):
+        """Make every missing vector and drop those of things forgotten (in the background)."""
+        if self.meaning is None:
+            return 0
+        with self._lock:
+            store = self._vector_store()
+            memories, sessions = self.memories(), self.sessions()
+            before = sum(len(v) for v in store.values())
+            for kind, items in (("m", memories), ("s", sessions)):
+                keep = {item["id"] for item in items}
+                for i in [i for i in store[kind] if i not in keep]:
+                    del store[kind][i]
+            made = len([1 for m in memories if store["m"].get(m["id"], (None,))[0] != zlib.crc32(m["text"].encode("utf-8"))])
+            made += len([1 for s in sessions if store["s"].get(s["id"], (None,))[0] != zlib.crc32(_session_text(s).encode("utf-8"))])
+            self._vectors_for("m", [m["id"] for m in memories], [m["text"] for m in memories])
+            self._vectors_for("s", [s["id"] for s in sessions], [_session_text(s) for s in sessions])
+            if sum(len(v) for v in store.values()) != before:
+                self._save_vectors()
+            return made
+
+    def _forget_vector(self, kind, item_id):
+        if self.meaning is None and not os.path.exists(self.vectors_path):
+            return
+        if np is None:
+            return
+        store = self._vector_store()
+        if store[kind].pop(item_id, None) is not None:
+            self._save_vectors()
+
+    def _save_vectors(self):
+        arrays = {}
+        size = self.meaning.size if self.meaning is not None else 256
+        for kind in ("m", "s"):
+            items = self._vectors[kind]
+            arrays[kind + "_ids"] = np.array(list(items), dtype=np.int64)
+            arrays[kind + "_keys"] = np.array([items[i][0] for i in items], dtype=np.int64)
+            arrays[kind + "_vecs"] = np.array([items[i][1] for i in items], dtype=np.float16).reshape(len(items), size)
+        tmp = os.path.join(self.folder, ".vectors-new.npz")
+        np.savez(tmp, **arrays)
+        os.replace(tmp, self.vectors_path)
 
     # ----- keeping it up to date (in the background, with the language model)
     def needs_work(self, now=None, keep=KEEP_VERBATIM):
@@ -830,6 +959,7 @@ class Memory:
         if day is not None and not any(not s.get("done") for s in self.sessions()):
             if await self._write_diary(llm, day, now, name, persona):
                 done["diary"] = day.isoformat()
+        self.refresh_vectors()
         return done
 
     async def _ask(self, llm, prompt, system="You keep a character's memory. Follow the format exactly."):
@@ -1001,6 +1131,11 @@ def _ago(seconds):
         hours = round(seconds / 3600)
         return "%d hour%s ago" % (hours, "" if hours == 1 else "s")
     return "%d days ago" % round(seconds / 86400)
+
+
+def _session_text(session):
+    """What a conversation is about, for matching by meaning."""
+    return ("%s. %s" % (session.get("title", ""), session.get("summary", ""))).strip(" .")
 
 
 def _days_since(day, now):

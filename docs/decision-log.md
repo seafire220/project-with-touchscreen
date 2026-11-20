@@ -777,3 +777,24 @@ rejected. Settled entries are not reopened without new evidence.
   answer, then stops listening as before.
 - A television can set it off: hence the gap, the quiet hours, once per
   gap, and off by default.
+
+## D-054 — Memories are matched by meaning with a static embedding model, read with numpy
+
+- Date: 2026-11-20. Status: built (owner: "Yes, please do so" to recall by
+  meaning; `31-memory.md`).
+- Three models were compared on 30 remarks whose memories share few words
+  with them: Model2Vec potion-base-8M and potion-retrieval-32M (static), and
+  all-MiniLM-L6-v2 (a small transformer, in two forms). potion-base-8M found
+  the right memory in its top three for 29 (MiniLM 30, words alone 9), at
+  0.04 ms a remark against about 1 ms, and needs no runtime but numpy. On a
+  1 GB board that settles it.
+- **Read by our own code** (WordPiece tokenizer, safetensors table, average,
+  unit length), checked to give the official library's vectors exactly. The
+  device gains no Python packages.
+- **Added to word matching, not replacing it**: names and rare words still
+  match by words. Meaning adds up to four memories (at least 0.18 alike,
+  within 0.15 of the closest), chosen on the same test (27 of 30 right, about
+  one extra memory a reply).
+- **Vectors are kept per memory and conversation**, keyed by a checksum of the
+  text, made in the background (at most 64 during a reply), and removed when
+  their memory or conversation is forgotten.

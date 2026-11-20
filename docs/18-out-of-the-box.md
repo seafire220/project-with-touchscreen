@@ -48,6 +48,7 @@ running Raspberry Pi OS (`13-build-and-install.md`).
 | `/opt/companion/share/update-key.pem`, `update.json` | The public half of the owner's update key, and where updates come from | Software update |
 | `/var/lib/companion/updates/` | An update waiting to be installed, and what the installer last did | The device; kept by a reset |
 | `/var/lib/companion/models/stt` | The on-device speech model (shipped in the image) | Software update; kept by a reset |
+| `/var/lib/companion/models/meaning` | The model that matches memories by meaning (potion-base-8M, about 30 MB) | Software update; kept by a reset |
 | `/var/lib/companion/config/settings.json` | Choices: AI services, volume, listening mode | The owner, in the settings page |
 | `/var/lib/companion/config/secrets.json` | **The owner's API keys**, readable only by the service | The owner, in the settings page |
 | `/var/lib/companion/config/console-password` | The settings-page password, hashed | The owner |
