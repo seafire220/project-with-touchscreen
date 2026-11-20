@@ -66,7 +66,10 @@ function show(tab) {
   for (const s of document.querySelectorAll(".tab")) s.hidden = s.id !== tab;
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
   if (tab === "memory") loadMemory();
-  if (tab === "device") loadWifi().catch((e) => text($("wifi-status"), e.message));
+  if (tab === "device") {
+    loadWifi().catch((e) => text($("wifi-status"), e.message));
+    loadUpdate().catch((e) => text($("upd-status"), e.message));
+  }
   if (tab === "animation") loadAnimation().catch((e) => text($("an-speed"), e.message));
 }
 for (const b of document.querySelectorAll("#tabs button")) b.addEventListener("click", () => show(b.dataset.tab));
@@ -1168,3 +1171,60 @@ $("reset-form").addEventListener("submit", async (e) => {
 $("btn-logout").addEventListener("click", async () => { await api("POST", "/api/logout"); if (source) source.close(); showLogin(false); });
 
 start().catch((err) => { document.body.prepend(Object.assign(document.createElement("p"), { className: "error", textContent: err.message })); });
+
+// ----- software updates
+let updateTimer = null;
+async function loadUpdate() {
+  const u = await api("GET", "/api/update");
+  text($("upd-version"), u.version === "0" ? "a development copy" : u.version);
+  const pending = u.ready || u.found;
+  const installer = u.installer || {};
+  let line = "";
+  if (!u.can_update) line = "This copy of the software cannot be updated from here (it has no update key).";
+  else if (u.busy) line = "Fetching the update…";
+  else if (installer.state === "installing") line = "Installing version " + installer.version + "; the device restarts its software…";
+  else if (u.ready) line = "Version " + u.ready.version + " is ready to install.";
+  else if (u.found) line = "Version " + u.found.version + " is available.";
+  else if (u.online && u.checked) line = "Up to date (checked " + new Date(u.checked * 1000).toLocaleString() + ").";
+  else if (!u.online) line = "Updates come as files (no update address is set).";
+  if (["installed", "rolled back", "failed"].includes(installer.state) && installer.message) line += " Last: " + installer.message;
+  if (u.error) line += " Problem: " + u.error;
+  text($("upd-status"), line);
+  text($("upd-notes"), pending && pending.notes ? "What is new: " + pending.notes : "");
+  $("btn-upd-install").hidden = !pending || !u.can_update || u.busy || installer.state === "installing";
+  $("btn-upd-check").hidden = !u.online;
+  $("btn-upd-rollback").hidden = !u.previous || installer.state === "installing";
+  $("upd-check").checked = (u.settings || {}).check !== false;
+  $("upd-auto").checked = (u.settings || {}).auto_install !== false;
+  clearTimeout(updateTimer);
+  if (u.busy || installer.state === "installing") updateTimer = setTimeout(() => loadUpdate().catch(() => {}), 4000);
+}
+$("btn-upd-check").addEventListener("click", async () => {
+  text($("upd-msg"), "Looking…");
+  try { await api("POST", "/api/update/check"); text($("upd-msg"), ""); } catch (err) { text($("upd-msg"), err.message); }
+  loadUpdate().catch(() => {});
+});
+$("btn-upd-install").addEventListener("click", async () => {
+  if (!confirm("Install the update now? The character stops for a minute or two while the software restarts.")) return;
+  try { await api("POST", "/api/update/install"); text($("upd-msg"), "Started."); } catch (err) { text($("upd-msg"), err.message); }
+  setTimeout(() => loadUpdate().catch(() => {}), 1500);
+});
+$("btn-upd-rollback").addEventListener("click", async () => {
+  if (!confirm("Go back to the previous version of the software?")) return;
+  try { await api("POST", "/api/update/rollback"); text($("upd-msg"), "Going back…"); } catch (err) { text($("upd-msg"), err.message); }
+});
+for (const id of ["upd-check", "upd-auto"]) {
+  $(id).addEventListener("change", () => api("PUT", "/api/update/settings",
+    { check: $("upd-check").checked, auto_install: $("upd-auto").checked }).catch((err) => text($("upd-msg"), err.message)));
+}
+$("upd-file").addEventListener("change", async () => {
+  const file = $("upd-file").files[0];
+  if (!file) return;
+  text($("upd-msg"), "Checking the update file…");
+  try {
+    const r = await api("PUT", "/api/update/file", undefined, file);
+    text($("upd-msg"), "Version " + r.version + " checked and ready: press Install the update.");
+  } catch (err) { text($("upd-msg"), err.message); }
+  $("upd-file").value = "";
+  loadUpdate().catch(() => {});
+});

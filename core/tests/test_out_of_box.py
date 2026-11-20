@@ -72,7 +72,8 @@ class OutOfBoxTest(unittest.IsolatedAsyncioTestCase):
             device.memory("aria").set_notes("- likes tea\n")
             os.makedirs(os.path.join(d, "models", "stt"))
             await device.factory_reset()
-            self.assertEqual(sorted(os.listdir(d)), ["card.inp", "current-map.json", "current-stage.json", "current.inp", "models"])
+            self.assertEqual(sorted(os.listdir(d)), ["card.inp", "current-map.json", "current-stage.json", "current.inp", "models",
+                                                     "updates"], "the software's update state is kept, like the speech model")
             with open(os.path.join(d, "current-map.json")) as f:
                 self.assertEqual(f.read().strip(), "{}", "no movement settings are kept")
             self.assertEqual(restarted, [1])

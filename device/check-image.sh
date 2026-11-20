@@ -41,6 +41,12 @@ check "core service installed" test -f "$ROOT/opt/companion/core/companion/__mai
 check "settings page installed" test -f "$ROOT/opt/companion/core/companion/console/index.html"
 check "character program installed (64-bit ARM)" sh -c "file -b '$ROOT/opt/companion/bin/stage' | grep -q aarch64"
 check "full-body animations for 3D avatars installed" sh -c "ls '$ROOT/opt/companion/share/vrma/idle.vrma'"
+check "software in its version's folder (releases/, current)" sh -c "readlink '$ROOT/opt/companion/current' | grep -q '^releases/' && test -L '$ROOT/opt/companion/core'"
+check "the software knows its version" sh -c "grep -qE '^[0-9]' '$ROOT/opt/companion/core/companion/VERSION'"
+check "updates can be checked (the owner's update key)" test -s "$ROOT/opt/companion/share/update-key.pem"
+check "the updater is installed" test -x "$ROOT/opt/companion/updater/companion-update.py"
+check "update requests start the updater" enabled multi-user.target companion-update.path
+check "an update the power cut short is finished or undone at start" enabled multi-user.target companion-update-boot.service
 check "Python environment with on-device speech recognition" sh -c "ls '$ROOT'/opt/companion/venv/lib/python3*/site-packages | grep -q sherpa_onnx"
 check "speech model shipped" test -f "$ROOT/var/lib/companion/models/stt/encode.int8.onnx"
 check "on-device voice shipped" test -f "$ROOT/var/lib/companion/models/tts/en_US-libritts_r-medium.onnx"

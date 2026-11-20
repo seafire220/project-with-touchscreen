@@ -1,0 +1,11 @@
+[Unit]
+Description=Character device: finish, or undo, a software update the power cut short
+After=companion-core.service companion-stage.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/companion/updater/companion-update.py --boot
+TimeoutStartSec=10min
+
+[Install]
+WantedBy=multi-user.target

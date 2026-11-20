@@ -19,6 +19,9 @@
 #   --https-sources      fetch packages over https while building (for proxies
 #                        that refuse plain http); the image keeps its usual sources
 #   --compress           also write OUT.img.xz and its SHA-256 sum
+#   --version V          the software's version (as in its releases; default:
+#                        core/companion/VERSION). Sold devices compare it with
+#                        updates (docs/32-updates.md)
 #
 # Runs on a Linux PC (x86 or ARM) as root. Needs: xz, sfdisk, losetup,
 # e2fsck, resize2fs, mtools, and ARM64 emulation (qemu-user-static with
@@ -30,6 +33,7 @@ STAGE_BINARY="$REPO/stage/target/aarch64-unknown-linux-gnu/release/stage"
 GROW=2G
 EXTRA_CA=""
 COMPRESS=0
+VERSION=""
 HTTPS_SOURCES=0
 ARGS=()
 while [ $# -gt 0 ]; do
@@ -38,6 +42,7 @@ while [ $# -gt 0 ]; do
         --grow) GROW="$2"; shift 2 ;;
         --extra-ca) EXTRA_CA="$2"; shift 2 ;;
         --compress) COMPRESS=1; shift ;;
+        --version) VERSION="$2"; shift 2 ;;
         --https-sources) HTTPS_SOURCES=1; shift ;;
         -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
         *) ARGS+=("$1"); shift ;;
@@ -125,7 +130,7 @@ chroot "$ROOT" env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8
     http_proxy="${http_proxy:-}" https_proxy="${https_proxy:-}" \
     HTTP_PROXY="${HTTP_PROXY:-}" HTTPS_PROXY="${HTTPS_PROXY:-}" \
     PIP_CERT=/etc/ssl/certs/ca-certificates.crt REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
-    /tmp/companion-src/device/install.sh --image --stage-binary /tmp/companion-src/stage-binary
+    /tmp/companion-src/device/install.sh --image --stage-binary /tmp/companion-src/stage-binary ${VERSION:+--version "$VERSION"}
 
 say "Tidying up"
 rm -rf "$SRC"

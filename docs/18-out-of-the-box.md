@@ -40,9 +40,13 @@ running Raspberry Pi OS (`13-build-and-install.md`).
 
 | Where | What | Changes when |
 |---|---|---|
-| `/opt/companion/core` | The core service: conversation, settings page, Wi-Fi setup | Software update |
+| `/opt/companion/releases/<version>/` | One folder per software version; `current` and `previous` point at two of them, and `core`, `bin` and `share` point into `current` (`32-updates.md`) | Software update |
+| `/opt/companion/core` | The core service: conversation, settings page, Wi-Fi setup, updates | Software update |
 | `/opt/companion/venv` | Its Python libraries (on-device speech recognition, Anthropic's library) | Software update |
 | `/opt/companion/bin/stage` | The program that draws the character | Software update |
+| `/opt/companion/updater/` | The installer for updates, run as root when the service asks | Software update |
+| `/opt/companion/share/update-key.pem`, `update.json` | The public half of the owner's update key, and where updates come from | Software update |
+| `/var/lib/companion/updates/` | An update waiting to be installed, and what the installer last did | The device; kept by a reset |
 | `/var/lib/companion/models/stt` | The on-device speech model (shipped in the image) | Software update; kept by a reset |
 | `/var/lib/companion/config/settings.json` | Choices: AI services, volume, listening mode | The owner, in the settings page |
 | `/var/lib/companion/config/secrets.json` | **The owner's API keys**, readable only by the service | The owner, in the settings page |
@@ -107,16 +111,18 @@ owner's things without removing the software.
 | A character cannot be shown | Nothing | After about 25 seconds the screen explains and asks for another character |
 | The service or character program crashes | Nothing | Restarted within seconds |
 | The whole system hangs | Nothing | The hardware watchdog restarts the Pi |
-| A software update fails to start | Nothing (with `device/update.sh`) | It goes back to the previous version |
+| A software update fails to start | Nothing | The installer goes back to the previous version and the settings page says so (`32-updates.md`) |
+| The owner wants the previous version back | Settings page → Device → Software → Go back to the previous version | The version before runs again |
 
 ## Still needed before selling
 
 1. **An original default character**, so a new unit greets the buyer with a
    character rather than text. Needs artwork the owner commissions or draws
    (no existing character may ship, D-024).
-2. **Updates without a computer**: a signed update file uploaded on the
-   settings page, checked against a key built into the image. Designed, not
-   built; today updates use `device/update.sh` over SSH.
+2. ~~**Updates without a computer**~~: built (2026-11-20, `32-updates.md`). Devices look for
+   signed updates twice a day and install them at night, going back by themselves if one does not
+   start; the owner can also choose an update file. Before building sale images, make the update
+   key (`device/release.py keygen`) and set the update address.
 3. **Support access**: a way for the owner to switch on remote maintenance
    for a unit with the buyer's agreement. Off by default.
 4. **Testing on real hardware**, starting with the bring-up tests in

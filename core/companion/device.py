@@ -4,6 +4,7 @@ import datetime
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from .characters import Characters, split_persona
 from .conversation import Conversation
 from .memory import Memory
 from . import motions, screen, speech_text, temperament
+from . import updates as updates_module
 from .network import NetworkError, WiFi
 from .providers import ProviderError
 from .stage_link import StageLink
@@ -22,6 +24,7 @@ from .store import Store, redact, write_atomic
 
 log = logging.getLogger("companion")
 
+UPDATE_CHECK_EVERY = 12 * 3600
 MEMORY_TEMPERATURE = 0.3      # the background memory work: summing up, memories, the diary
 MEMORY_MAX_TOKENS = 700
 
@@ -77,8 +80,11 @@ class Device:
         self.stage_ready_at = 0.0
         self.vrm_failures = {}
         self.last_use = 0.0                 # when the settings page was last used
+        self.last_talk = 0.0                # when the character last replied
         self.summarising = False            # a memory update is under way
         self.memory_retry = 0.0             # after a failed memory update, wait until then
+        self.updates = updates_module.Updates(data_dir)
+        self.updating = False               # an update is being fetched or handed to the installer
 
     # ----- events for the console
     def emit(self, kind, data=None):
@@ -211,7 +217,7 @@ class Device:
         """Remove everything the owner added: characters, memories, keys, settings, timers, Wi-Fi."""
         self.interrupt()
         await self.forget_wifi()
-        keep = {"models"}
+        keep = {"models", "updates"}           # the software's, not the owner's: kept like the speech models
         for name in os.listdir(self.data_dir):
             if name in keep:
                 continue
@@ -443,6 +449,7 @@ class Device:
         elif kind == "saying":
             self.set_state("speaking")
         elif kind == "replied":
+            self.last_talk = time.time()
             self.set_state("listening" if self.listening else "idle")
             asyncio.ensure_future(self.keep_memory())
         self.emit(kind, data)
@@ -496,6 +503,73 @@ class Device:
                     await self.keep_memory(cid)
             except Exception:
                 log.exception("memory watch failed")
+
+    # ----- software updates (docs/32-updates.md)
+    async def install_update(self):
+        """Fetch the update found (if not already) and ask the installer to install it. The service
+        restarts on the new version; if that does not start properly, the installer goes back."""
+        if self.updating:
+            return None
+        self.updating = True
+        try:
+            status = self.updates.status()
+            if not status["ready"]:
+                found = status["found"] or await self.updates.check()
+                if not found:
+                    raise updates_module.UpdateError("there is no newer version")
+                self.emit("update", {"did": "downloading", "version": found["version"]})
+                await self.updates.download(found)
+            version = self.updates.request_install()
+            self.emit("update", {"did": "installing", "version": version})
+            self.show_card(screen.message_card("Updating", "Installing version %s…" % version))
+            return version
+        except updates_module.UpdateError as error:
+            self.emit("error", {"message": "update: %s" % error})
+            raise
+        finally:
+            self.updating = False
+
+    async def update_step(self, now=None):
+        """One pass of keeping the software up to date: look for an update twice a day, fetch it, and
+        install it at night (2 to 5 am) when nobody has talked for half an hour. Returns what it did."""
+        now = now or time.time()
+        settings = self.store.settings().get("updates", {})
+        status = self.updates.status()
+        if not settings.get("check", True) or not status["online"] or self.updating:
+            return None
+        try:
+            found = status["found"]
+            if now - (status.get("checked") or 0) >= UPDATE_CHECK_EVERY:
+                found = await self.updates.check()
+                if found:
+                    self.emit("update", {"did": "found", "version": found["version"]})
+            if not settings.get("auto_install", True) or not (found or status["ready"]):
+                return "found" if found else None
+            hour = datetime.datetime.fromtimestamp(now).hour
+            quiet = now - self.last_talk > 30 * 60 and self.state == "idle"
+            if 2 <= hour < 5 and quiet:
+                await self.install_update()
+                return "installing"
+            if found and not status["ready"]:
+                self.updating = True
+                try:
+                    await self.updates.download(found)
+                finally:
+                    self.updating = False
+                return "downloaded"
+            return "waiting"
+        except updates_module.UpdateError as error:
+            self.emit("error", {"message": "update: %s" % error})
+            return None
+
+    async def update_watch(self, every=30 * 60):
+        await asyncio.sleep(10 * 60 + random.random() * 600)      # devices sold together do not all ask at once
+        while True:
+            try:
+                await self.update_step()
+            except Exception:
+                log.exception("update watch failed")
+            await asyncio.sleep(every)
 
     def set_state(self, state):
         if state != self.state:
@@ -698,6 +772,7 @@ class Device:
             asyncio.ensure_future(self.stage_watch())
         asyncio.ensure_future(self.memory_watch())
         asyncio.ensure_future(self.clock_watch())
+        asyncio.ensure_future(self.update_watch())
 
     # ----- Wi-Fi
     async def network_watch(self, wait=40.0, retry=180.0, busy=120.0):

@@ -32,6 +32,8 @@ DEFAULT_SETTINGS = {
     # with Ayagami) or "inochi2d" (the Inochi2D puppet). Either is used when it is the only one.
     "character_format": "live2d",
     "volume": 0.8,
+    # Software updates (docs/32-updates.md): look for them now and then, and install them at night.
+    "updates": {"check": True, "auto_install": True},
 }
 
 # The secret names the device accepts: one key per provider.

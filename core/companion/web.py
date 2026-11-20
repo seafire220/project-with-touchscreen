@@ -19,9 +19,10 @@ import urllib.parse
 
 from aiohttp import web
 
-from . import animations, cards, motions, package, persona, providers, speech_text, temperament, vrm
+from . import animations, cards, motions, package, persona, providers, screen, speech_text, temperament, vrm
 from . import memory as memory_module
 from .memory import when
+from . import updates as updates_module
 from .network import NetworkError
 from .providers import ProviderError, clone_voice_elevenlabs
 from .stage_link import CONTROL_NAMES, CONTROLS
@@ -30,7 +31,7 @@ SESSION_COOKIE = "companion_session"
 SESSION_HOURS = 12
 MAX_UPLOAD = package.MAX_TOTAL + 1024 * 1024
 STATIC = os.path.join(os.path.dirname(__file__), "console")
-OPEN_PATHS = {"/api/login", "/api/setup", "/api/hello"}
+OPEN_PATHS = {"/api/login", "/api/setup", "/api/hello", "/api/health"}
 
 
 def local_address(remote):
@@ -757,6 +758,74 @@ class Console:
             raise web.HTTPNotFound(text="no diary entry for that day")
         return web.json_response({"ok": True})
 
+    # ----- software updates (docs/32-updates.md)
+    async def health(self, request):
+        """Open to the device itself: the installer asks it whether a new version started properly."""
+        return web.json_response({"ok": True, "version": updates_module.current_version()})
+
+    async def get_update(self, request):
+        status = self.device.updates.status()
+        status["settings"] = self.device.store.settings().get("updates", {})
+        status["busy"] = self.device.updating
+        return web.json_response(status)
+
+    async def check_update(self, request):
+        try:
+            await self.device.updates.check()
+        except updates_module.UpdateError as error:
+            raise web.HTTPBadGateway(text=str(error))
+        return await self.get_update(request)
+
+    async def install_update(self, request):
+        """Install the update that is ready, or fetch the one found and then install it (in the
+        background: the page follows along)."""
+        status = self.device.updates.status()
+        if not status["ready"] and not status["found"]:
+            raise web.HTTPBadRequest(text="there is no update to install")
+
+        async def go():
+            try:
+                await self.device.install_update()
+            except updates_module.UpdateError:
+                pass                                # reported in the device's log and the update's status
+        asyncio.ensure_future(go())
+        return web.json_response({"ok": True})
+
+    async def upload_update(self, request):
+        """An update file the owner chooses (for a device without internet, or from support)."""
+        path = os.path.join(self.device.updates.folder, "upload.part")
+        size = 0
+        with open(path, "wb") as f:
+            async for chunk in request.content.iter_chunked(1024 * 1024):
+                size += len(chunk)
+                if size > updates_module.MAX_UPDATE:
+                    f.close()
+                    os.remove(path)
+                    raise web.HTTPRequestEntityTooLarge(max_size=updates_module.MAX_UPDATE, actual_size=size)
+                f.write(chunk)
+        try:
+            manifest = self.device.updates.accept(path)
+        except updates_module.UpdateError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        return web.json_response({"ok": True, "version": manifest["version"], "notes": manifest.get("notes", "")})
+
+    async def rollback_update(self, request):
+        try:
+            self.device.updates.request_rollback()
+        except updates_module.UpdateError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        self.device.show_card(screen.message_card("Updating", "Going back to the previous version…"))
+        return web.json_response({"ok": True})
+
+    async def put_update_settings(self, request):
+        body = await request.json()
+        if not isinstance(body, dict) or not all(isinstance(body.get(k, True), bool) for k in ("check", "auto_install")):
+            raise web.HTTPBadRequest(text="send check and auto_install as true or false")
+        current = self.device.store.settings().get("updates", {})
+        self.device.store.update_settings({"updates": {"check": body.get("check", current.get("check", True)),
+                                                       "auto_install": body.get("auto_install", current.get("auto_install", True))}})
+        return await self.get_update(request)
+
     # ----- talking from the console
     async def say(self, request):
         body = await request.json()
@@ -881,6 +950,13 @@ def make_app(device):
     r.add_post("/api/interrupt", console.interrupt)
     r.add_post("/api/timezone", console.set_timezone)
     r.add_post("/api/reset", console.reset)
+    r.add_get("/api/health", console.health)
+    r.add_get("/api/update", console.get_update)
+    r.add_post("/api/update/check", console.check_update)
+    r.add_post("/api/update/install", console.install_update)
+    r.add_put("/api/update/file", console.upload_update)
+    r.add_post("/api/update/rollback", console.rollback_update)
+    r.add_put("/api/update/settings", console.put_update_settings)
     r.add_get("/api/wifi", console.wifi_status)
     r.add_post("/api/wifi", console.wifi_join)
     if os.path.isdir(STATIC):

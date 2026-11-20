@@ -266,6 +266,18 @@ Under **AI services**, in three parts:
 - **The settings page** only answers on your home network, behind your
   password.
 
+## Software updates
+
+The device keeps itself up to date. It looks for updates from its maker twice a day, and installs them at night (2 to 5 am) when nobody is talking to the character.
+- Your characters, memories, keys and settings are kept.
+- If an update ever doesn't start properly, the device goes back to the version before by itself. That includes after a power cut in the middle of one.
+
+**Device → Software** shows the version, and lets you:
+- check for updates and install one now;
+- turn automatic installing off;
+- go back to the previous version;
+- install an update file you were sent (for a device without internet).
+
 ## Rights
 
 Use only pictures, models, character cards and voices you have the right to
@@ -300,4 +312,5 @@ own private use. Clone only your own voice, or a voice whose owner agrees.
 | The screen says a 3D avatar is too detailed for this device | Choose another character, or export the avatar again with fewer polygons and smaller textures and add it again |
 | A 3D avatar moves stiffly or the screen is slow | Under **3D animation**, tick *Simplify the drawing*, or choose the *Light* style |
 | A 3D animation you added will not load | It must be a `.vrma` file of at most 16 MB and 2 minutes; the settings page says what is wrong |
+| The screen says *Updating* for more than ten minutes | Unplug it and plug it in again: it starts on the version that works and finishes or undoes the update |
 | Giving the device away | **Device → Reset everything** (password, then type RESET): removes characters, memories, keys, settings, timers and saved Wi-Fi |

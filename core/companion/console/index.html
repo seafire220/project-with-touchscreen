@@ -360,6 +360,18 @@
     <h3>Time zone</h3>
     <p>Alarms use the device's time zone: <strong id="tz-device">…</strong>.
        <button type="button" id="btn-tz">Use this phone's time zone (<span id="tz-phone"></span>)</button> <span id="tz-msg"></span></p>
+    <h3>Software</h3>
+    <p>Version <strong id="upd-version">…</strong>. <span id="upd-status"></span></p>
+    <p id="upd-notes" class="muted"></p>
+    <p><button type="button" id="btn-upd-check">Check for updates</button>
+       <button type="button" id="btn-upd-install" hidden>Install the update</button>
+       <button type="button" id="btn-upd-rollback" hidden>Go back to the previous version</button>
+       <span id="upd-msg"></span></p>
+    <label><input type="checkbox" id="upd-check"> Look for updates automatically</label>
+    <label><input type="checkbox" id="upd-auto"> Install them at night (2 to 5 am), when nobody is talking to the character</label>
+    <p class="muted">Updates come from the device's maker, signed so that the device installs nothing else. Characters,
+      memories, keys and settings are kept. If an update does not start properly, the device goes back to the version
+      before by itself. Without internet, choose an update file: <input type="file" id="upd-file" accept=".update"></p>
     <h3>Change password</h3>
     <form id="pw-form">
       <label>Current <input type="password" id="pw-old" autocomplete="current-password"></label>

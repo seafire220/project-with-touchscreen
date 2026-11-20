@@ -730,3 +730,30 @@ rejected. Settled entries are not reopened without new evidence.
 - **Forgiving of the model**: answers are read in every form a real small
   model wrote, and a plain or empty answer still leaves a summary.
 - Not done: speaking first, encryption at rest, more than one person.
+
+## D-052 — Sold devices update themselves from updates signed with the owner's key
+
+- Date: 2026-11-20. Status: built (owner: "a way to enable the device to
+  receive updates ... even after I've sold the device"; `32-updates.md`).
+- **Signed, not merely downloaded over HTTPS**: an update is accepted only if
+  the owner's Ed25519 key signed its manifest, which names the payload's
+  hash. The update address can be any static host, even a hijacked one; it
+  doesn't matter. The private key stays with the owner, never in the
+  repository or on a device. Older versions are refused, so a known-bad old
+  update can't be replayed.
+- **Split by privilege**: the device's service (unprivileged, read-only
+  system) finds, downloads and checks updates, and asks by writing a request
+  file. A root installer, started by a systemd path unit, checks the
+  signature again itself and does the installing. The service never gains
+  the power to change software.
+- **A folder per version, switched by links**: the new version is unpacked
+  beside the running one, and `current` switches in one step. If it doesn't
+  answer its health check (or the screen program keeps stopping), `current`
+  switches back. A start after a power cut finishes or undoes an update.
+  Each version carries its own system files, so going back restores them.
+- **Night-time, idle installs**, on by default and with a switch to turn them
+  off, plus manual update files for devices without internet.
+- The installer uses only Python's standard library and `openssl`, so it
+  survives an update that breaks the Python packages. New Python packages
+  come as wheels inside the update, never from the internet at install time.
+  System packages need a new image.

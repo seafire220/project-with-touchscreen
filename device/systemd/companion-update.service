@@ -1,0 +1,8 @@
+[Unit]
+Description=Character device: install a software update, or go back to the version before
+
+[Service]
+Type=oneshot
+# Python's own library and openssl only, so a broken update cannot break the updater.
+ExecStart=/usr/bin/python3 /opt/companion/updater/companion-update.py
+TimeoutStartSec=45min

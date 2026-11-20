@@ -1,0 +1,10 @@
+[Unit]
+Description=Character device: watch for a request to install a software update
+
+[Path]
+# The device's service (unprivileged) writes this file to ask; the installer runs as root.
+PathExists=/var/lib/companion/updates/request.json
+Unit=companion-update.service
+
+[Install]
+WantedBy=multi-user.target

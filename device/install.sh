@@ -1,10 +1,12 @@
 #!/bin/bash
 # Turn a fresh Raspberry Pi OS Lite (64-bit) into the character device.
 #
-#   sudo ./device/install.sh [--stage-binary PATH] [--no-model] [--image]
+#   sudo ./device/install.sh [--stage-binary PATH] [--no-model] [--image] [--version V]
 #
 # --image prepares a ready-made device image (device/build-image.sh uses it):
-# no login prompt, no cloud-init, hostname "companion".
+# no login prompt, no cloud-init, hostname "companion". --version names the
+# software's version (default: core/companion/VERSION); sold devices compare it
+# with updates (docs/32-updates.md).
 #
 # Run it from a copy of this repository on the Pi. It installs the packages
 # the device needs, the core service, the stage program and the system
@@ -23,6 +25,7 @@ DATA=/var/lib/companion
 STAGE_BINARY="$REPO/stage/target/aarch64-unknown-linux-gnu/release/stage"
 GET_MODEL=1
 IMAGE=0
+VERSION=""
 # On-device speech recognition model: Moonshine tiny, English, 8-bit (MIT
 # licence, Useful Sensors), packaged for sherpa-onnx. About 120 MB.
 MODEL_URL="https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main"
@@ -38,6 +41,7 @@ while [ $# -gt 0 ]; do
         --stage-binary) STAGE_BINARY="$2"; shift 2 ;;
         --no-model) GET_MODEL=0; shift ;;
         --image) IMAGE=1; shift ;;
+        --version) VERSION="$2"; shift 2 ;;
         -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -68,13 +72,19 @@ for group in video render audio input; do
 done
 install -d -o companion -g companion -m 0750 "$DATA"
 
-say "Installing the software in $APP"
-install -d "$APP" "$APP/bin"
-rm -rf "$APP/core.new"
-cp -r "$REPO/core" "$APP/core.new"
-rm -rf "$APP/core.new/tests" "$APP/core.new"/companion/__pycache__
-if [ -d "$APP/core" ]; then rm -rf "$APP/core.previous"; mv "$APP/core" "$APP/core.previous"; fi
-mv "$APP/core.new" "$APP/core"
+[ -n "$VERSION" ] || VERSION="$(cat "$REPO/core/companion/VERSION" 2>/dev/null || echo 0)"
+say "Installing the software (version $VERSION) in $APP"
+# Each version lives in releases/<version>; current points at the running one, previous at the one
+# before, and core, bin and share point into current. Updates switch these links (docs/32-updates.md).
+REL="$APP/releases/$VERSION"
+STAGING="$REL.new"
+install -d "$APP/releases"
+rm -rf "$STAGING"
+install -d "$STAGING/bin" "$STAGING/share/vrma" "$STAGING/system"
+cp -r "$REPO/core" "$STAGING/core"
+rm -rf "$STAGING/core/tests"
+find "$STAGING/core" -name __pycache__ -prune -exec rm -rf {} +
+printf '%s\n' "$VERSION" > "$STAGING/core/companion/VERSION"
 
 if [ ! -x "$STAGE_BINARY" ]; then
     if command -v cargo >/dev/null; then
@@ -86,11 +96,41 @@ if [ ! -x "$STAGE_BINARY" ]; then
         exit 1
     fi
 fi
-install -m 0755 "$STAGE_BINARY" "$APP/bin/stage.new"
-mv "$APP/bin/stage.new" "$APP/bin/stage"
+install -m 0755 "$STAGE_BINARY" "$STAGING/bin/stage"
 # The built-in full-body animations for 3D (VRM) avatars, read by the stage when one is set to them.
-install -d "$APP/share/vrma"
-install -m 0644 "$REPO"/stage/motions/vrma/*.vrma "$APP/share/vrma/"
+install -m 0644 "$REPO"/stage/motions/vrma/*.vrma "$STAGING/share/vrma/"
+# Where updates come from, and the key they must be signed with (the owner's: device/release.py keygen).
+install -m 0644 "$REPO/device/config/update.json" "$STAGING/share/update.json"
+if [ -f "$REPO/device/config/update-key.pem" ]; then
+    install -m 0644 "$REPO/device/config/update-key.pem" "$STAGING/share/update-key.pem"
+else
+    echo "note: no device/config/update-key.pem, so this software cannot install updates (device/release.py keygen)" >&2
+fi
+[ -f "$REPO/THIRD_PARTY.md" ] && install -m 0644 "$REPO/THIRD_PARTY.md" "$STAGING/share/THIRD_PARTY.md"
+# This version's own system files: the updater installs a version's when it switches to it.
+install -m 0644 "$REPO/device/systemd/companion-core.service" "$REPO/device/systemd/companion-stage.service" \
+    "$REPO/device/systemd/companion-update.service" "$REPO/device/systemd/companion-update.path" \
+    "$REPO/device/systemd/companion-update-boot.service" "$STAGING/system/"
+install -m 0644 "$REPO/device/config/polkit-companion.rules" "$STAGING/system/50-companion.rules"
+install -m 0755 "$REPO/device/updater/companion-update.py" "$STAGING/system/companion-update.py"
+
+# Software installed before versions had their own folders becomes the version before this one.
+if [ -d "$APP/core" ] && [ ! -L "$APP/core" ]; then
+    install -d "$APP/releases/earlier"
+    for part in core bin share; do
+        if [ -d "$APP/$part" ] && [ ! -L "$APP/$part" ]; then mv "$APP/$part" "$APP/releases/earlier/$part"; fi
+    done
+    rm -rf "$APP/core.previous" "$APP/bin.previous"
+    ln -sfn releases/earlier "$APP/current"
+fi
+OLD="$(readlink "$APP/current" 2>/dev/null || true)"
+rm -rf "$REL"
+mv "$STAGING" "$REL"
+ln -sfn "releases/$VERSION" "$APP/current.new" && mv -T "$APP/current.new" "$APP/current"
+for part in core bin share; do ln -sfn "current/$part" "$APP/$part"; done
+if [ -n "$OLD" ] && [ "$OLD" != "releases/$VERSION" ]; then ln -sfn "$OLD" "$APP/previous"; fi
+install -d "$APP/updater"
+install -m 0755 "$REPO/device/updater/companion-update.py" "$APP/updater/companion-update.py"
 
 say "Setting up Python"
 if [ ! -x "$APP/venv/bin/python" ]; then
@@ -148,6 +188,8 @@ fi
 say "Installing system settings"
 install -m 0644 "$REPO/device/systemd/companion-core.service" /etc/systemd/system/
 install -m 0644 "$REPO/device/systemd/companion-stage.service" /etc/systemd/system/
+install -m 0644 "$REPO/device/systemd/companion-update.service" "$REPO/device/systemd/companion-update.path" \
+    "$REPO/device/systemd/companion-update-boot.service" /etc/systemd/system/
 install -m 0644 "$REPO/device/config/pam-companion-stage" /etc/pam.d/companion-stage
 install -d /etc/polkit-1/rules.d /etc/systemd/journald.conf.d /etc/systemd/system.conf.d
 install -m 0644 "$REPO/device/config/polkit-companion.rules" /etc/polkit-1/rules.d/50-companion.rules
@@ -167,7 +209,8 @@ fi
 say "Enabling the services"
 systemctl daemon-reload || true
 systemctl disable getty@tty1.service 2>/dev/null || true
-systemctl enable NetworkManager.service avahi-daemon.service companion-core.service companion-stage.service
+systemctl enable NetworkManager.service avahi-daemon.service companion-core.service companion-stage.service \
+    companion-update.path companion-update-boot.service
 systemctl set-default graphical.target
 
 if [ "$IMAGE" = 1 ]; then
