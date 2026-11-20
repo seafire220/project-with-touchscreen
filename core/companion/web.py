@@ -911,6 +911,14 @@ class Console:
         self.device.set_muted(muted)
         return web.json_response({"muted": self.device.muted, "switch": self.device.mic_switch})
 
+    async def storage_seen(self, request):
+        """The owner has seen that the device's storage had to be made again (and restored a backup)."""
+        try:
+            os.remove(os.path.join(self.device.data_dir, "storage-recovered"))
+        except OSError:
+            pass
+        return web.json_response({"ok": True})
+
     async def family_safe(self, request):
         """Family-safe mode on, or (with the settings-page password again) off."""
         body = await request.json()
@@ -989,6 +997,7 @@ def make_app(device):
     r.add_put("/api/settings", console.put_settings)
     r.add_post("/api/microphone", console.microphone)
     r.add_post("/api/family-safe", console.family_safe)
+    r.add_post("/api/storage-recovered/seen", console.storage_seen)
     r.add_get("/api/keys", console.get_keys)
     r.add_put("/api/keys/{name}", console.put_key)
     r.add_post("/api/test/{which}", console.test_provider)

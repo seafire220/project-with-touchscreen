@@ -1,0 +1,14 @@
+[Unit]
+Description=Character device: first start (the data partition fills the card)
+After=companion-data-check.service
+Requires=companion-data-check.service
+ConditionPathExists=!/data/system/first-boot-done
+ConditionPathIsDirectory=/data/system
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/companion/bin/companion-firstboot
+
+[Install]
+WantedBy=multi-user.target

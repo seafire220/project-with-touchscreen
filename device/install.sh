@@ -106,6 +106,9 @@ fi
 install -m 0755 "$STAGE_BINARY" "$STAGING/bin/stage"
 # The USB connection to a computer (a network adapter on the USB-C port).
 install -m 0755 "$REPO/device/usb/companion-usb-gadget" "$STAGING/bin/companion-usb-gadget"
+# Power-cut protection (used by images built with it, device/build-image.sh): the data partition's check
+# at each start, and its growth at the first.
+install -m 0755 "$REPO/device/readonly/companion-data-check" "$REPO/device/readonly/companion-firstboot" "$STAGING/bin/"
 # The built-in full-body animations for 3D (VRM) avatars, read by the stage when one is set to them.
 install -m 0644 "$REPO"/stage/motions/vrma/*.vrma "$STAGING/share/vrma/"
 # Where updates come from, and the key they must be signed with (the owner's: device/release.py keygen).
@@ -120,7 +123,9 @@ fi
 install -m 0644 "$REPO/device/systemd/companion-core.service" "$REPO/device/systemd/companion-stage.service" \
     "$REPO/device/systemd/companion-update.service" "$REPO/device/systemd/companion-update.path" \
     "$REPO/device/systemd/companion-update-boot.service" "$REPO/device/systemd/companion-usb.service" \
-    "$REPO/device/systemd/companion-usb-dhcp.service" "$REPO/device/config/99-companion-backlight.rules" "$STAGING/system/"
+    "$REPO/device/systemd/companion-usb-dhcp.service" "$REPO/device/config/99-companion-backlight.rules" \
+    "$REPO/device/readonly/companion-var-dirs.service" "$REPO/device/readonly/companion-data-check.service" \
+    "$REPO/device/readonly/companion-firstboot.service" "$STAGING/system/"
 install -m 0600 "$REPO/device/config/companion-usb.nmconnection" "$STAGING/system/"
 install -m 0644 "$REPO/device/config/polkit-companion.rules" "$STAGING/system/50-companion.rules"
 install -m 0755 "$REPO/device/updater/companion-update.py" "$STAGING/system/companion-update.py"

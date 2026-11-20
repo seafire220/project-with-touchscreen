@@ -1,0 +1,36 @@
+#!/bin/bash
+# A read-only system (docs/33-finishing.md, "Power cuts") keeps everything the device saves on its data
+# partition: characters, memories, settings, keys, saved Wi-Fi and the time zone. It must be mounted before
+# the device's services start. The start-up check (fsck) repairs what a power cut can do to it; if it
+# still cannot be mounted, it is made again, empty, so the device works and shows its setup screens, and
+# the settings page asks for a backup to be restored.
+set -u
+LABEL=companion-data
+
+prepare() {
+    mkdir -p /data/companion /data/system/nm-connections /data/system/time
+    chown companion:companion /data/companion /data/system/time
+    chmod 0750 /data/companion
+    chmod 0700 /data/system/nm-connections
+    [ -e /data/system/time/localtime ] || ln -s /usr/share/zoneinfo/Etc/UTC /data/system/time/localtime
+}
+
+DEV="$(blkid -L "$LABEL" 2>/dev/null || true)"
+if [ -z "$DEV" ]; then
+    echo "no data partition (an image without power-cut protection)"
+    exit 0
+fi
+if ! mountpoint -q /data; then
+    e2fsck -p "$DEV" || e2fsck -y "$DEV" || true
+    if ! mount /data; then
+        echo "the data partition could not be repaired: making it again, empty"
+        mkfs.ext4 -F -q -L "$LABEL" "$DEV" && mount /data || { echo "the data partition is unusable"; exit 1; }
+        prepare
+        date > /data/companion/storage-recovered
+        chown companion:companion /data/companion/storage-recovered
+    fi
+fi
+prepare
+mountpoint -q /var/lib/companion || mount /var/lib/companion
+mountpoint -q /etc/NetworkManager/system-connections || mount /etc/NetworkManager/system-connections
+exit 0

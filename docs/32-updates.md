@@ -50,6 +50,10 @@ Otherwise the installer switches back. The settings page then says what happened
 
 The updater itself uses only Python's own library and the `openssl` program, so an update that breaks the device's Python packages can't break the updater.
 
+**On a read-only system** (images built with power-cut protection, `33-finishing.md`), the installer
+makes the system partition writable when it starts, and read-only again when it is done. A power cut in
+between is handled as above. The device's data, on its own partition, is never touched.
+
 ## What the buyer sees
 
 On the settings page, **Device → Software**:

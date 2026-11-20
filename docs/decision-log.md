@@ -814,3 +814,55 @@ rejected. Settled entries are not reopened without new evidence.
 - Stretchy Studio was looked at too (`23-drawing-workflow.md`): its Live2D
   model export does not yet carry the deformers that move a face, and its other
   exports are formats the device does not play. To watch.
+
+## D-056 — The system partition is read-only; what the device saves has its own partition
+
+- Date: 2026-11-20. Status: built (owner: "how do we protect the card from power cuts?"; `33-finishing.md`).
+- The operating system, the software and the models it comes with are mounted read-only, so a power cut
+  cannot damage what the device needs to start. Everything it saves (characters, memories, settings,
+  keys, saved Wi-Fi, the time zone) is on a third partition, `companion-data`, grown to fill the card at
+  the first start; /var's changes and the logs are kept in memory.
+- **Updates make the system writable only while they install**, then read-only again, rather than an
+  overlay that would need a restart after each update.
+- **Raspberry Pi OS's own first-start resize is switched off** (it grows the system partition, which the
+  data partition now follows); the device grows the data partition itself.
+- If the data partition cannot be repaired at start, it is made again, empty, so the device still works,
+  and the settings page asks for a backup. `--writable-system` builds the earlier layout.
+
+## D-057 — The wake word is keyword spotting on the device, and keeps the whole utterance
+
+- Date: 2026-11-20. Status: built (`28-user-guide.md`).
+- sherpa-onnx's English keyword spotter (3.3M parameters, Apache-2.0) listens for any words given as
+  text, so the character's name works without training. Measured on the device's 904 synthetic voices
+  (`core/tools/wake_check.py`): names with clear consonants are heard well ("Lucy" 96%), some short names
+  less ("Mika" 66%, "hello Mika" 91%); no false starts from 21 minutes of everyday speech except a name that
+  sounds the same.
+- Transcribing everything said in the room and looking for the name was tried and rejected: the device's
+  recogniser returns nothing for most short phrases said alone, and it would run far more often.
+- When it wakes mid-sentence, the whole utterance is kept and the wake words taken off, so a question in
+  one breath is answered at once.
+
+## D-058 — Pictures over the character are drawn by the core and shown by the stage
+
+- Date: 2026-11-20. Status: built.
+- Captions, what it heard, the microphone-off sign and hints are drawn as PNGs by the core (Pillow, the
+  same fonts as the setup cards), in a folder in /run, and named to the stage, which only fades them in
+  and out. The stage needs no text layout or fonts. The same pass dims the screen or makes it dark (it
+  then stops moving and drawing the character).
+
+## D-059 — The USB connection is the device's own small gadget, not Raspberry Pi's package
+
+- Date: 2026-11-20. Status: built (owner: "include a usb connection option").
+- Raspberry Pi's `rpi-usb-gadget` (January 2026) shares internet both ways and can make a laptop send its
+  traffic through the device. The device only needs its settings page reachable: a NCM network gadget
+  (built into Windows 11, macOS and Linux), with an address given and no route, so the computer's own
+  internet is untouched. ECM and RNDIS are a setting away if a computer needs them.
+- On a Pi 4 or 5 the USB-C port is also the power input: the computer powers the device while it is
+  connected. A power-and-data splitter in the case would allow both at once (`05-hardware-and-bom.md`).
+
+## D-060 — Family-safe mode cannot be turned off without the password again
+
+- Date: 2026-11-20. Status: built.
+- Its rules come after the character's description and say they come first; a reminder ends the
+  instructions; the memory's work is told too; strong swearing is taken out of what is said as a second
+  line. A child with the settings page open on a parent's phone cannot turn it off.

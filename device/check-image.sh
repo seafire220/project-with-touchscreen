@@ -6,8 +6,9 @@
 # Mounts the image read-only and checks: the software and speech model are
 # installed, the services are enabled, nothing asks for a login on the
 # screen, cloud-init and SSH are off, no API keys or owner data are inside,
-# and the boot settings for the buttons and display are present.
-# Exit status 0 means every check passed.
+# and the boot settings for the buttons and display are present. An image with
+# power-cut protection (a read-only system and a data partition) is checked for
+# that too. Exit status 0 means every check passed.
 set -uo pipefail
 
 IMG="${1:?usage: check-image.sh IMAGE}"
@@ -15,7 +16,11 @@ IMG="${1:?usage: check-image.sh IMAGE}"
 WORK="$(mktemp -d)"
 ROOT="$WORK/root"
 LOOP=""
-cleanup() { mountpoint -q "$ROOT" && umount "$ROOT"; [ -n "$LOOP" ] && losetup -d "$LOOP"; rm -rf "$WORK"; }
+DLOOP=""
+cleanup() {
+    mountpoint -q "$WORK/data" && umount "$WORK/data"; [ -n "$DLOOP" ] && losetup -d "$DLOOP"
+    mountpoint -q "$ROOT" && umount "$ROOT"; [ -n "$LOOP" ] && losetup -d "$LOOP"; rm -rf "$WORK"
+}
 trap cleanup EXIT
 
 part() {
@@ -26,6 +31,19 @@ read -r ROOT_START ROOT_SIZE < <(part 2)
 mkdir -p "$ROOT"
 LOOP="$(losetup -f --show -r -o "$ROOT_START" --sizelimit "$ROOT_SIZE" "$IMG")"
 mount -o ro "$LOOP" "$ROOT"
+# With power-cut protection, what the device saves (and the first setup screen) is on partition 3.
+PARTS="$(sfdisk -J "$IMG" | python3 -c "import json,sys; print(len(json.load(sys.stdin)['partitiontable']['partitions']))")"
+DATA="$ROOT/var/lib/companion"
+if [ "$PARTS" -ge 3 ]; then
+    read -r DATA_START DATA_SIZE < <(part 3)
+    mkdir -p "$WORK/data"
+    DLOOP="$(losetup -f --show -r -o "$DATA_START" --sizelimit "$DATA_SIZE" "$IMG")"
+    mount -o ro "$DLOOP" "$WORK/data"
+    DATA="$WORK/data/companion"
+fi
+model() {   # a model file the device comes with: on the read-only system, or in the data folder
+    test -s "$ROOT/opt/companion/models/$1" || test -s "$DATA/models/$1"
+}
 
 PASS=0
 FAIL=0
@@ -48,13 +66,13 @@ check "the updater is installed" test -x "$ROOT/opt/companion/updater/companion-
 check "update requests start the updater" enabled multi-user.target companion-update.path
 check "an update the power cut short is finished or undone at start" enabled multi-user.target companion-update-boot.service
 check "Python environment with on-device speech recognition" sh -c "ls '$ROOT'/opt/companion/venv/lib/python3*/site-packages | grep -q sherpa_onnx"
-check "speech model shipped" test -f "$ROOT/var/lib/companion/models/stt/encode.int8.onnx"
-check "on-device voice shipped" test -f "$ROOT/var/lib/companion/models/tts/en_US-libritts_r-medium.onnx"
-check "model for matching memories by meaning shipped" test -s "$ROOT/var/lib/companion/models/meaning/model.safetensors"
-check "wake-word model shipped" sh -c "ls '$ROOT'/var/lib/companion/models/wake/encoder-*.int8.onnx && test -s '$ROOT/var/lib/companion/models/wake/bpe.model'"
+check "speech model shipped" model stt/encode.int8.onnx
+check "on-device voice shipped" model tts/en_US-libritts_r-medium.onnx
+check "model for matching memories by meaning shipped" model meaning/model.safetensors
+check "wake-word model shipped" model wake/bpe.model
 check "the wake word can spell names (sentencepiece)" sh -c "ls '$ROOT'/opt/companion/venv/lib/python3*/site-packages | grep -q sentencepiece"
 check "espeak-ng installed for the voice" test -x "$ROOT/usr/bin/espeak-ng"
-check "data folder owned by the service user" sh -c "[ \"\$(stat -c %U '$ROOT/var/lib/companion')\" = companion ] || grep -q '^companion:' '$ROOT/etc/passwd'"
+check "data folder owned by the service user" sh -c "[ \"\$(stat -c %u '$DATA')\" = \"\$(grep '^companion:' '$ROOT/etc/passwd' | cut -d: -f3)\" ]"
 check "core service starts at boot" enabled multi-user.target companion-core.service
 check "character starts at boot" enabled graphical.target companion-stage.service
 check "boots to the character screen (graphical target)" sh -c "readlink '$ROOT/etc/systemd/system/default.target' | grep -q graphical.target"
@@ -66,12 +84,12 @@ check "hostname is companion" grep -qx companion "$ROOT/etc/hostname"
 check "Wi-Fi and time zone permission for the service" test -f "$ROOT/etc/polkit-1/rules.d/50-companion.rules"
 check "small logs" test -f "$ROOT/etc/systemd/journald.conf.d/companion.conf"
 check "hardware watchdog" test -f "$ROOT/etc/systemd/system.conf.d/companion.conf"
-check "a setup screen is ready for the first start" sh -c "test -s '$ROOT/var/lib/companion/card.inp' && test -L '$ROOT/var/lib/companion/current.inp'"
+check "a setup screen is ready for the first start" sh -c "test -s '$DATA/card.inp' && test -L '$DATA/current.inp'"
 check "the screen restarts forever if it fails" grep -q "StartLimitIntervalSec=0" "$ROOT/etc/systemd/system/companion-stage.service"
-check "no API keys inside" sh -c "! test -e '$ROOT/var/lib/companion/config/secrets.json'"
-check "no settings-page password inside" sh -c "! test -e '$ROOT/var/lib/companion/config/console-password'"
-check "no characters or memories inside" sh -c "! ls '$ROOT/var/lib/companion/characters/'* '$ROOT/var/lib/companion/memory/'* >/dev/null 2>&1"
-check "no saved Wi-Fi networks inside" sh -c "! ls '$ROOT'/etc/NetworkManager/system-connections/* >/dev/null 2>&1"
+check "no API keys inside" sh -c "! test -e '$DATA/config/secrets.json'"
+check "no settings-page password inside" sh -c "! test -e '$DATA/config/console-password'"
+check "no characters or memories inside" sh -c "! ls '$DATA/characters/'* '$DATA/memory/'* >/dev/null 2>&1"
+check "no saved Wi-Fi networks inside" sh -c "! ls '$ROOT'/etc/NetworkManager/system-connections/* '$WORK'/data/system/nm-connections/* >/dev/null 2>&1"
 check "no build leftovers" sh -c "! test -e '$ROOT/tmp/companion-src' && ! test -e '$ROOT/usr/local/share/ca-certificates/build-extra-ca.crt'"
 check "buttons and display in the boot settings" sh -c "mtype -i '$IMG@@$BOOT_START' ::config.txt | grep -q 'gpio-key,gpio=17'"
 check "the USB-C port can be a USB device (dwc2)" sh -c "mtype -i '$IMG@@$BOOT_START' ::config.txt | grep -q '^dtoverlay=dwc2,dr_mode=peripheral'"
@@ -81,6 +99,16 @@ check "the device's end of the USB connection (readable by root only)" sh -c "[ 
 check "the gadget program is installed" test -x "$ROOT/opt/companion/bin/companion-usb-gadget"
 check "the screen's brightness can be set by the service" test -f "$ROOT/etc/udev/rules.d/99-companion-backlight.rules"
 check "quiet boot" sh -c "mtype -i '$IMG@@$BOOT_START' ::cmdline.txt | grep -q logo.nologo"
+if [ "$PARTS" -ge 3 ]; then
+    fstab="$ROOT/etc/fstab"
+    check "power cuts: the system partition is read-only" sh -c "grep -E '^[^#]+ +/ +ext4 +[^ ]*\\bro\\b' '$fstab' && mtype -i '$IMG@@$BOOT_START' ::cmdline.txt | grep -qw ro"
+    check "power cuts: the data partition is labelled and mounted at /data" sh -c "blkid -o value -s LABEL '$DLOOP' | grep -qx companion-data && grep -q '^LABEL=companion-data +/data ' '$fstab'"
+    check "power cuts: the device's data, Wi-Fi and /var go where they can be written" sh -c "grep -q '^/data/companion +/var/lib/companion ' '$fstab' && grep -q '^/data/system/nm-connections +/etc/NetworkManager/system-connections ' '$fstab' && grep -q '^overlay +/var overlay' '$fstab'"
+    check "power cuts: the data partition is checked, and grows at the first start" sh -c "ls '$ROOT'/etc/systemd/system/multi-user.target.wants/companion-data-check.service '$ROOT'/etc/systemd/system/multi-user.target.wants/companion-firstboot.service && test -x '$ROOT/opt/companion/bin/companion-data-check' && test -x '$ROOT/opt/companion/bin/companion-firstboot'"
+    check "power cuts: Raspberry Pi OS's own first-start resize is off" sh -c "! mtype -i '$IMG@@$BOOT_START' ::cmdline.txt | grep -qw resize && [ \"\$(readlink '$ROOT/etc/systemd/system/rpi-resize.service')\" = /dev/null ]"
+    check "power cuts: logs in memory, name servers in /run, time zone on the data partition" sh -c "grep -q 'Storage=volatile' '$ROOT'/etc/systemd/journald.conf.d/zz-companion-readonly.conf && [ \"\$(readlink '$ROOT/etc/resolv.conf')\" = /run/NetworkManager/resolv.conf ] && [ \"\$(readlink '$ROOT/etc/localtime')\" = /data/system/time/localtime ] && test -L '$WORK/data/system/time/localtime'"
+    check "power cuts: the models the device comes with are on the read-only system" test -s "$ROOT/opt/companion/models/stt/encode.int8.onnx"
+fi
 
 echo
 echo "$PASS passed, $FAIL failed"

@@ -38,6 +38,18 @@ running Raspberry Pi OS (`13-build-and-install.md`).
 
 ## What is on the card
 
+The card has three partitions (images built with power-cut protection, the default since 2026-11-20;
+`33-finishing.md`):
+
+| Partition | Mounted | Holds |
+|---|---|---|
+| 1, `bootfs` (512 MB, FAT) | `/boot/firmware`, read-only | The Pi's firmware, kernel and boot settings |
+| 2, `rootfs` (about 4.3 GB) | `/`, **read-only** | Raspberry Pi OS, the device's software and its versions, the models it came with (`/opt/companion/models`) |
+| 3, `companion-data` (512 MB in the image; fills the card from the first start) | `/data` | `/data/companion` (mounted at `/var/lib/companion`), saved Wi-Fi (at `/etc/NetworkManager/system-connections`), the time zone |
+
+`/var`'s other changes and the logs are kept in memory. Updates make partition 2 writable only while
+they install.
+
 | Where | What | Changes when |
 |---|---|---|
 | `/opt/companion/releases/<version>/` | One folder per software version; `current` and `previous` point at two of them, and `core`, `bin` and `share` point into `current` (`32-updates.md`) | Software update |
@@ -47,8 +59,8 @@ running Raspberry Pi OS (`13-build-and-install.md`).
 | `/opt/companion/updater/` | The installer for updates, run as root when the service asks | Software update |
 | `/opt/companion/share/update-key.pem`, `update.json` | The public half of the owner's update key, and where updates come from | Software update |
 | `/var/lib/companion/updates/` | An update waiting to be installed, and what the installer last did | The device; kept by a reset |
-| `/var/lib/companion/models/stt` | The on-device speech model (shipped in the image) | Software update; kept by a reset |
-| `/var/lib/companion/models/meaning` | The model that matches memories by meaning (potion-base-8M, about 30 MB) | Software update; kept by a reset |
+| `/opt/companion/models/` | The models the device comes with: speech recognition, the voice, matching by meaning, the wake word (in `/var/lib/companion/models` on a device installed by hand) | Rarely |
+| `/var/lib/companion/models/` | Models an update brings, used in place of those above | Software update; kept by a reset |
 | `/var/lib/companion/config/settings.json` | Choices: AI services, volume, listening mode | The owner, in the settings page |
 | `/var/lib/companion/config/secrets.json` | **The owner's API keys**, readable only by the service | The owner, in the settings page |
 | `/var/lib/companion/config/console-password` | The settings-page password, hashed | The owner |
@@ -74,10 +86,12 @@ No separate storage module: the microSD card is the device's storage. On the Rad
 
 | What | Size |
 |---|---|
-| Raspberry Pi OS Lite and the packages the device adds | about 3 GB (the image is 5.2 GB, with 2 GB left free for growth; the card's partition grows to fill the card at first start) |
+| Raspberry Pi OS Lite and the packages the device adds | about 3 GB (the system partition is 4.3 GB, with 2 GB left free for software versions; the image is 5.7 GB) |
 | The device's software: core, settings page, stage program (5 MB), animations | under 15 MB a version; two versions are kept for going back, plus one update waiting (30 to 50 MB) |
 | Models: speech recognition 120 MB, voice 80 MB, matching by meaning 30 MB | 230 MB |
-| Logs (capped) | at most 40 MB |
+| The wake-word model | 5 MB |
+| The data partition's own space | 512 MB at first; then the rest of the card |
+| Logs | in memory, at most 20 MB (on the card, at most 40 MB, on images without power-cut protection) |
 | **A 2D character** (picture-made, Live2D or Inochi2D) | 5 to 50 MB each |
 | **A 3D avatar** (VRM, after import shrinks its textures) | 10 to 160 MB each, typically 20 to 60 |
 | **Memory**: conversations, every word, memories, diary | about 5 MB per character per year of daily talk |

@@ -127,6 +127,10 @@ async function setMicrophone(muted, where) {
   try { showMicrophone(Object.assign(await api("POST", "/api/microphone", { muted }), { muted })); text(where, ""); }
   catch (err) { text(where, err.message); }
 }
+$("btn-storage-seen").addEventListener("click", async () => {
+  await api("POST", "/api/storage-recovered/seen", {});
+  $("storage-recovered").hidden = true;
+});
 $("btn-mic").addEventListener("click", () => setMicrophone(!state.muted, $("mic-msg")));
 $("btn-unmute").addEventListener("click", () => setMicrophone(false, $("mic-msg")));
 
@@ -382,6 +386,7 @@ function setStatus(s) {
   text($("home-state"), s.state);
   text($("btn-listen"), s.listening ? "Stop listening" : "Start listening");
   showMicrophone(s);
+  if (s.storage_recovered !== undefined) $("storage-recovered").hidden = !s.storage_recovered;
   if (s.backlight !== undefined) $("dev-brightness-row").hidden = !s.backlight;
   if (s.usb) {
     $("usb-status").hidden = !s.usb.available;

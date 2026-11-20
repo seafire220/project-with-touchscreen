@@ -1,7 +1,8 @@
 # What else would make it complete and polished
 
 Status: 2026-11-20. The owner asked for a review of anything else that would make the product more complete
-and polished. This is that review, in order of importance, with what was built in the same round marked.
+and polished. This is that review, in order of importance, with what was built marked. The "strongly
+recommended" items and power-cut protection were built in the next round, the same day.
 Everything below is about the product as a buyer meets it; `21-roadmap.md` keeps the overall order of work.
 
 ## Built in this round
@@ -15,14 +16,25 @@ Everything below is about the product as a buyer meets it; `21-roadmap.md` keeps
 | ✓ | **Backup and restore**: every character with its memory, choices and animations, and the settings, in one file. Keys, the password and Wi-Fi are never in it. For keeping, or for moving to a new device or a bigger card | Device tab |
 | ✓ | **A support report**: versions, board, storage, settings, which keys are set, recent problems and logs. No keys, no passwords, nothing anyone said. A buyer can email it to you | Device tab |
 
+Built in the next round (2026-11-20), at the owner's request:
+
+| | What | Where |
+|---|---|---|
+| ✓ | **Power-cut protection**: a read-only system partition and a separate data partition (below) | `device/build-image.sh`, `device/readonly/` |
+| ✓ | **A wake word**: "hey", "hi" or "hello" and the character's name, or the owner's own words; in one breath with the question | `28-user-guide.md`, `core/companion/wakeword.py` |
+| ✓ | **Captions**, and optionally what it heard | `stage/src/overlay.rs`, `core/companion/overlays.py` |
+| ✓ | **The screen at night**: dark or dim in the owner's hours; the backlight follows where it can be set | `core/companion/backlight.py` |
+| ✓ | **Family-safe mode**; turning it off needs the password again | `core/companion/family.py` |
+| ✓ | **The microphone off, shown on the screen**: a two-second hold, the settings page, or an optional slide switch | `28-user-guide.md` |
+| ✓ | **A USB connection to a computer**: the settings page over a USB-C cable | `device/usb/` |
+| ✓ | **Updates built on GitHub, signed on the owner's Mac** | `32-updates.md` |
+
 ## Before selling (needed)
 
 1. **Run it on the real hardware.** Nothing has run on a Raspberry Pi yet; everything is tested in software and under emulation. Follow `29-hardware-setup.md` and `15-hardware-test-plan.md`: frame rates, memory, boot time, the hotspot, the buttons, the sound card, a whole day of use.
 2. **Make your update key and choose the update address** before building the images you sell (`32-updates.md`). A device made without them can only be updated by re-flashing its card.
-3. **Protect the card from power cuts.** The architecture doc said the system was read-only; it was not (corrected).
-   - Writes are safe now: they are atomic and journaled, the logs are small, and the power button shuts down cleanly.
-   - Proper protection means a read-only system partition plus a separate data partition for characters, memories, settings and the software's versions, so updates can still be written.
-   - Medium work, mostly in the image build; to be tested on the real board.
+3. **Test power-cut protection on the board** (built; "Power cuts" below): pull the plug 50 times, at
+   random moments and while it saves, and check that it always starts, keeps its data, and repairs itself.
 4. **A character in the box.** Commission original art (no existing character may ship, D-024), so a new device greets its buyer with someone rather than text.
 5. **The paperwork:**
    - the seven questions for a lawyer (`19-live2d-format-licensing.md`), including whether advertising the import of buyers' own Live2D models is safe;
@@ -33,14 +45,10 @@ Everything below is about the product as a buyer meets it; `21-roadmap.md` keeps
 
 ## Strongly recommended
 
-7. **A wake word**: say the character's name instead of pressing the button.
-   - sherpa-onnx, already on the device for speech recognition, also does keyword spotting with small models.
-   - The echo-cancelling microphone in the parts list (ReSpeaker Lite) makes it dependable.
-   - Medium work; the single biggest everyday improvement.
-8. **Captions**: what the character says, on the screen, as an option. Helps in noisy rooms, and anyone hard of hearing. Medium work, in the stage.
-9. **Screen sleep at night.** The character already dozes; dimming or switching off the display on a schedule saves the screen and the bedroom. Small to medium, depending on the display's backlight control.
-10. **A family-safe mode**: an option that adds content rules to every reply's instructions, for homes with children. Small.
-11. **A microphone mute you can see**: a hardware switch (or a long press) with the state shown on screen. Some buyers will want it, whatever the software promises.
+7. ~~A wake word~~, 8. ~~captions~~, 9. ~~screen sleep at night~~, 10. ~~a family-safe mode~~, 11. ~~a
+   microphone mute you can see~~: built (above). Still to do for them on the board: the wake word with
+   real voices and the ReSpeaker Lite, captions read from across a room, the Touch Display 2's backlight,
+   and fitting the mute switch (`15-hardware-test-plan.md`).
 
 ## Later
 
@@ -50,6 +58,34 @@ Everything below is about the product as a buyer meets it; `21-roadmap.md` keeps
 15. **Add the settings page to the home screen**, so it opens like an app on a phone. Small.
 16. **Calendar, weather, smart home**, as tools the character can use. Medium each.
 17. **Hearing about failed updates**: an opt-in report to you when a device goes back to an earlier version. Small, with a privacy statement.
+
+## Power cuts: how the card is protected
+
+A microSD card can be damaged if the power goes while it is being written: the file being written, and
+sometimes data near it on the card. Images built now (`device/build-image.sh`; `--writable-system` builds
+the earlier layout) protect against that in layers:
+
+| Layer | What it does |
+|---|---|
+| **A read-only system** | The system partition (the operating system, the software, the models it came with) is mounted read-only, so in normal use nothing writes to it at all, and a power cut cannot damage it. The device always starts |
+| **A data partition** | Everything the device saves goes on a third partition, `companion-data`: characters, memories, settings, keys, saved Wi-Fi, the time zone. It is made small in the image and grows to fill the card at the first start |
+| **Changes kept in memory** | /var (logs, the network's state, temporary files) is an overlay whose changes live in memory; the logs are kept in memory, 20 MB at most |
+| **Careful writes** | Every file the device saves is written whole and then swapped in (`write_atomic`), so a power cut leaves the old file or the new one, never half of one; the data partition is journaled ext4 |
+| **A check at each start** | The data partition is checked and repaired at start. If it ever cannot be repaired, it is made again, empty, so the device still works; the settings page then asks for the latest backup |
+| **Updates** | An update makes the system writable only while it installs (a minute or two, at night), then read-only again; a power cut in that time is finished or undone at the next start (`32-updates.md`) |
+| **The power button** | Shuts down cleanly |
+
+What it costs: a few hundred MB of the card set aside for the system's own use, logs that start afresh at
+each start, and updates that cannot add operating-system packages (that was already so).
+
+**Hardware that helps further** (not needed for the above to work):
+- A **name-brand A1 or A2 card**, as in the parts list. For production runs, an **industrial or
+  high-endurance card with power-loss protection** (SanDisk Industrial, Kingston Industrial, Swissbit):
+  about A$15–35 for 8–32 GB.
+- A board with **eMMC storage** instead of a card (the Radxa Zero 3W, or a Compute Module): more robust
+  against power cuts than most cards.
+- A small **supercapacitor or battery module** that keeps the board running for a few seconds after the
+  power goes, and shuts it down cleanly: about A$15–40. Worth it only if testing shows a need.
 
 ## Not recommended
 

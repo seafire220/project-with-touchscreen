@@ -1,0 +1,13 @@
+# A read-only system (docs/33-finishing.md, "Power cuts"): /var is an overlay whose changes live in
+# memory (logs, the network's state, temporary files), so nothing writes to the system partition. Its
+# folders are made here, before /var is mounted (see /etc/fstab).
+[Unit]
+Description=Character device: folders for /var in memory
+DefaultDependencies=no
+Before=var.mount local-fs-pre.target
+After=systemd-tmpfiles-setup-dev-early.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/mkdir -p /run/companion-var/upper /run/companion-var/work

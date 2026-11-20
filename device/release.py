@@ -56,6 +56,9 @@ SYSTEM_FILES = {
     "companion-usb-dhcp.service": "device/systemd/companion-usb-dhcp.service",
     "99-companion-backlight.rules": "device/config/99-companion-backlight.rules",
     "companion-usb.nmconnection": "device/config/companion-usb.nmconnection",
+    "companion-var-dirs.service": "device/readonly/companion-var-dirs.service",
+    "companion-data-check.service": "device/readonly/companion-data-check.service",
+    "companion-firstboot.service": "device/readonly/companion-firstboot.service",
 }
 
 
@@ -185,8 +188,9 @@ def _payload(version, stage_binary, requirements=None, wheels=None, models=None,
         _add(tar, "core/companion/VERSION", (version + "\n").encode())
         with open(stage_binary, "rb") as f:
             _add(tar, "bin/stage", f.read(), 0o755)
-        with open(os.path.join(REPO, "device", "usb", "companion-usb-gadget"), "rb") as f:
-            _add(tar, "bin/companion-usb-gadget", f.read(), 0o755)
+        for program in ("usb/companion-usb-gadget", "readonly/companion-data-check", "readonly/companion-firstboot"):
+            with open(os.path.join(REPO, "device", program), "rb") as f:
+                _add(tar, "bin/" + os.path.basename(program), f.read(), 0o755)
         vrma = os.path.join(REPO, "stage", "motions", "vrma")
         for name in sorted(os.listdir(vrma)):
             if name.endswith(".vrma"):

@@ -1,0 +1,14 @@
+[Unit]
+Description=Character device: the data partition, mounted (and repaired or made again if need be)
+DefaultDependencies=no
+After=local-fs.target
+Before=companion-core.service companion-stage.service NetworkManager.service companion-update-boot.service
+ConditionPathIsDirectory=/data
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/companion/bin/companion-data-check
+
+[Install]
+WantedBy=multi-user.target

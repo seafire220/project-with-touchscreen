@@ -46,6 +46,8 @@ personality.
    QR code.
 5. **Put your phone back on your home Wi-Fi** and open the address on the
    screen, or `http://companion.local`.
+
+No phone, or no Wi-Fi? See "Connecting by USB" below.
 6. **Follow "Getting started"** on the settings page's Home tab: add a
    language-model key, choose a voice, add a character, then press the
    button and say hello. Each step links to where it is done. The page also
@@ -69,6 +71,45 @@ The settings page only answers on your home network.
 
 While you speak it looks at you, nods in your pauses and looks up when you
 start. While it thinks it looks away for a moment.
+
+### Saying its name (the wake word)
+
+Turn on **Device → Wake word**, and the character starts listening when you say **"hey"**, **"hi"** or
+**"hello"** and its first name, as well as when you press the button.
+- Say it all in one breath ("Hey Mika, what time is it?") and it answers straight away; or say its name,
+  wait for it to look up, then ask.
+- After it answers, it listens ten seconds more, so you can carry on without its name.
+- You can choose other words (*the words*), and how readily it hears them.
+- It listens only while the character is quiet and the microphone is on. It runs on the device: nothing
+  it hears is kept or sent anywhere.
+
+Some names are heard more easily than others. Tested with the device's own synthetic voices (`core/tools/wake_check.py`):
+
+| Name | Heard at the usual setting | Started by everyday speech |
+|---|---|---|
+| "hey/hi/hello Lucy" | 96% | never, in 21 minutes of speech |
+| "hey/hi/hello Oliver" | 81% | never |
+| "hey/hi/hello Mika" | 66% ("hello Mika" 91%) | only by "hello Micah", which sounds the same |
+
+Names with clear consonants work best. Short names that start with a vowel, like "Emma", are harder: if yours
+is missed, set **how readily it hears them** to *more*, say "hello" rather than "hey", or choose different
+words. The Home tab's *What is happening* shows each time it heard its name.
+
+### Captions
+
+Turn on **Device → Captions** and what the character says is written at the bottom of the screen as it
+says it, a few lines at a time. It helps in a noisy room, or for anyone hard of hearing. *…and what it
+heard* also shows what it heard you say, at the top. Captions come in two sizes.
+
+### The microphone off
+
+**Hold the listen button for two seconds** (or **Device → Microphone**) to turn the microphone off. A
+crossed-out microphone shows in the corner of the screen, and the recording program is stopped: nothing
+is heard, recorded or sent. Hold it for two seconds again to turn it back on. While you hold the button,
+the screen says what letting go will do. It stays off after a restart.
+
+A device can also have a **mute switch** (`29-hardware-setup.md`). While the switch is on, the
+microphone stays off whatever else asks.
 
 ### Things you can ask for
 
@@ -281,6 +322,35 @@ Under **AI services**, in three parts:
 - **The settings page** only answers on your home network, behind your
   password.
 
+## The screen at night
+
+Turn on **Device → Screen at night**: in the hours you choose (11 pm to 7 am to begin with), once
+nobody has talked to it for a minute and a half, the screen goes **dark** (or **dim**). Press the
+button, say its name, or an alarm, and it lights up; it sleeps again a little after. Where the screen's
+backlight can be set (the Raspberry Pi touch screen), there is also a **brightness** slider.
+
+## Family-safe mode
+
+Turn on **Device → Family-safe**, for homes with children. Every reply then follows rules that come
+before the character's own description: nothing unsuitable for a young child, no personal details asked
+for, kind advice to talk to a grown-up about anything worrying. Its memories and diary follow them too, and
+any strong swearing is taken out of what it says before it is spoken or shown.
+- **Turning it off asks for the settings-page password again.**
+- How well the rules are kept depends on the language model: the large cloud models keep them closely; a
+  small model on your own computer may not.
+
+## Connecting by USB
+
+No Wi-Fi to hand, or a phone that won't join the setup network? Connect a computer to the device's
+**USB-C port** with a USB-C cable, and open **http://10.12.194.1** in its browser (or
+`http://companion.local`). The settings page works exactly as over Wi-Fi: set it up, add characters,
+choose Wi-Fi.
+- Windows 11, macOS and Linux need nothing installed. The computer's own internet is untouched.
+- On a Raspberry Pi 4 or 5, the USB-C port is also the power socket: unplug the power supply, and the
+  computer powers the device. Use a USB-C port on the computer (a USB-A port gives too little power).
+  The device then runs on the computer's power, a little quieter and dimmer, until you plug its own
+  supply back in.
+
 ## Software updates
 
 The device keeps itself up to date. It looks for updates from its maker twice a day, and installs them at night (2 to 5 am) when nobody is talking to the character.
@@ -313,13 +383,18 @@ own private use. Clone only your own voice, or a voice whose owner agrees.
 
 | Button | Press | Hold |
 |---|---|---|
-| Listen | Start listening; press again to stop; press while it speaks to interrupt | 12 seconds: forget the settings-page password and the saved Wi-Fi (characters, memories and keys stay), and show the setup screens again |
+| Listen | Start listening; press again to stop; press while it speaks to interrupt | 2 seconds: the microphone off, or on again. 12 seconds: forget the settings-page password and the saved Wi-Fi (characters, memories and keys stay), and show the setup screens again. While you hold it, the screen says which |
 | Power | Shut down cleanly; press again to start | — |
 
 ## Troubleshooting
 
 | Problem | What to do |
 |---|---|
+| It does not hear its name | Is the wake word on (Device), and the microphone on? Try "hello" and its name, or set how readily it hears to *more*, or choose other words |
+| It starts listening when nobody asked | Set how readily it hears its name to *less*, or choose less common words |
+| A crossed-out microphone shows on the screen | The microphone is off: hold the button for two seconds, or slide the mute switch |
+| The screen is dark | It is asleep for the night: press the button. **Device → Screen at night** sets the hours |
+| The settings page says the storage had to be made again | The device's data was damaged (perhaps by a power cut while it saved) and was emptied: restore your latest backup, then put your keys in again |
 | The screen shows *Set up Wi-Fi* again | The device cannot find your Wi-Fi (new router or password?): join its network and choose your Wi-Fi again |
 | The settings page will not open | Is your phone on the same Wi-Fi? Use the address on the screen rather than `companion.local` |
 | Forgot the settings-page password | Hold the listen button for 12 seconds, then set up again (characters, memories and keys stay) |

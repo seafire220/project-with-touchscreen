@@ -177,6 +177,14 @@ Configuration A with the sound card and speaker replaced by:
 | Seeed ReSpeaker Lite | Two microphones with echo cancellation, noise suppression and gain control done on the board; 5 W speaker amplifier; USB | 1 | A$46 *est.* (US$24.90 + post) | Seeed, Core Electronics, Pakronics | Lets the user talk over the character |
 | Speaker, 4 Ω 5 W, about 50 mm | Voice | 1 | A$9 *est.* | AliExpress, Jaycar | Connector to match the board |
 
+Optional, added 2026-11-20 (`33-finishing.md`):
+
+| Part | Purpose | Qty | Cost | Source | Notes |
+|---|---|---|---|---|---|
+| Slide switch, SPDT, panel mount | A microphone mute switch you can see and feel | 1 | A$2 *est.* | Jaycar, AliExpress | GPIO27 to ground when "off" (`29-hardware-setup.md`); the screen shows the state either way |
+| USB-C power and data splitter (for Pi 4 OTG) | Lets a computer connect by USB while the device keeps its own power | 1 | A$15 *est.* | The Pi Hut, AliExpress | Without it, the computer powers the device while connected (`28-user-guide.md`) |
+| Industrial or high-endurance microSD card with power-loss protection, 16–32 GB | Instead of the A1 card, for production | 1 | A$15–35 *est.* | SanDisk Industrial, Kingston Industrial, Swissbit | The software protects the card already (read-only system); this adds a card that survives power cuts mid-write |
+
 The extra A$31 buys echo cancellation that is known to work. Echo is the most
 common reason home-built voice devices feel bad to use, so this is where a
 small premium is justified. Buying the A$18 sound card as well allows a test

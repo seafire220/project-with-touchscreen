@@ -42,6 +42,22 @@ they change a decision.
 | 19 | Restart recovery | `sudo systemctl kill companion-stage`, then the core | Both come back within 5 s |
 | 20 | Echo | Turn listening on and let it speak loudly | It does not answer itself (the microphone is ignored while it speaks) |
 
+## Added on 2026-11-20
+
+| # | Test | How | Pass |
+|---|---|---|---|
+| 21 | Power cuts | With an image built with power-cut protection: pull the plug 50 times, at random moments, ten of them while it saves (just after a reply, or while adding a character) | It always starts; the character, memories and settings are there (the last few seconds' change may be lost); `journalctl -b -u companion-data-check` shows repairs if any; `mount` shows `/` read-only |
+| 22 | First start of a new card | Flash a fresh image to a 32 GB card and start it | `df -h /data` shows the data partition grown to fill the card; second start is no slower |
+| 23 | Updates on a read-only system | Install an update file (Device → Software) | It installs and restarts; `mount` shows `/` read-only again after |
+| 24 | Wake word | Turn it on; say "hello" and the name 20 times from 1 m and 3 m, with the TV off and on; then talk normally near it for an hour | Heard at least 17 of 20 from 1 m; it starts by mistake at most once in the hour. Try *less* and *more*; record the name |
+| 25 | Wake word, one breath | "Hey NAME, what time is it?" | It answers the question without a second step |
+| 26 | Captions | Turn captions on; read them from 2 m and 3 m, in both sizes | Readable from where people sit |
+| 27 | Microphone off | Hold the button 2 s; check `pgrep -a arecord` | The sign shows, `arecord` is not running, a press says the microphone is off; 2 s again turns it on |
+| 28 | Mute switch | Fit the switch (`29-hardware-setup.md`); slide it both ways, also while the device starts | The sign follows the switch, from the start too |
+| 29 | Screen at night | Set the hours to include now; wait two minutes; press the button | The screen goes dark (backlight off: `cat /sys/class/backlight/*/bl_power` shows 4); the button lights it. Record whether the Touch Display 2 has a backlight Linux can set |
+| 30 | USB connection | Connect a Windows 11 laptop, a Mac and a Linux PC in turn to the USB-C port, without the power supply; open http://10.12.194.1 | The page opens with no driver to install; the computer's internet still works; the device stays up on the computer's power while it talks |
+| 31 | Family-safe mode | Turn it on; ask for a rude joke, and something frightening | Polite refusals that change the subject; turning it off asks for the password |
+
 ## Things to measure and feed back
 
 - The sound card's ALSA name, and whether the ReSpeaker Lite's echo

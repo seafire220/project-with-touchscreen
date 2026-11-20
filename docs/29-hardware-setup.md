@@ -63,7 +63,10 @@ inside row, 2, 4, 6... along the edge.
 | 7 | — | 8 | — |
 | **9** | **Ground: listen button** | 10 | — |
 | **11** | **GPIO17: listen button** | 12 | — |
-| 13 | — | **14** | **Ground: power button** |
+| 13 | (GPIO27: mute switch, if fitted) | **14** | **Ground: power button** |
+| 15 | — | 16 | — |
+| 17 | — | 18 | — |
+| 19 | — | 20 | (Ground: mute switch, if fitted) |
 
 1. **Cooling.** Fit the Active Cooler (Pi 5: it clips into two holes and
    plugs into the fan socket) or stick on the heatsinks (Pi 4).
@@ -87,6 +90,12 @@ inside row, 2, 4, 6... along the edge.
 
 No resistors are needed: the software switches on the Pi's own pull-ups for
 both buttons.
+
+**A mute switch (optional).** A slide switch between pin 13 (GPIO27) and pin 20 (ground), closed for
+"microphone off". Then remove the `#` in front of the `gpio-key,gpio=27` line in the boot settings
+(`/boot/firmware/config.txt`, or `device/config/boot-config.txt` before building an image). The
+crossed-out microphone on the screen follows the switch, and while it is on nothing can turn the
+microphone back on.
 
 ## 4. Put the software on the card
 

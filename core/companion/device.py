@@ -29,6 +29,13 @@ from .store import Store, redact, write_atomic
 log = logging.getLogger("companion")
 
 UPDATE_CHECK_EVERY = 12 * 3600
+# Models that came with the device, on its read-only system partition (an image built with power-cut
+# protection, docs/33-finishing.md); those an update brings, in DATA/models, are preferred.
+FACTORY_MODELS = os.environ.get("COMPANION_FACTORY_MODELS", "/opt/companion/models")
+# On such a device the time zone is kept on the data partition: /etc/localtime points here.
+TIME_DIR = "/data/system/time"
+LOCALTIME = "/etc/localtime"
+ZONEINFO = "/usr/share/zoneinfo"
 # Speaking first: what the model is told, how long it listens for an answer, and how much speech-like
 # sound means someone is there.
 GREETING_PROMPT = ("(Nothing has been said yet. You hear someone nearby, most likely them, after %s without "
@@ -71,8 +78,6 @@ class Device:
         self.store = Store(os.path.join(data_dir, "config"))
         self.characters = Characters(os.path.join(data_dir, "characters"))
         self.memory_dir = os.path.join(data_dir, "memory")
-        self.stt_model_dir = os.path.join(data_dir, "models", "stt")
-        self.tts_model_dir = os.path.join(data_dir, "models", "tts")
         self.current_puppet = os.path.join(data_dir, "current.inp")
         self.movement_map = os.path.join(data_dir, "current-map.json")   # read by the stage at start
         # A 3D avatar's animation style, clip folders, drawing cost and shot, also read by the stage at start.
@@ -125,7 +130,6 @@ class Device:
         self.backlight = Backlight()
         self.screen_mode = "on"             # "on", "dim" or "off"
         self.last_activity = time.time()    # the button, speech, the wake word: someone is there
-        self.wake_model_dir = os.path.join(data_dir, "models", "wake")
         self._wake = None                   # the wake-word listener, once built for the words set now
         self._wake_for = None               # what it was built for (words, sensitivity)
         self._wake_building = False
@@ -228,7 +232,7 @@ class Device:
     # ----- time zone, resets
     def timezone(self):
         try:
-            return os.path.relpath(os.path.realpath("/etc/localtime"), "/usr/share/zoneinfo")
+            return os.path.relpath(os.path.realpath(LOCALTIME), os.path.realpath(ZONEINFO))
         except ValueError:
             return ""
 
@@ -236,7 +240,17 @@ class Device:
         if not re.fullmatch(r"[A-Za-z0-9_+\-]+(/[A-Za-z0-9_+\-]+){0,2}", zone or "") or \
                 not os.path.isfile(os.path.join("/usr/share/zoneinfo", zone)):
             raise ValueError("unknown time zone: %s" % zone)
-        await self.run("timedatectl", "set-timezone", zone)
+        link = LOCALTIME
+        if os.path.islink(link) and os.readlink(link).startswith(TIME_DIR + "/"):
+            # A read-only system: the zone is a link on the data partition, which /etc/localtime points at.
+            target = os.path.join(TIME_DIR, "localtime")
+            if os.path.lexists(target + ".new"):
+                os.remove(target + ".new")
+            os.symlink(os.path.join(ZONEINFO, zone), target + ".new")
+            os.replace(target + ".new", target)
+            time.tzset()
+        else:
+            await self.run("timedatectl", "set-timezone", zone)
         self.emit("device", {"timezone": zone})
 
     async def forget_wifi(self):
@@ -300,7 +314,7 @@ class Device:
             key = (json.dumps(settings["stt"], sort_keys=True), json.dumps(self.store.secret_status(), sort_keys=True))
             if getattr(self, "_stt_key", None) != key:
                 self._stt = None
-                self._stt = providers.build_stt(settings, self.store, self.stt_model_dir)
+                self._stt = providers.build_stt(settings, self.store, self.model_dir("stt"))
                 self._stt_key = key
             return self._stt
         if which == "tts":
@@ -310,12 +324,18 @@ class Device:
                 key = json.dumps(settings["tts"], sort_keys=True)
                 if getattr(self, "_tts_key", None) != key:
                     self._tts = None
-                    self._tts = providers.build_tts(settings, self.store, model_dir=self.tts_model_dir)
+                    self._tts = providers.build_tts(settings, self.store, model_dir=self.model_dir("tts"))
                     self._tts_key = key
                 self._tts.set_voice(extra.get("voice") or settings["tts"].get("voice", ""))
                 return self._tts
             return providers.build_tts(settings, self.store, **extra)
         raise ValueError(which)
+
+    def model_dir(self, name):
+        """A model's folder: one an update brought (DATA/models), else the one the device came with."""
+        mine = os.path.join(self.data_dir, "models", name)
+        factory = os.path.join(FACTORY_MODELS, name)
+        return mine if os.path.isdir(mine) or not os.path.isdir(factory) else factory
 
     # ----- characters
     def active_id(self):
@@ -328,7 +348,7 @@ class Device:
     def memory(self, cid=None):
         cid = cid or self.active_id()
         return Memory(os.path.join(self.memory_dir, cid or "_none"),
-                      meaning=meaning_module.load(os.path.join(self.data_dir, "models", "meaning")))
+                      meaning=meaning_module.load(self.model_dir("meaning")))
 
     def activate(self, cid):
         if cid not in self.characters.ids():
@@ -876,7 +896,7 @@ class Device:
                 return
             try:
                 self._wake = await asyncio.get_running_loop().run_in_executor(
-                    None, lambda: wakeword.WakeWord(self.wake_model_dir, words, sensitivity))
+                    None, lambda: wakeword.WakeWord(self.model_dir("wake"), words, sensitivity))
                 self._wake_for, self.wake_error = (words, sensitivity), ""
                 self.emit("device", {"wake_word": "listening for " + ", ".join(w.title() for w in words)})
             except wakeword.WakeWordError as error:
@@ -1114,6 +1134,8 @@ class Device:
             "screen": self.screen_mode,
             "backlight": self.backlight.available,
             "usb": usb_status(),
+            # The data partition was damaged beyond repair and made again (device/readonly/companion-data-check).
+            "storage_recovered": os.path.exists(os.path.join(self.data_dir, "storage-recovered")),
             "wake_word": {"words": [w.title() for w in self.wake_words()],
                           "ready": self._wake is not None, "error": self.wake_error},
             # timedatectl needs systemd running (true on the device, not in every test machine)

@@ -22,6 +22,14 @@
 #   --version V          the software's version (as in its releases; default:
 #                        core/companion/VERSION). Sold devices compare it with
 #                        updates (docs/32-updates.md)
+#   --writable-system    the earlier layout: one writable system partition, no
+#                        separate data partition (no power-cut protection)
+#
+# Power-cut protection (the default, docs/33-finishing.md): the system partition
+# is mounted read-only, so a power cut cannot damage it, and everything the
+# device saves (characters, memories, settings, keys, saved Wi-Fi, the time zone)
+# goes on a third partition, "companion-data", which grows to fill the card at
+# the first start. Updates make the system writable only while they install.
 #
 # Runs on a Linux PC (x86 or ARM) as root. Needs: xz, sfdisk, losetup,
 # e2fsck, resize2fs, mtools, and ARM64 emulation (qemu-user-static with
@@ -35,6 +43,8 @@ EXTRA_CA=""
 COMPRESS=0
 VERSION=""
 HTTPS_SOURCES=0
+READ_ONLY=1
+DATA_SIZE=512M      # the data partition's first size; it grows to fill the card at the first start
 ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -44,17 +54,18 @@ while [ $# -gt 0 ]; do
         --compress) COMPRESS=1; shift ;;
         --version) VERSION="$2"; shift 2 ;;
         --https-sources) HTTPS_SOURCES=1; shift ;;
-        -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
+        --writable-system) READ_ONLY=0; shift ;;
+        -h|--help) sed -n '2,36p' "$0"; exit 0 ;;
         *) ARGS+=("$1"); shift ;;
     esac
 done
-[ ${#ARGS[@]} -eq 2 ] || { sed -n '2,28p' "$0"; exit 2; }
+[ ${#ARGS[@]} -eq 2 ] || { sed -n '2,36p' "$0"; exit 2; }
 SOURCE="${ARGS[0]}"
 OUT="${ARGS[1]}"
 
 say() { printf '\n== %s\n' "$*"; }
 [ "$(id -u)" -eq 0 ] || { echo "run this with sudo" >&2; exit 1; }
-for tool in xz sfdisk losetup e2fsck resize2fs mtype mcopy; do
+for tool in xz sfdisk losetup e2fsck resize2fs mkfs.ext4 mtype mcopy; do
     command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 1; }
 done
 [ -x "$STAGE_BINARY" ] || { echo "no stage program at $STAGE_BINARY (see stage/README.md)" >&2; exit 1; }
@@ -143,13 +154,84 @@ if [ -n "$EXTRA_CA" ]; then
     rm -f "$ROOT/usr/local/share/ca-certificates/build-extra-ca.crt"
     chroot "$ROOT" update-ca-certificates --fresh >/dev/null
 fi
-rm -f "$ROOT/etc/resolv.conf"
-if [ -e "$RESOLV_BACKUP" ] || [ -L "$RESOLV_BACKUP" ]; then cp -a "$RESOLV_BACKUP" "$ROOT/etc/resolv.conf"; fi
+if [ "$READ_ONLY" = 0 ]; then
+    rm -f "$ROOT/etc/resolv.conf"
+    if [ -e "$RESOLV_BACKUP" ] || [ -L "$RESOLV_BACKUP" ]; then cp -a "$RESOLV_BACKUP" "$ROOT/etc/resolv.conf"; fi
+fi
 rm -rf "$ROOT/root/.cache" "$ROOT/var/lib/apt/lists/"*
+
+if [ "$READ_ONLY" = 1 ]; then
+    say "Power-cut protection: a read-only system and a data partition"
+    DATA_STAGE="$WORK/data"
+    mkdir -p "$DATA_STAGE/system/nm-connections" "$DATA_STAGE/system/time"
+    CUID="$(chroot "$ROOT" id -u companion)"
+    CGID="$(chroot "$ROOT" id -g companion)"
+    # The models the device comes with stay on the read-only system (safe even if the data partition has to
+    # be made again); models an update brings go on the data partition, and are preferred.
+    if [ -d "$ROOT/var/lib/companion/models" ]; then
+        rm -rf "$ROOT/opt/companion/models"
+        mv "$ROOT/var/lib/companion/models" "$ROOT/opt/companion/models"
+        chown -R root:root "$ROOT/opt/companion/models"
+        chmod -R a+rX,go-w "$ROOT/opt/companion/models"
+    fi
+    mv "$ROOT/var/lib/companion" "$DATA_STAGE/companion"
+    install -d -m 0750 -o "$CUID" -g "$CGID" "$ROOT/var/lib/companion"
+    if ls "$ROOT"/etc/NetworkManager/system-connections/* >/dev/null 2>&1; then
+        mv "$ROOT"/etc/NetworkManager/system-connections/* "$DATA_STAGE/system/nm-connections/"
+    fi
+    zone="$(readlink "$ROOT/etc/localtime" | sed 's#.*/zoneinfo/##')"
+    ln -sfn "/usr/share/zoneinfo/${zone:-Etc/UTC}" "$DATA_STAGE/system/time/localtime"
+    ln -sfn /data/system/time/localtime "$ROOT/etc/localtime"
+    # NetworkManager writes the name servers in /run; /etc/resolv.conf points there.
+    ln -sfn /run/NetworkManager/resolv.conf "$ROOT/etc/resolv.conf"
+    RESOLV_BACKUP=""
+    install -d "$ROOT/data"
+    sed -i -E 's#^([^ ]+ +/ +ext4 +)defaults,noatime( |$)#\1defaults,noatime,ro\2#' "$ROOT/etc/fstab"
+    sed -i -E 's#^([^ ]+ +/boot/firmware +vfat +)defaults( |$)#\1defaults,ro\2#' "$ROOT/etc/fstab"
+    cat >> "$ROOT/etc/fstab" <<'FSTAB'
+# Power-cut protection (docs/33-finishing.md): the system is read-only; what the device saves is on the
+# data partition; /var's changes are kept in memory.
+LABEL=companion-data  /data  ext4  defaults,noatime,nofail,x-systemd.device-timeout=30  0  2
+overlay  /var  overlay  lowerdir=/var,upperdir=/run/companion-var/upper,workdir=/run/companion-var/work,x-systemd.requires=companion-var-dirs.service  0  0
+/data/companion  /var/lib/companion  none  bind,nofail,x-systemd.requires-mounts-for=/data  0  0
+/data/system/nm-connections  /etc/NetworkManager/system-connections  none  bind,nofail,x-systemd.requires-mounts-for=/data  0  0
+FSTAB
+    install -m 0644 "$REPO"/device/readonly/companion-var-dirs.service "$REPO"/device/readonly/companion-data-check.service \
+        "$REPO"/device/readonly/companion-firstboot.service "$ROOT/etc/systemd/system/"
+    install -d "$ROOT/etc/systemd/journald.conf.d"
+    install -m 0644 "$REPO/device/readonly/journald-readonly.conf" "$ROOT/etc/systemd/journald.conf.d/zz-companion-readonly.conf"
+    chroot "$ROOT" systemctl enable companion-data-check.service companion-firstboot.service
+    # First-start jobs that would write to the system, and timers with nothing to do on a read-only one.
+    for unit in rpi-resize.service systemd-firstboot.service apt-daily.timer apt-daily-upgrade.timer man-db.timer \
+            dpkg-db-backup.timer; do
+        chroot "$ROOT" systemctl mask "$unit" >/dev/null 2>&1 || true
+    done
+    if [ -f "$ROOT/etc/default/fake-hwclock" ]; then
+        sed -i 's#^\#\?FILE=.*#FILE=/data/system/fake-hwclock.data#' "$ROOT/etc/default/fake-hwclock"
+    fi
+fi
 for m in dev/pts dev proc sys; do umount -l "$ROOT/$m"; done
 umount "$ROOT"
 losetup -d "$LOOP"
 LOOP=""
+
+if [ "$READ_ONLY" = 1 ]; then
+    say "Adding the data partition"
+    truncate -s +"$DATA_SIZE" "$OUT"
+    echo "start=$(( (ROOT_START + ROOT_SIZE) / 512 )), type=83" | sfdisk --no-reread --quiet --append "$OUT"
+    read -r DATA_START DATA_BYTES < <(part 3)
+    LOOP="$(losetup -f --show -o "$DATA_START" --sizelimit "$DATA_BYTES" "$OUT")"
+    mkfs.ext4 -q -L companion-data "$LOOP"
+    mkdir -p "$WORK/datamnt"
+    mount "$LOOP" "$WORK/datamnt"
+    cp -a "$DATA_STAGE/." "$WORK/datamnt/"
+    chown "$CUID:$CGID" "$WORK/datamnt/companion" "$WORK/datamnt/system/time"
+    chmod 0750 "$WORK/datamnt/companion"
+    chmod 0700 "$WORK/datamnt/system/nm-connections"
+    umount "$WORK/datamnt"
+    losetup -d "$LOOP"
+    LOOP=""
+fi
 
 say "Boot settings"
 BOOT="$OUT@@$BOOT_START"
@@ -162,6 +244,13 @@ fi
 mtype -i "$BOOT" ::cmdline.txt | tr -d '\r\n' > "$WORK/cmdline.txt"
 if ! grep -q "logo.nologo" "$WORK/cmdline.txt"; then
     printf '%s quiet loglevel=3 logo.nologo vt.global_cursor_default=0\n' "$(cat "$WORK/cmdline.txt")" > "$WORK/cmdline.txt.new"
+    mcopy -o -i "$BOOT" "$WORK/cmdline.txt.new" ::cmdline.txt
+fi
+if [ "$READ_ONLY" = 1 ]; then
+    # Raspberry Pi OS's first-start "resize" grows the system partition, which the data partition now
+    # follows: the data partition is grown instead (companion-firstboot). The system starts read-only.
+    mtype -i "$BOOT" ::cmdline.txt | tr -d '\r\n' | sed -e 's/ resize\b//' -e 's/ ro\b//' > "$WORK/cmdline.txt"
+    printf '%s ro\n' "$(cat "$WORK/cmdline.txt")" > "$WORK/cmdline.txt.new"
     mcopy -o -i "$BOOT" "$WORK/cmdline.txt.new" ::cmdline.txt
 fi
 

@@ -15,10 +15,14 @@ and `share` point into `current`. Installing puts the new version beside the run
 `current` to it, restarts the services and waits for the new version to answer; if it does not, it
 switches back. Characters, memories, keys and settings (in /var/lib/companion) are never touched.
 
+On a device whose system partition is read-only (so a power cut cannot damage it: docs/33-finishing.md),
+the partition is made writable just while an update changes it, and read-only again after.
+
 Only Python's own library and the openssl program are used, so an update that breaks the device's
 Python packages cannot break the updater. Paths can be moved for testing with COMPANION_APP,
 COMPANION_DATA, COMPANION_ETC, COMPANION_SYSTEMCTL and COMPANION_HEALTH.
 """
+import contextlib
 import hashlib
 import json
 import os
@@ -38,6 +42,7 @@ SYSTEMCTL = os.environ.get("COMPANION_SYSTEMCTL", "systemctl")
 HEALTH = os.environ.get("COMPANION_HEALTH", "http://127.0.0.1:80/api/health")
 HEALTH_WAIT = float(os.environ.get("COMPANION_HEALTH_WAIT", "150"))
 STAGE_WATCH = float(os.environ.get("COMPANION_STAGE_WATCH", "20"))
+MOUNT = os.environ.get("COMPANION_MOUNT", "mount")
 UPDATES = os.path.join(DATA, "updates")
 SERVICES = ("companion-core", "companion-stage")
 # The system files a version may carry, and where they go.
@@ -53,6 +58,10 @@ SYSTEM_FILES = {
     "99-companion-backlight.rules": "etc/udev/rules.d/99-companion-backlight.rules",
     # NetworkManager reads only connection files that nobody but root can read (see below).
     "companion-usb.nmconnection": "usr/lib/NetworkManager/system-connections/companion-usb.nmconnection",
+    # Power-cut protection's own units (installed by images built with it).
+    "companion-var-dirs.service": "etc/systemd/system/companion-var-dirs.service",
+    "companion-data-check.service": "etc/systemd/system/companion-data-check.service",
+    "companion-firstboot.service": "etc/systemd/system/companion-firstboot.service",
 }
 MAX_UPDATE = 700 * 1024 * 1024
 
@@ -317,6 +326,39 @@ def prune(keep):
             shutil.rmtree(path, ignore_errors=True)
 
 
+def _read_only(path="/", mounts="/proc/mounts"):
+    """Whether the file system mounted at `path` is mounted read-only."""
+    read_only = False
+    try:
+        with open(mounts, encoding="utf-8") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 4 and parts[1] == path:
+                    read_only = "ro" in parts[3].split(",")      # the last mount there counts
+    except OSError:
+        pass
+    return read_only
+
+
+@contextlib.contextmanager
+def system_writable():
+    """The system partition writable while an update changes it, if it is read-only, and read-only again
+    after. (Only for the real system: tests move ETC elsewhere.)"""
+    was = ETC == "/" and _read_only("/")
+    if was:
+        subprocess.run([MOUNT, "-o", "remount,rw", "/"], check=True)
+        log("made the system partition writable for the update")
+    try:
+        yield
+    finally:
+        if was:
+            os.sync()
+            if subprocess.run([MOUNT, "-o", "remount,ro", "/"]).returncode == 0:
+                log("the system partition is read-only again")
+            else:
+                log("the system partition stays writable until the next start")
+
+
 # ----- what is asked
 def install(request):
     bundle = request.get("bundle", "")
@@ -379,6 +421,15 @@ def rollback():
     return 0
 
 
+def _interrupted():
+    """Whether an update was under way when the device stopped (most starts: no)."""
+    try:
+        with open(os.path.join(UPDATES, "status.json"), encoding="utf-8") as f:
+            return json.load(f).get("state") == "installing"
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def after_boot():
     """At start: an update the power cut short is finished (if the new version answers) or undone."""
     try:
@@ -417,7 +468,10 @@ def _remove(path):
 
 def main():
     if "--boot" in sys.argv[1:]:
-        return after_boot()
+        if not _interrupted():
+            return 0
+        with system_writable():
+            return after_boot()
     request_path = os.path.join(UPDATES, "request.json")
     taken = request_path + ".taken"
     try:
@@ -432,9 +486,11 @@ def main():
     finally:
         _remove(taken)
     if request.get("do") == "install":
-        return install(request)
+        with system_writable():
+            return install(request)
     if request.get("do") == "rollback":
-        return rollback()
+        with system_writable():
+            return rollback()
     set_status("failed", message="an update request that was not understood")
     return 1
 

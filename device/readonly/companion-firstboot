@@ -1,0 +1,24 @@
+#!/bin/bash
+# The first start of a device with a read-only system (docs/33-finishing.md, "Power cuts"): the data
+# partition grows to fill the card, and the device keeps its identity (machine-id) from now on. Runs once.
+set -u
+DEV="$(findmnt -n -o SOURCE /data || true)"
+if [ -n "$DEV" ]; then
+    DISK="/dev/$(lsblk -no pkname "$DEV")"
+    PART="$(cat "/sys/class/block/$(basename "$DEV")/partition")"
+    # The last partition, grown to the end of the card while mounted: the table, the kernel, the file system.
+    if echo ", +" | sfdisk --quiet --no-reread --no-tell-kernel -N "$PART" "$DISK" && partx -u -n "$PART" "$DISK" \
+            && resize2fs "$DEV"; then
+        echo "the data partition fills the card"
+    else
+        echo "the data partition could not be grown; it keeps its size"
+    fi
+fi
+if findmnt -n -o OPTIONS / | tr ',' '\n' | grep -qx ro; then
+    mount -o remount,rw / && systemd-machine-id-setup --commit
+    sync
+    mount -o remount,ro /
+else
+    systemd-machine-id-setup --commit
+fi
+touch /data/system/first-boot-done
