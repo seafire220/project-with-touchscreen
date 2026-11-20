@@ -13,8 +13,10 @@ and fails if any mood or gesture tagged in the reply (and available to the
 character) did not play, if it did not look up as the person started
 speaking, or if it never responded in their pauses. Needs Xvfb. With
 COMPANION_TEST_VOICE set to an on-device voice folder, the reply is spoken
-by that voice instead of a stand-in, so the mouth follows real speech. Options after OUT_DIR go to
-the stage (for a 3D avatar's full-body style: --vrm-animation full).
+by that voice instead of a stand-in, so the mouth follows real speech. With COMPANION_TEST_CAPTIONS
+set, captions are shown as the device shows them (core/companion/overlays.py), and the check fails if
+the stage did not show them. Options after OUT_DIR go to the stage (for a 3D avatar's full-body style:
+--vrm-animation full).
 """
 import asyncio
 import json
@@ -65,9 +67,15 @@ async def main(stage, puppet, out, *options):
             tts = LocalTTS(voice)
         else:
             tts = FakeTTS(seconds_per_char=0.03)
+        overlays = None
+        if os.environ.get("COMPANION_TEST_CAPTIONS"):
+            from companion.overlays import Overlays
+            overlays = Overlays(os.path.join(work, "overlays"), link)       # the stage's folder, beside its socket
+            overlays.screen = (int(ready.get("width") or 360), int(ready.get("height") or 640))
         conv = Conversation(llm=FakeLLM(REPLY, delay=0.02), tts=tts,
                             speaker=Speaker(command=None, realtime=True), stage=link,
-                            memory=Memory(os.path.join(work, "memory")), persona="# Test\n\nYou are a test.")
+                            memory=Memory(os.path.join(work, "memory")), persona="# Test\n\nYou are a test.",
+                            on_caption=overlays.caption if overlays else None)
         link.clock(15.0)                         # mid-afternoon: awake
         await asyncio.sleep(3.0)                 # the stage settles; frame 0 is at rest
         # The person speaks for six seconds, in stretches with pauses, while it listens.
@@ -78,6 +86,8 @@ async def main(stage, puppet, out, *options):
             await asyncio.sleep(0.02)
         link.state("thinking")
         reply = await conv.respond("hello")
+        if overlays:
+            overlays.caption_done()
         await asyncio.sleep(12.0)                # then alone a while
     finally:
         await asyncio.sleep(0.5)
@@ -103,7 +113,8 @@ async def main(stage, puppet, out, *options):
               "gestures_played": gestures, "spoken": reply.spoken, "error": reply.error,
               "drives_first_and_last": [drives[0], drives[-1]] if drives else None,
               "skipped": [(e["name"], e.get("why")) for e in seen if e.get("event") == "gesture_skipped"],
-              "errors_from_stage": [e for e in seen if e.get("event") in ("error", "fatal")]}
+              "errors_from_stage": [e for e in seen if e.get("event") in ("error", "fatal")],
+              "captions_shown": sum(1 for e in mouth if "caption" in (e.get("overlays") or []))}
     print(json.dumps(report, indent=1))
     missing = (wanted_moods - set(moods)) | (wanted_gestures - {g for g, _ in gestures})
     if missing:
@@ -115,8 +126,11 @@ async def main(stage, puppet, out, *options):
     if not responded:
         print("it never responded in the person's pauses")
     clocked = bool(drives) and abs(drives[-1].get("hour", 0) - 15.0) < 0.2
+    captioned = not os.environ.get("COMPANION_TEST_CAPTIONS") or report["captions_shown"] > 0
+    if not captioned:
+        print("no caption was shown")
     ok = (not reply.error and "speaking" in states and not report["errors_from_stage"] and not missing
-          and looked_up and responded and clocked)
+          and looked_up and responded and clocked and captioned)
     return 0 if ok else 1
 
 
