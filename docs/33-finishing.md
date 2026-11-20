@@ -25,7 +25,7 @@ Everything below is about the product as a buyer meets it; `21-roadmap.md` keeps
    - Medium work, mostly in the image build; to be tested on the real board.
 4. **A character in the box.** Commission original art (no existing character may ship, D-024), so a new device greets its buyer with someone rather than text.
 5. **The paperwork:**
-   - the six questions for a lawyer (`19-live2d-format-licensing.md`);
+   - the seven questions for a lawyer (`19-live2d-format-licensing.md`), including whether advertising the import of buyers' own Live2D models is safe;
    - in Australia, an electrical safety and EMC declaration (RCM) for the finished product. A pre-certified Pi and power supply help, but don't cover the whole device;
    - a privacy statement, saying what goes to the AI services the buyer chooses;
    - warranty and returns terms.
