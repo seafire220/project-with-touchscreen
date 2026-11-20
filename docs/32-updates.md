@@ -63,44 +63,57 @@ On the settings page, **Device → Software**:
 
 While installing, the screen says "Updating". The character comes back in a minute or two.
 
-## Setting up, once
+## Set up (done, 2026-11-20)
 
-1. **Make your key pair**, on your own computer:
+| | |
+|---|---|
+| **Your key pair** | Made with `release.py keygen`. The public half is `device/config/update-key.pem`, fingerprint **3D92 866F 8686 CCB3**. The private half is on your computer, normally `~/companion-signing/update-key-private.pem` |
+| **The update address** | [seafire220/update-repo](https://github.com/seafire220/update-repo), a public repository just for updates. `device/config/update.json` points devices at `https://github.com/seafire220/update-repo/releases/latest/download/latest.json`, which always serves the newest release's files. Until the first release it answers "not found", which devices take as "up to date" |
 
-   ```bash
-   python3 device/release.py keygen
-   ```
+Build the device images you sell from now on. `device/check-image.sh` fails an image that has no update key.
+A device made before this can only be updated by re-flashing its card.
 
-   This writes `~/companion-signing/update-key-private.pem` and copies the public half to `device/config/update-key.pem`.
-   - **Commit the public key.** Every image and update carries it.
-   - **Never commit the private key**, never put it on a device, and keep a backup somewhere safe (a password manager, or an encrypted USB stick).
-   - Whoever has the private key can update every device you have sold. Lose it, and you can never update them again.
-2. **Choose an update address** and put it in `device/config/update.json`, for example:
+### Your keys
 
-   ```json
-   {"url": "https://github.com/YOU/companion-updates/releases/latest/download/latest.json"}
-   ```
+The two `.pem` files are **plain text**. Nothing opens them, and nothing needs to:
+- Double-clicking one on a Mac starts Keychain Access, which can't use this kind of key. That's expected and harmless. Keychain and passkeys play no part here.
+- To look at the public key, open it in TextEdit. Never paste the private key anywhere: not in a chat, an email, GitHub or a cloud note.
+- The release tool reads the private key by its place on disk. Leave it in `~/companion-signing` (in Finder: **Go → Home → companion-signing**), and the tool finds it by itself.
 
-   Any HTTPS host that serves files works:
-   - A **public** GitHub repository just for updates, with each update as a release, is free. Its `releases/latest/download/` address always serves the newest release's files.
-   - Don't use this code's own repository if it is private: devices can't log in to it.
-   - Cloudflare R2 or Pages, S3, or your own website also work.
-3. **Build the device images after this.** `device/check-image.sh` now fails an image that has no update key. A device made without the key, or before this change, can only be updated by re-flashing its card.
+**Back the private key up** somewhere safe and offline-ish: an encrypted USB stick, or a password manager that stores files (1Password, Bitwarden). Lose it, and you can never update the devices you have sold. Whoever has it can update all of them.
+
+**Check it**, in Terminal, in the project folder:
+
+```bash
+python3 device/release.py check
+```
+
+It prints both keys' fingerprints and says whether they match; it should say `3D92 866F 8686 CCB3` twice.
+Nothing here needs OpenSSL: the tool signs in plain Python (`device/ed25519.py`), with exactly the bytes OpenSSL makes (tested). That matters on a Mac, whose `openssl` may not do this kind of key.
 
 ## Releasing an update
 
-1. Build the stage program for the Pi (`stage/README.md`).
-2. Make the update, with a version newer than the last (dates work well; a second update on the same day is `2026.12.1.2`):
+The update is built on GitHub, and signed on your computer, so the private key never leaves it.
+
+1. **Build it.** On GitHub, in the project repository: **Actions → Make an update → Run workflow**. Give the version, newer than the last (dates work well: `2026.12.1`; a second one that day is `2026.12.1.2`), and what changed. The workflow (`.github/workflows/make-update.yml`) runs every test, builds the screen program for the Pi, and makes `companion-2026.12.1.unsigned.update`. About fifteen minutes.
+2. **Download it.** On the finished run's page, under *Artifacts*, download `companion-2026.12.1-unsigned` and unzip it. It also holds the screen program on its own (`stage-aarch64`), for building device images.
+3. **Sign it**, in Terminal, in the project folder:
 
    ```bash
-   python3 device/release.py build --version 2026.12.1 \
-       --stage-binary stage/target/aarch64-unknown-linux-gnu/release/stage \
-       --key ~/companion-signing/update-key-private.pem --notes "Kinder greetings; fixes the alarm sound."
+   python3 device/release.py sign ~/Downloads/companion-2026.12.1-unsigned/companion-2026.12.1.unsigned.update
    ```
 
-   This writes `dist/companion-2026.12.1.update` and `dist/latest.json`. It refuses to sign with a key that doesn't match `device/config/update-key.pem`, because devices would refuse that update.
-3. Try it on your own device first: **Device → Software → choose an update file**.
-4. Publish both files: as a new GitHub release, or uploaded to your host with `latest.json` last. Devices pick it up within half a day, and install it the next night.
+   It shows the version, notes and size, checks the update carries your public key and the update address (so devices can still update after installing it), and writes `companion-2026.12.1.update` and `latest.json` next to it.
+4. **Try it** on your own device first: **Device → Software → choose an update file**.
+5. **Publish it.** In [seafire220/update-repo](https://github.com/seafire220/update-repo): **Releases → Draft a new release**, tag `v2026.12.1`, attach both files, **Publish release**. Devices pick it up within half a day, and install it the next night.
+
+Building on your own computer instead also works, if it has a cross-compiler for the Pi (`stage/README.md`):
+
+```bash
+python3 device/release.py build --version 2026.12.1 --stage-binary stage/target/aarch64-unknown-linux-gnu/release/stage --notes "Kinder greetings"
+```
+
+It refuses to sign with a key that doesn't match `device/config/update-key.pem`, because devices would refuse that update.
 
 **Python packages and models.** If a version needs a new Python package, add `--requirements FILE --wheels DIR`. The wheels must be built for 64-bit ARM, and they install from the update itself, never from the internet. To ship a new model, use `--models DIR`.
 

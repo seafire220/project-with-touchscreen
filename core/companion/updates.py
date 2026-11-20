@@ -201,6 +201,11 @@ class Updates:
         session = session or aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=CHECK_TIMEOUT))
         try:
             async with session.get(where["url"]) as r:
+                if r.status == 404:
+                    # Nothing published there yet (a GitHub repository's latest release answers 404 until its
+                    # first one): up to date.
+                    self._save(checked=int(time.time()), found=None, error=None)
+                    return None
                 if r.status != 200:
                     raise UpdateError("the update address answered %d" % r.status)
                 text = await r.text()

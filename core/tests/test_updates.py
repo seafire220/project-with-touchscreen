@@ -140,12 +140,82 @@ class SignatureTest(unittest.TestCase):
 
     def test_the_release_tool_will_not_sign_with_a_key_devices_do_not_have(self):
         stranger_private, _ = make_key(self.dir.name, "stranger")
-        with self.assertRaisesRegex(SystemExit, "does not match"):
+        with self.assertRaisesRegex(self.shop.tool.ReleaseError, "does not match"):
             self.shop.tool.build("2026.12.1", self.shop.stage, stranger_private, self.dir.name, any_arch=True,
                                  public_key=self.shop.public)
-        with self.assertRaisesRegex(SystemExit, "64-bit ARM"):
+        with self.assertRaisesRegex(self.shop.tool.ReleaseError, "64-bit ARM"):
             self.shop.tool.build("2026.12.1", self.shop.stage, self.shop.private, self.dir.name,
                                  public_key=self.shop.public)
+
+    def test_signatures_made_in_python_are_what_openssl_makes(self):
+        # The release tool signs without OpenSSL (a Mac's openssl may lack Ed25519); devices check with
+        # OpenSSL. Ed25519 is deterministic, so the two must give the very same bytes.
+        tool = self.shop.tool
+        message = os.urandom(2000)
+        path = os.path.join(self.dir.name, "message")
+        with open(path, "wb") as f:
+            f.write(message)
+        by_openssl = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", self.shop.private, "-rawin", "-in", path],
+                                    check=True, capture_output=True).stdout
+        self.assertEqual(tool.ed25519.sign(tool.read_key(self.shop.private), message), by_openssl)
+        with open(self.shop.public, "rb") as f:
+            self.assertEqual(tool.ed25519.public_pem(tool.ed25519.public_key(tool.read_key(self.shop.private))), f.read())
+
+    def test_keys_made_without_openssl_work_with_devices(self):
+        tool = self.shop.tool
+        public = os.path.join(self.dir.name, "project", "update-key.pem")
+        private = tool.keygen(os.path.join(self.dir.name, "signing"), public_key=public)
+        self.assertEqual(os.stat(private).st_mode & 0o777, 0o600, "only its owner can read the private key")
+        with self.assertRaisesRegex(tool.ReleaseError, "already exists"):
+            tool.keygen(os.path.join(self.dir.name, "signing"), public_key=public)
+        bundle = tool.build("2026.12.1", self.shop.stage, private, os.path.join(self.dir.name, "d"), any_arch=True,
+                            public_key=public)
+        self.assertEqual(read_update(bundle, public, installed="0")["version"], "2026.12.1")
+        self.assertTrue(tool.check(private, public_key=public))
+        self.assertFalse(tool.check(self.shop.private, public_key=public))
+        with open(os.path.join(self.dir.name, "not-a-key.pem"), "w") as f:
+            f.write("-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n")
+        with self.assertRaisesRegex(tool.ReleaseError, "SSH key"):
+            tool.read_key(os.path.join(self.dir.name, "not-a-key.pem"))
+        with self.assertRaisesRegex(tool.ReleaseError, "no private key"):
+            tool.read_key(os.path.join(self.dir.name, "missing.pem"))
+
+    def test_an_update_built_on_github_is_signed_on_the_owners_computer_after_checks(self):
+        tool = self.shop.tool
+        out = os.path.join(self.dir.name, "built")
+        unsigned = tool.build("2026.12.1", self.shop.stage, None, out, notes="Kinder.", any_arch=True,
+                              public_key=self.shop.public, unsigned=True)
+        self.assertTrue(unsigned.endswith("companion-2026.12.1.unsigned.update"))
+        with self.assertRaisesRegex(UpdateError, "incomplete|not signed"):
+            read_update(unsigned, self.shop.public, installed="0")
+        stranger_private, _ = make_key(self.dir.name, "stranger")
+        with self.assertRaisesRegex(tool.ReleaseError, "different public key"):
+            tool.sign(unsigned, stranger_private, public_key=self.shop.public)
+        signed = tool.sign(unsigned, self.shop.private, public_key=self.shop.public)
+        self.assertEqual(os.path.basename(signed), "companion-2026.12.1.update")
+        self.assertEqual(read_update(signed, self.shop.public, installed="2026.11.20")["notes"], "Kinder.")
+        with open(os.path.join(out, "latest.json")) as f:
+            latest = json.load(f)
+        self.assertEqual((latest["version"], latest["url"], latest["size"]),
+                         ("2026.12.1", "companion-2026.12.1.update", os.path.getsize(signed)))
+        # A file changed after it was built is not signed.
+        with tarfile.open(unsigned) as t:
+            parts = {m.name: t.extractfile(m).read() for m in t.getmembers()}
+        changed = os.path.join(self.dir.name, "changed.unsigned.update")
+        with tarfile.open(changed, "w:") as t:
+            for name, data in parts.items():
+                data = data[:-4] + b"evil" if name == "payload.tar.gz" else data
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                t.addfile(info, io.BytesIO(data))
+        with self.assertRaisesRegex(tool.ReleaseError, "do not match"):
+            tool.sign(changed, self.shop.private, public_key=self.shop.public)
+
+    def test_the_project_carries_the_owners_key_and_update_address(self):
+        tool = self.shop.tool
+        key = tool.read_public()
+        self.assertEqual(len(key), 32)
+        self.assertTrue(tool.update_address().startswith("https://"), "devices know where to look for updates")
 
 
 class FetchTest(unittest.IsolatedAsyncioTestCase):
@@ -212,6 +282,15 @@ class FetchTest(unittest.IsolatedAsyncioTestCase):
         device_side = Updates(self.data, app=self.app)
         self.assertIsNone(await device_side.check())
         self.assertIsNotNone(device_side.status()["checked"])
+
+    async def test_an_update_address_with_nothing_published_yet_is_up_to_date(self):
+        # A GitHub repository's releases/latest/download/latest.json answers 404 until the first release.
+        os.remove(os.path.join(self.dist, "latest.json"))
+        device_side = Updates(self.data, app=self.app)
+        self.assertIsNone(await device_side.check())
+        status = device_side.status()
+        self.assertIsNotNone(status["checked"])
+        self.assertIsNone(status["error"])
 
 
 class SettingsPageTest(unittest.IsolatedAsyncioTestCase):

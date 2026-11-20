@@ -1,0 +1,75 @@
+# Builds a software update for sold devices, unsigned (docs/32-updates.md).
+#
+# Run it from the Actions tab: "Make an update" -> "Run workflow", with the version (newer than the
+# last, such as 2026.12.1) and what changed. It tests the software, builds the screen program for the
+# Raspberry Pi, and attaches companion-<version>.unsigned.update to the run. Download it, sign it on
+# your own computer (python3 device/release.py sign ...), and publish the two files it makes as a release
+# of the update repository. The private key never comes here.
+name: Make an update
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version: numbers with dots, newer than the last (for example 2026.12.1)"
+        required: true
+        type: string
+      notes:
+        description: "What changed (buyers see this on the settings page)"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check the version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){0,4}$'; then
+            echo "::error::A version is numbers with dots, such as 2026.12.1"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Test the core service
+        run: |
+          python3 -m pip install --quiet aiohttp numpy pillow qrcode
+          cd core && python3 -m unittest discover -s tests
+
+      - name: Install the tools for building the screen program for the Raspberry Pi
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc-aarch64-linux-gnu
+          rustup target add aarch64-unknown-linux-gnu
+
+      - name: Test the screen program
+        run: cd stage && cargo test --release
+
+      - name: Build the screen program for the Raspberry Pi
+        run: cd stage && cargo build --release --target aarch64-unknown-linux-gnu
+
+      - name: Make the update (unsigned)
+        env:
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          python3 device/release.py build --unsigned --version "$VERSION" --notes "$NOTES" \
+              --stage-binary stage/target/aarch64-unknown-linux-gnu/release/stage --out dist
+          cp stage/target/aarch64-unknown-linux-gnu/release/stage dist/stage-aarch64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-${{ inputs.version }}-unsigned
+          path: |
+            dist/companion-*.unsigned.update
+            dist/stage-aarch64
+          retention-days: 30
+          if-no-files-found: error
