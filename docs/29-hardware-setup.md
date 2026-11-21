@@ -184,7 +184,7 @@ and a third partition holds what the device saves (`33-finishing.md`).
    publish later must be newer), and leave the release as **draft**. It takes about half an hour, and
    about as long again to add the operating system's source code.
 2. **Releases → Device image 2026.11.21** (a draft, seen only by you): download
-   `companion-<version>.img.xz` (about 1.5 GB) and its `.sha256`. Keep it as `.img.xz`: Imager reads it
+   `companion-<version>.img.xz` (about 1 GB) and its `.sha256`. Keep it as `.img.xz`: Imager reads it
    as it is.
 3. Before selling devices with this image, **publish** the release (**Edit → Publish release**; leave
    *Set as the latest release* unticked, so Character Studio's links keep working). The device's
