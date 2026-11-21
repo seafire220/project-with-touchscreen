@@ -29,7 +29,7 @@ Done and tested in software (not yet on real hardware):
 - 2026-11-20, second round: power-cut protection (a read-only system and a data partition, D-056),
   a wake word (D-057), captions, the screen at night, family-safe mode, the microphone off shown on the
   screen, a USB connection to a computer (D-059), and updates built on GitHub and signed on the owner's
-  Mac (`32-updates.md`). Update address: `seafire220/update-repo`.
+  Mac (`32-updates.md`). Update address: `seafire220/touchscreen-update`.
 - Conversations and memory (`31-memory.md`): conversations with clear
   ends, each summed up; lasting memories the model keeps up to date; plans
   followed up; a diary; all shown and editable on the Memory tab. The

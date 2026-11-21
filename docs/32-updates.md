@@ -72,7 +72,7 @@ While installing, the screen says "Updating". The character comes back in a minu
 | | |
 |---|---|
 | **Your key pair** | Made with `release.py keygen`. The public half is `device/config/update-key.pem`, fingerprint **3D92 866F 8686 CCB3**. The private half is on your computer, normally `~/companion-signing/update-key-private.pem` |
-| **The update address** | [seafire220/update-repo](https://github.com/seafire220/update-repo), a public repository just for updates. `device/config/update.json` points devices at `https://github.com/seafire220/update-repo/releases/latest/download/latest.json`, which always serves the newest release's files. Until the first release it answers "not found", which devices take as "up to date" |
+| **The update address** | [seafire220/touchscreen-update](https://github.com/seafire220/touchscreen-update), a public repository just for Touchscreen Edition updates. `device/config/update.json` points devices at `https://github.com/seafire220/touchscreen-update/releases/latest/download/latest.json`, which always serves the newest release's files. Until the first release it answers "not found", which devices take as "up to date" |
 
 Build the device images you sell from now on. `device/check-image.sh` fails an image that has no update key.
 A device made before this can only be updated by re-flashing its card.
@@ -109,7 +109,7 @@ The update is built on GitHub, and signed on your computer, so the private key n
 
    It shows the version, notes and size, checks the update carries your public key and the update address (so devices can still update after installing it), and writes `companion-2026.12.1.update` and `latest.json` next to it.
 4. **Try it** on your own device first: **Device → Software → choose an update file**.
-5. **Publish it.** In [seafire220/update-repo](https://github.com/seafire220/update-repo): **Releases → Draft a new release**, tag `v2026.12.1`, attach both files, **Publish release**. Devices pick it up within half a day, and install it the next night.
+5. **Publish it.** In [seafire220/touchscreen-update](https://github.com/seafire220/touchscreen-update): **Releases → Draft a new release**, tag `v2026.12.1`, attach both files, **Publish release**. Devices pick it up within half a day, and install it the next night.
 
 Building on your own computer instead also works, if it has a cross-compiler for the Pi (`stage/README.md`):
 

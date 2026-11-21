@@ -57,7 +57,7 @@ updates (`release.py`) carry the same parts.
    file, choose the card, and say *No* to customisation. Step by step:
    [docs/29-hardware-setup.md](docs/29-hardware-setup.md).
 4. After that, sold devices update themselves over the internet from signed updates published in
-   [`seafire220/update-repo`](https://github.com/seafire220/update-repo), with no reflashing:
+   [`seafire220/touchscreen-update`](https://github.com/seafire220/touchscreen-update), with no reflashing:
    [docs/32-updates.md](docs/32-updates.md).
 
 The image's release also gets the source code of every operating-system package in it, which the

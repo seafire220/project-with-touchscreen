@@ -960,7 +960,7 @@ rejected. Settled entries are not reopened without new evidence.
 - A draft by default, so the owner checks before anything is public; "publish" makes it public at once.
 - Character Studio's releases are the repository's "latest", so `releases/latest/download/...` links
   always give the newest apps. Image releases are never "latest".
-- Updates for sold devices stay in `seafire220/update-repo`, whose latest release devices read; nothing
+- Updates for sold Touchscreen Edition devices stay in `seafire220/touchscreen-update`, whose latest release devices read; nothing
   else is released there.
 
 ## D-069 — Touchscreen edition: native Rust tactile engine + GPU effects with Core frosted-glass overlays
