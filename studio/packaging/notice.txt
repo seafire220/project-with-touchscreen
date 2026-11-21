@@ -43,5 +43,6 @@ Corporation; PyTorch is a trademark of The Linux Foundation. Other names are tra
 Character Studio and its maker are not affiliated with, sponsored or endorsed by any of them; the names
 are used only to say what Character Studio works with.
 
-No Live2D software is included. Character Studio makes Inochi2D models, and copies of them in the Live2D
-model format with image2live2d, an independent open-source tool (Apache License 2.0).
+Character Studio makes Inochi2D models, and a second copy of each in the .model3.json format that
+Live2D-style models use, with image2live2d, an independent open-source tool (Apache License 2.0). No
+Live2D software is included.
