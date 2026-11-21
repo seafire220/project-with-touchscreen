@@ -1,0 +1,66 @@
+name: Character Studio on Windows, macOS and Linux
+
+# Sets Character Studio up exactly as a buyer's computer does (studio/launch.py: its own Python
+# environment, PyTorch for that computer, the rigger), runs its tests with that environment (a drawn
+# test figure made into a character, rigged and packaged), then starts it and checks it answers.
+# Runs when the studio changes, and on demand (Actions -> Character Studio -> Run workflow).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "studio/**"
+      - "core/companion/package.py"
+      - "core/companion/cards.py"
+      - "core/companion/persona.py"
+      - "core/companion/vrm.py"
+      - ".github/workflows/studio.yml"
+
+jobs:
+  studio:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set it up, as a buyer's computer does
+        env:
+          CHARACTER_STUDIO_HOME: ${{ runner.temp }}/character-studio
+        run: python studio/launch.py --setup-only
+
+      - name: Which PyTorch it got
+        env:
+          CHARACTER_STUDIO_HOME: ${{ runner.temp }}/character-studio
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY="$CHARACTER_STUDIO_HOME/venv/Scripts/python.exe"; else PY="$CHARACTER_STUDIO_HOME/venv/bin/python"; fi
+          "$PY" -c "import platform, torch; mps = getattr(torch.backends, 'mps', None); print(platform.system(), platform.machine(), 'torch', torch.__version__, 'cuda', torch.cuda.is_available(), 'mps', bool(mps and mps.is_available()))"
+
+      - name: The studio's tests, with its own Python
+        env:
+          CHARACTER_STUDIO_HOME: ${{ runner.temp }}/character-studio
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then PY="$CHARACTER_STUDIO_HOME/venv/Scripts/python.exe"; else PY="$CHARACTER_STUDIO_HOME/venv/bin/python"; fi
+          cd studio
+          "$PY" -m unittest discover -v 2>&1 | tee "$RUNNER_TEMP/studio-tests.log"
+          # The rigger must really have run (its tests are skipped when it is missing).
+          if grep -q "the image2live2d rigger is not installed" "$RUNNER_TEMP/studio-tests.log"; then
+            echo "The rigger was not installed, so its tests did not run"; exit 1
+          fi
+
+      - name: Start it and check it answers
+        env:
+          CHARACTER_STUDIO_HOME: ${{ runner.temp }}/character-studio
+        run: python studio/smoke_test.py --port 8779

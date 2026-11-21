@@ -106,7 +106,10 @@ def rig(layers_dir, out_path, name, live2d_dir=None):
     cmd = [sys.executable, "-m", "image2live2d", layers_dir, "-o", out_path, "-n", name]
     if live2d_dir:
         cmd += ["--live2d", live2d_dir]
-    run = subprocess.run(cmd, capture_output=True, text=True, cwd=os.path.dirname(out_path))
+    # UTF-8 both ways: Windows would otherwise use its older encodings for a name with accents.
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    run = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", cwd=os.path.dirname(out_path),
+                         env=env)
     if run.returncode != 0 or not os.path.exists(out_path):
         tail = (run.stdout + run.stderr).strip().splitlines()[-3:]
         raise RuntimeError("the rigger failed: %s" % " / ".join(tail))

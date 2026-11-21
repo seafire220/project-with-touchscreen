@@ -1,4 +1,5 @@
-# Character Studio (app.py) on top of requirements.txt. start.sh installs these, PyTorch and
-# requirements-model.txt into the studio's own environment.
+# Character Studio (app.py) on top of requirements.txt. launch.py (run by start.sh and start.bat)
+# installs these, PyTorch and requirements-model.txt into the studio's own environment. The rigger
+# comes as GitHub's zip of one fixed commit, so no git program is needed.
 aiohttp>=3.9
-image2live2d @ git+https://github.com/Wzhang3912/image2live2d@714e7cc
+image2live2d @ https://github.com/Wzhang3912/image2live2d/archive/714e7cc9191f1ef6c9a1732c80e8b566ec127d6b.zip

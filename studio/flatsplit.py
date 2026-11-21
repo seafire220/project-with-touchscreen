@@ -318,7 +318,7 @@ def main(argv):
         print(__doc__)
         return 2
     image = Image.open(argv[1])
-    with open(argv[2]) as f:
+    with open(argv[2], encoding="utf-8") as f:
         marks = json.load(f)
     try:
         layers, report = split(image, marks)

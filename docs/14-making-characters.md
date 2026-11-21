@@ -18,17 +18,29 @@ it to the device through its settings page.
 
 ## The easy way: Character Studio
 
-`studio/start.sh` starts the character maker as a page in the browser
-(`studio/app.py`; it runs on this computer only):
+Character Studio is the character maker: a program for a laptop or desktop computer (**Windows, Mac or
+Linux**) that shows its page in the browser and runs on that computer only (`studio/app.py`). Adding and
+managing characters afterwards is done on the device's own settings page, in any browser.
 
-```bash
-studio/start.sh
-```
+**You need** Python 3.10 or newer (3.12 or 3.13 is best; from [python.org](https://www.python.org/downloads/),
+or Homebrew on a Mac), about 6 GB of free space, and the internet the first time. Get the project's files
+(on GitHub: **Code → Download ZIP**, then unzip it), then start the studio:
 
-The first run sets up its own Python environment in `~/.character-studio`
-(PyTorch, the rigger and the model's libraries: a few GB, several minutes).
-The page then offers to download the part-finding model once (about 1.3 GB,
-from its authors' pages). After that:
+| Computer | Start it |
+|---|---|
+| **Windows 10 or 11** | Double-click `studio\start.bat`. If Python is missing it says so: install it from python.org, ticking **Add python.exe to PATH**, and double-click again |
+| **Mac** (Apple silicon: M1 or newer) | Double-click `studio/start-mac.command`. The first time, macOS may refuse a file from the internet: Control-click it, choose **Open**, then **Open** again |
+| **Linux** | Run `studio/start.sh` |
+
+A window shows what it is doing; closing that window stops the studio. All three run `studio/launch.py`,
+which the first time sets up the studio's own Python environment in your home folder
+(`.character-studio`; `CHARACTER_STUDIO_HOME` chooses another): PyTorch built for that computer, the
+rigger and the model's libraries (a few GB, several minutes). PyTorch comes for the computer's graphics:
+an NVIDIA card on Windows or Linux, the Mac's own graphics on Apple silicon, otherwise the processor, which
+also works (about 30 seconds a picture on four cores). Later starts take seconds. No `git` is needed.
+
+The page then offers to download the part-finding model once (about 1.3 GB, from its authors' pages).
+After that:
 
 1. Drop a picture in and give the character a name. A character card (the
    PNG files other AI-companion apps share, with the character's
@@ -45,14 +57,19 @@ from its authors' pages). After that:
    upload and not kept. Or save the `.char` file and add it on the device's
    settings page.
 
-Checked here on Linux (2026-11-18): a first run of `start.sh` in an empty
-folder (a 1.5 GB environment), the model download from the page (1.3 GB; the
-model's code comes by `git` when its zip cannot be fetched), a character
-made with the real part-finding model in about a minute on four processor
-cores, and sending into the device's real settings-page API (the virtual
-device, driven from a browser). `studio/test_app.py` covers the page's API.
-A Mac should work the same way, *unchecked*; there is no Windows launcher
-yet.
+**Checked** (2026-11-21): on Linux here, a first run of `launch.py` in an empty folder, the model download
+from the page, a character made with the real part-finding model, and sending it into the device's real
+settings-page API. On **Windows, macOS and Linux** on GitHub's computers, every time the studio changes
+(`.github/workflows/studio.yml`): the same first-run setup as a buyer's computer, the studio's tests with
+that environment (a drawn test figure made into a character, rigged and packaged), and the studio started
+and answering. See the latest run under **Actions → Character Studio on Windows, macOS and Linux**.
+
+**Older computers.** An Intel Mac gets no new PyTorch (its last is 2.2, for Python 3.12 or older), so the
+studio may not install there: use Apple silicon, Windows or Linux. A Mac on macOS 13 or older gets an older
+PyTorch, which should work, *unchecked*. An older NVIDIA card is served by the CUDA 12.6 build the studio
+asks for on Windows; on Linux, if PyTorch says the card is too old, set
+`CHARACTER_STUDIO_TORCH_INDEX=https://download.pytorch.org/whl/cu126` and delete
+`~/.character-studio/venv` to set up again.
 
 ## From the command line
 

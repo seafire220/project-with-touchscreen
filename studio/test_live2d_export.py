@@ -194,18 +194,18 @@ class Live2DExportTest(unittest.TestCase):
     def test_the_riggers_physics_and_motions_are_carried_over(self):
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, "sub"))
-            with open(os.path.join(d, "x.model3.json"), "w") as f:
+            with open(os.path.join(d, "x.model3.json"), "w", encoding="utf-8") as f:
                 json.dump({"FileReferences": {"Physics": "x.physics3.json",
                                               "Motions": {"Idle": [{"File": "x.idle.motion3.json"}] * 2}}}, f)
             for name in ("x.physics3.json", "x.idle.motion3.json"):
-                with open(os.path.join(d, name), "w") as f:
+                with open(os.path.join(d, name), "w", encoding="utf-8") as f:
                     f.write("{}")
             extras = L.read_extras(d)
             files, _ = L.export(self.data, name="model", extras=extras, check=False)
             refs = json.loads(files["model.model3.json"])["FileReferences"]
             self.assertEqual(refs["Physics"], "model.physics3.json")
             self.assertEqual(refs["Motions"], {"Idle": [{"File": "motions/idle.motion3.json"}]})
-            with open(os.path.join(d, "x.model3.json"), "w") as f:
+            with open(os.path.join(d, "x.model3.json"), "w", encoding="utf-8") as f:
                 json.dump({"FileReferences": {"Physics": "../outside.json"}}, f)
             with self.assertRaises(ValueError):
                 L.read_extras(d)
