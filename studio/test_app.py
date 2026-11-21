@@ -3,12 +3,14 @@
 Uses a stand-in part finder (the drawn test figure's labels) and a stand-in device; the rigger is real.
 """
 import argparse
+import asyncio
 import importlib.util
 import io
 import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 from aiohttp import web
@@ -203,6 +205,49 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(r.status, 409)
             finally:
                 await client.close()
+
+
+
+class StoppingTest(unittest.IsolatedAsyncioTestCase):
+    """Started from the Character Studio app, the studio stops with its Quit button, or by itself a while
+    after its page was closed, but never while it is making a character or downloading the model."""
+
+    async def test_quit_stops_it_after_answering(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(app, "stop_now") as stop:
+            studio = app.Studio(d)
+            client = TestClient(TestServer(app.make_app(studio)))
+            await client.start_server()
+            studio.port = client.port
+            try:
+                r = await client.post("/api/quit")
+                self.assertEqual(r.status, 403, "another site cannot stop it")
+                r = await client.post("/api/quit", headers=H)
+                self.assertEqual(r.status, 200)
+                stop.assert_not_called()
+                await asyncio.sleep(0.5)
+                stop.assert_called_once()
+            finally:
+                await client.close()
+
+    async def test_it_stops_by_itself_once_its_page_is_gone_unless_busy(self):
+        with tempfile.TemporaryDirectory() as d:
+            studio = app.Studio(d)
+            stop = mock.Mock()
+            studio.last_seen -= 3600
+            studio.setup["state"] = "running"          # downloading the model: it waits
+            watch = asyncio.ensure_future(app.idle_watch(studio, 15, every=0.01, stop=stop))
+            await asyncio.sleep(0.1)
+            stop.assert_not_called()
+            studio.setup["state"] = "done"
+            await asyncio.wait_for(watch, 2)
+            stop.assert_called_once()
+            # A page that asks for news keeps it going.
+            studio.last_seen = app.time.monotonic()
+            stop = mock.Mock()
+            watch = asyncio.ensure_future(app.idle_watch(studio, 15, every=0.01, stop=stop))
+            await asyncio.sleep(0.1)
+            watch.cancel()
+            stop.assert_not_called()
 
 
 if __name__ == "__main__":

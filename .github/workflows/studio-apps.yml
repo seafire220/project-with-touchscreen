@@ -1,0 +1,173 @@
+name: Make the Character Studio apps
+
+# Builds Character Studio as an app for each system, each with its own Python inside
+# (studio/packaging/build_app.py), then installs it the way a buyer would and runs it with --self-test:
+# the first start downloads its AI tools, its page answers, the studio starts and answers, and Quit stops it.
+#
+#   Windows: CharacterStudio-Setup-<version>.exe     macOS: CharacterStudio-<version>.dmg
+#   Linux:   CharacterStudio-<version>-x86_64.AppImage
+#
+# Run it from Actions -> "Make the Character Studio apps" -> Run workflow, with a version. The apps are
+# on the run's page under Artifacts. It also runs, with a test version number, when the app's files change.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version, for example 2026.11.21"
+        required: true
+  push:
+    branches: [main]
+    paths:
+      - "studio/launch.py"
+      - "studio/app.py"
+      - "studio/app/**"
+      - "studio/requirements*.txt"
+      - "studio/packaging/**"
+      - ".github/workflows/studio-apps.yml"
+
+env:
+  VERSION: ${{ inputs.version || format('0.0.{0}', github.run_number) }}
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Get the app's own Python and Inno Setup
+        run: |
+          python -m pip install --quiet uv
+          python -m uv python install $env:PYTHON_VERSION --install-dir "$env:RUNNER_TEMP\pythons"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup was not installed" }
+      - name: Build the installer
+        run: |
+          $py = (Get-ChildItem "$env:RUNNER_TEMP\pythons" -Directory | Where-Object Name -like "cpython-*-windows-*" | Select-Object -First 1).FullName
+          python studio/packaging/build_app.py --python $py --version $env:VERSION --out "$env:RUNNER_TEMP\dist" --iscc "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          Get-ChildItem "$env:RUNNER_TEMP\dist\*.exe" | Format-Table Name, Length
+      - name: Install it as a buyer would
+        run: |
+          $setup = "$env:RUNNER_TEMP\dist\CharacterStudio-Setup-$env:VERSION.exe"
+          $p = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "the installer stopped with $($p.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\Character Studio"
+          if (-not (Test-Path "$app\python\pythonw.exe")) { throw "not installed where expected" }
+          $menu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Character Studio.lnk"
+          if (-not (Test-Path $menu)) { throw "no Start menu icon" }
+          $link = (New-Object -ComObject WScript.Shell).CreateShortcut($menu)
+          "Start menu icon runs: $($link.TargetPath) $($link.Arguments)"
+      - name: Start it as its icon does, first time (downloads its tools) and again
+        env:
+          CHARACTER_STUDIO_HOME: ${{ runner.temp }}\character-studio
+        run: |
+          $app = "$env:LOCALAPPDATA\Programs\Character Studio"
+          & "$app\python\python.exe" -I -B "$app\studio\launch.py" --self-test
+          if ($LASTEXITCODE -ne 0) { Get-Content "$env:CHARACTER_STUDIO_HOME\launcher.log" -Tail 60; throw "self-test failed" }
+          # The icon's own program (no console window) must manage too.
+          $p = Start-Process -FilePath "$app\python\pythonw.exe" -ArgumentList '-I', '-B', "`"$app\studio\launch.py`"", '--self-test' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content "$env:CHARACTER_STUDIO_HOME\launcher.log" -Tail 60; throw "self-test with pythonw failed ($($p.ExitCode))" }
+          Get-Content "$env:CHARACTER_STUDIO_HOME\launcher.log" -Tail 8
+      - name: Uninstall leaves nothing behind but the downloads (kept unless asked)
+        run: |
+          $app = "$env:LOCALAPPDATA\Programs\Character Studio"
+          Start-Process -FilePath "$app\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          # The uninstaller hands over to a copy of itself: wait for it to finish.
+          for ($i = 0; $i -lt 60 -and (Test-Path "$app\python"); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path "$app\python") { throw "the app is still there after uninstalling" }
+          if (-not (Test-Path "$env:RUNNER_TEMP\character-studio")) { throw "the downloads were deleted without being asked" }
+          if (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Character Studio.lnk") { throw "the icon is still there" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: character-studio-windows-${{ env.VERSION }}
+          path: ${{ runner.temp }}/dist/*.exe
+          compression-level: 0
+          retention-days: 30
+
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Get the app's own Python
+        run: |
+          python -m pip install --quiet uv
+          python -m uv python install "$PYTHON_VERSION" --install-dir "$RUNNER_TEMP/pythons"
+      - name: Build the app and its disk image
+        run: |
+          PY="$(ls -d "$RUNNER_TEMP"/pythons/cpython-*-macos-aarch64-* | head -1)"
+          python studio/packaging/build_app.py --python "$PY" --version "$VERSION" --out "$RUNNER_TEMP/dist"
+          ls -l "$RUNNER_TEMP/dist"
+      - name: Install it as a buyer would (drag it from the disk image to Applications)
+        run: |
+          hdiutil attach "$RUNNER_TEMP/dist/CharacterStudio-$VERSION.dmg" -nobrowse -mountpoint /Volumes/CharacterStudio
+          ls -la /Volumes/CharacterStudio
+          mkdir -p "$RUNNER_TEMP/Applications"
+          ditto "/Volumes/CharacterStudio/Character Studio.app" "$RUNNER_TEMP/Applications/Character Studio.app"
+          hdiutil detach /Volumes/CharacterStudio
+          plutil -p "$RUNNER_TEMP/Applications/Character Studio.app/Contents/Info.plist"
+          codesign -dv "$RUNNER_TEMP/Applications/Character Studio.app/Contents/Resources/python/bin/python3" 2>&1 | head -4 || true
+      - name: Start it as Finder does, first time (downloads its tools) and again
+        env:
+          CHARACTER_STUDIO_HOME: ${{ runner.temp }}/character-studio
+        run: |
+          APP="$RUNNER_TEMP/Applications/Character Studio.app"
+          "$APP/Contents/MacOS/Character Studio" --self-test || { tail -60 "$CHARACTER_STUDIO_HOME/launcher.log"; exit 1; }
+          # Moved (as from Downloads to Applications): it carries on with what it downloaded.
+          mv "$APP" "$RUNNER_TEMP/Character Studio.app"
+          "$RUNNER_TEMP/Character Studio.app/Contents/MacOS/Character Studio" --self-test || { tail -60 "$CHARACTER_STUDIO_HOME/launcher.log"; exit 1; }
+          # The last start (after the move) installed nothing.
+          if awk '/Character Studio starting/ {last = ""} {last = last $0 "\n"} END {printf "%s", last}' "$CHARACTER_STUDIO_HOME/launcher.log" | grep -q "pip install"; then
+            echo "it downloaded again after moving"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: character-studio-mac-${{ env.VERSION }}
+          path: ${{ runner.temp }}/dist/*.dmg
+          compression-level: 0
+          retention-days: 30
+
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Get the app's own Python and appimagetool
+        run: |
+          python -m pip install --quiet uv
+          python -m uv python install "$PYTHON_VERSION" --install-dir "$RUNNER_TEMP/pythons"
+          curl -sSL -o "$RUNNER_TEMP/appimagetool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool"
+      - name: Build the AppImage
+        run: |
+          PY="$(ls -d "$RUNNER_TEMP"/pythons/cpython-*-linux-x86_64-gnu | head -1)"
+          python studio/packaging/build_app.py --python "$PY" --version "$VERSION" --out "$RUNNER_TEMP/dist" --appimagetool "$RUNNER_TEMP/appimagetool"
+          ls -l "$RUNNER_TEMP/dist"
+      - name: Start it as a double-click does, first time (downloads its tools) and again
+        env:
+          CHARACTER_STUDIO_HOME: ${{ runner.temp }}/character-studio
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          IMAGE="$RUNNER_TEMP/dist/CharacterStudio-$VERSION-x86_64.AppImage"
+          "$IMAGE" --self-test || { tail -60 "$CHARACTER_STUDIO_HOME/launcher.log"; exit 1; }
+          "$IMAGE" --self-test || { tail -60 "$CHARACTER_STUDIO_HOME/launcher.log"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: character-studio-linux-${{ env.VERSION }}
+          path: ${{ runner.temp }}/dist/*.AppImage
+          compression-level: 0
+          retention-days: 30

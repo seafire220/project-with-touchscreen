@@ -7,7 +7,12 @@
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<header><h1>Character Studio</h1><p class="muted">Make a character from a picture, then send it to your device.</p></header>
+<header><h1>Character Studio</h1><p class="muted">Make a character from a picture, then send it to your device.</p>
+  <button id="btn-quit" class="secondary quit" title="Stop Character Studio (it also stops by itself a while after this page is closed)">Quit</button></header>
+<section id="stopped" class="card" hidden>
+  <h2>Character Studio has stopped</h2>
+  <p>You can close this tab. To make another character, open Character Studio again.</p>
+</section>
 <main>
   <section id="setup" class="card" hidden>
     <h2>First, the part-finding model</h2>
@@ -16,8 +21,8 @@
     <p id="setup-missing" class="muted"></p>
     <p><button id="btn-setup">Download it</button></p>
     <div id="setup-progress" hidden><progress id="setup-bar" max="1" value="0"></progress> <span id="setup-text"></span></div>
-    <p id="setup-torch" class="muted" hidden>PyTorch is not installed in the studio's Python. Close the studio and
-      start it with <code>studio/start.sh</code>, which installs it, then come back here.</p>
+    <p id="setup-torch" class="muted" hidden>Part of the studio's tools (PyTorch) is missing. Quit Character Studio
+      and open it again: it puts back what is missing.</p>
   </section>
 
   <section id="new" class="card">

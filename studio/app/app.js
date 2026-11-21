@@ -9,6 +9,7 @@ let picture = null;          // the chosen file
 let current = "";            // the character shown
 let shown = "";              // what the shown character looked like last time (to redraw only on change)
 let timer = null;
+let failures = 0;            // status requests that failed in a row
 
 function text(el, value) { el.textContent = value == null ? "" : String(value); }
 
@@ -186,8 +187,14 @@ function showHistory(jobs) {
 async function refresh() {
   clearTimeout(timer);
   let status;
-  try { status = await api("GET", "/api/status"); }
-  catch (err) { timer = setTimeout(refresh, 3000); return; }
+  if (stopped) return;
+  try { status = await api("GET", "/api/status"); failures = 0; }
+  catch (err) {
+    // The studio stopped (closed by its Quit button elsewhere, or idle): say so rather than wait for ever.
+    if (++failures >= 3) { showStopped(); return; }
+    timer = setTimeout(refresh, 3000);
+    return;
+  }
   showSetup(status);
   if (!current && status.jobs.length) current = status.jobs[0].id;
   const job = status.jobs.find((j) => j.id === current);
@@ -196,6 +203,22 @@ async function refresh() {
   const busy = status.setup.state === "running" || status.jobs.some((j) => j.state === "working" || j.state === "waiting");
   timer = setTimeout(refresh, busy ? 1200 : 5000);
 }
+
+// ----- stopping
+let stopped = false;
+function showStopped() {
+  stopped = true;
+  clearTimeout(timer);
+  for (const el of document.querySelectorAll("main > section")) el.hidden = true;
+  $("btn-quit").hidden = true;
+  $("stopped").hidden = false;
+}
+$("btn-quit").addEventListener("click", async () => {
+  const busy = $("job-steps").querySelector(".now");
+  if (busy && !confirm("A character is being made. Stop anyway?")) return;
+  try { await api("POST", "/api/quit"); } catch (err) { /* it may stop before it answers */ }
+  showStopped();
+});
 
 api("GET", "/api/device").then((d) => { $("address").value = d.address; }).catch(() => {});
 refresh();

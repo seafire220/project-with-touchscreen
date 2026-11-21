@@ -45,14 +45,14 @@ jobs:
         env:
           CHARACTER_STUDIO_HOME: ${{ runner.temp }}/character-studio
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then PY="$CHARACTER_STUDIO_HOME/venv/Scripts/python.exe"; else PY="$CHARACTER_STUDIO_HOME/venv/bin/python"; fi
+          PY="$(python studio/launch.py --print-python)"
           "$PY" -c "import platform, torch; mps = getattr(torch.backends, 'mps', None); print(platform.system(), platform.machine(), 'torch', torch.__version__, 'cuda', torch.cuda.is_available(), 'mps', bool(mps and mps.is_available()))"
 
       - name: The studio's tests, with its own Python
         env:
           CHARACTER_STUDIO_HOME: ${{ runner.temp }}/character-studio
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then PY="$CHARACTER_STUDIO_HOME/venv/Scripts/python.exe"; else PY="$CHARACTER_STUDIO_HOME/venv/bin/python"; fi
+          PY="$(python studio/launch.py --print-python)"
           cd studio
           "$PY" -m unittest discover -v 2>&1 | tee "$RUNNER_TEMP/studio-tests.log"
           # The rigger must really have run (its tests are skipped when it is missing).

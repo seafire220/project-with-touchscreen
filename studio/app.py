@@ -110,6 +110,14 @@ class Studio:
         self._model_lock = threading.Lock()
         self._work = asyncio.Lock()               # one character at a time
         self.setup = {"state": "idle", "message": "", "done": 0, "total": 0}
+        self.last_seen = time.monotonic()         # the page's last request (it asks every few seconds)
+
+    def busy(self):
+        """Making a character or downloading the model: never stop by itself then."""
+        return self.setup["state"] == "running" or any(j.state in ("waiting", "working") for j in self.jobs.values())
+
+    def idle_for(self, now=None):
+        return (now if now is not None else time.monotonic()) - self.last_seen
 
     # ----- settings and the part-finding model
     @property
@@ -347,6 +355,7 @@ def make_app(studio):
     async def guard(request, handler):
         if request.host not in ("127.0.0.1:%d" % studio.port, "localhost:%d" % studio.port):
             raise web.HTTPForbidden(text="the studio only answers on this computer")
+        studio.last_seen = time.monotonic()
         if request.method not in ("GET", "HEAD") and request.headers.get("X-Studio") != "1":
             raise web.HTTPForbidden(text="missing X-Studio header")
         response = await handler(request)
@@ -461,6 +470,11 @@ def make_app(studio):
         except cards.CardError:
             return web.json_response({"card": None})
 
+    async def quit_studio(request):
+        """Stop the studio (the page's Quit button). The answer goes first."""
+        asyncio.get_running_loop().call_later(0.3, stop_now)
+        return web.json_response({"ok": True})
+
     async def last_address(request):
         return web.json_response({"address": studio.config().get("device_address", "companion.local")})
 
@@ -480,7 +494,25 @@ def make_app(studio):
     r.add_put("/api/jobs/{job}/persona", put_persona)
     r.add_get("/api/jobs/{job}/package", download)
     r.add_post("/api/jobs/{job}/send", send)
+    r.add_post("/api/quit", quit_studio)
     return app
+
+
+def stop_now():
+    """End the studio's process at once (it keeps nothing that needs saving on the way out)."""
+    sys.stdout.flush()
+    os._exit(0)
+
+
+async def idle_watch(studio, minutes, every=30.0, stop=stop_now):
+    """Started from the Character Studio app, the studio stops by itself once its page has been closed this
+    many minutes (the page asks for news every few seconds while it is open), unless it is busy."""
+    while True:
+        await asyncio.sleep(every)
+        if not studio.busy() and studio.idle_for() > minutes * 60:
+            print("No page has been open for %d minutes: stopping." % minutes, flush=True)
+            stop()
+            return
 
 
 def main(argv):
@@ -488,13 +520,20 @@ def main(argv):
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--data", default=os.path.join(os.path.expanduser("~"), ".character-studio"))
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--exit-when-idle", type=float, metavar="MINUTES",
+                        help="stop once no page has been open this long (the Character Studio app sets this)")
     args = parser.parse_args(argv[1:])
     studio = Studio(args.data, args.port)
     url = "http://127.0.0.1:%d/" % args.port
     print("Character Studio is at %s (close this window to stop it)" % url, flush=True)
     if not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    web.run_app(make_app(studio), host="127.0.0.1", port=args.port, print=None)
+    app = make_app(studio)
+    if args.exit_when_idle:
+        async def start_watch(app):
+            app["idle_watch"] = asyncio.ensure_future(idle_watch(studio, args.exit_when_idle))
+        app.on_startup.append(start_watch)
+    web.run_app(app, host="127.0.0.1", port=args.port, print=None)
     return 0
 
 
