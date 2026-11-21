@@ -2336,7 +2336,7 @@ class TouchUI:
 
         y += gap
         c.rect((pad, y, w - pad, y + footer_h), radius=18, fill=(22, 26, 40, 220))
-        c.text((w / 2, y + footer_h / 2), "Audio routes to connected Bluetooth speakers via PipeWire",
+        c.text((w / 2, y + footer_h / 2), "Audio routes automatically to connected Bluetooth speakers",
                round(side * 0.023), TEXT_MUTED, bold=False, anchor="mm", max_w=w - 2 * pad - 24)
         return c
 

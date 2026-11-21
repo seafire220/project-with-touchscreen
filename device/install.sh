@@ -71,7 +71,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y -q --no-install-recommends \
     cage python3 python3-venv python3-numpy python3-aiohttp python3-pil \
-    alsa-utils network-manager dnsmasq-base polkitd fonts-dejavu-core python3-qrcode avahi-daemon libnss-mdns \
+    alsa-utils bluez bluez-alsa-utils network-manager dnsmasq-base polkitd fonts-dejavu-core python3-qrcode avahi-daemon libnss-mdns \
     libegl1 libgles2 libgl1-mesa-dri libwayland-client0 libwayland-egl1 libxkbcommon0 \
     espeak-ng-data espeak-ng ca-certificates curl
 
@@ -79,7 +79,7 @@ say "Creating the service user"
 if ! id companion >/dev/null 2>&1; then
     useradd --system --home-dir "$DATA" --shell /usr/sbin/nologin companion
 fi
-for group in video render audio input systemd-journal; do
+for group in video render audio input bluetooth systemd-journal; do
     getent group "$group" >/dev/null && usermod -aG "$group" companion
 done
 install -d -o companion -g companion -m 0750 "$DATA"
@@ -132,6 +132,7 @@ install -m 0644 "$REPO/device/systemd/companion-core.service" "$REPO/device/syst
     "$REPO/device/systemd/companion-update.service" "$REPO/device/systemd/companion-update.path" \
     "$REPO/device/systemd/companion-update-boot.service" "$REPO/device/systemd/companion-usb.service" \
     "$REPO/device/systemd/companion-usb-dhcp.service" "$REPO/device/config/99-companion-backlight.rules" \
+    "$REPO/device/config/companion-bluetooth.conf" \
     "$REPO/device/readonly/companion-var-dirs.service" "$REPO/device/readonly/companion-data-check.service" \
     "$REPO/device/readonly/companion-firstboot.service" "$STAGING/system/"
 install -m 0600 "$REPO/device/config/companion-usb.nmconnection" "$STAGING/system/"
@@ -271,8 +272,9 @@ install -m 0644 "$REPO/device/systemd/companion-usb.service" "$REPO/device/syste
 # The device's end of the USB connection: a system connection, not one of the owner's saved networks.
 install -d /usr/lib/NetworkManager/system-connections
 install -m 0600 "$REPO/device/config/companion-usb.nmconnection" /usr/lib/NetworkManager/system-connections/
-install -d /etc/udev/rules.d
+install -d /etc/udev/rules.d /etc/dbus-1/system.d
 install -m 0644 "$REPO/device/config/99-companion-backlight.rules" /etc/udev/rules.d/
+install -m 0644 "$REPO/device/config/companion-bluetooth.conf" /etc/dbus-1/system.d/
 install -m 0644 "$REPO/device/config/pam-companion-stage" /etc/pam.d/companion-stage
 install -d /etc/polkit-1/rules.d /etc/systemd/journald.conf.d /etc/systemd/system.conf.d
 install -m 0644 "$REPO/device/config/polkit-companion.rules" /etc/polkit-1/rules.d/50-companion.rules
@@ -294,6 +296,7 @@ systemctl daemon-reload || true
 systemctl disable getty@tty1.service 2>/dev/null || true
 systemctl enable NetworkManager.service avahi-daemon.service companion-core.service companion-stage.service \
     companion-update.path companion-update-boot.service companion-usb.service companion-usb-dhcp.service
+systemctl enable bluetooth.service bluealsa.service 2>/dev/null || true
 systemctl set-default graphical.target
 
 if [ "$IMAGE" = 1 ]; then

@@ -717,6 +717,15 @@ class Phase2EnhancementsTest(TouchBase):
         await asyncio.sleep(0.05)
         self.assertTrue(self.device.touch_ui.bt_devices[0]["connected"])
 
+        # BlueALSA playback parser detects A2DP sink PCMs and ignores unrelated entries.
+        from companion import audio
+        self.assertEqual(
+            audio.detect_bluetooth_playback("/org/bluealsa/hci0/dev_11_22_33_44_55_66/a2dpsrc/sink\n"),
+            "bluealsa:DEV=11:22:33:44:55:66,PROFILE=a2dp",
+        )
+        self.assertEqual(audio.detect_bluetooth_playback("/org/bluealsa/hci0/dev_11_22_33_44_55_66/hfpag/source\n"), "")
+        self.assertEqual(audio.detect_bluetooth_playback(""), "")
+
 
 if __name__ == "__main__":
     unittest.main()

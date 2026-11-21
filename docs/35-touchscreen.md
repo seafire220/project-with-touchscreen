@@ -148,8 +148,10 @@ and become optional on touchscreen units.
 - **Bluetooth Audio Pairing (`core/companion/bluetooth.py`)**: Zero-dependency async
   `bluetoothctl` manager with an on-screen pairing sheet (**Moods & Care → Bluetooth**)
   and matching **Device → Bluetooth audio** web console controls to scan, pair,
-  trust, connect, and disconnect wireless speakers or headphones (PipeWire routes
-  audio automatically).
+  trust, connect, and disconnect wireless speakers or headphones. On flashed Raspberry
+  Pi OS Lite images, `bluez-alsa-utils` (`bluealsa`) and automatic A2DP detection in
+  `core/companion/audio.py` route audio to connected Bluetooth speakers (and fall back
+  to USB/built-in audio on disconnect), with pairings persisted on `/data/system/bluetooth`.
 - **Wi-Fi Picker & Full Touch Keyboard**: Live scan, signal-strength + lock icons,
   hidden SSID entry, full QWERTY (`abc`), Shift/Caps-Lock (`ABC`), numeric (`123`),
   and symbols (`#+=`) layouts supporting Wi-Fi SSIDs, WPA passwords (with show/hide

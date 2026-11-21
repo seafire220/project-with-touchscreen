@@ -55,6 +55,7 @@ SYSTEM_FILES = {
     "companion-usb.service": "device/systemd/companion-usb.service",
     "companion-usb-dhcp.service": "device/systemd/companion-usb-dhcp.service",
     "99-companion-backlight.rules": "device/config/99-companion-backlight.rules",
+    "companion-bluetooth.conf": "device/config/companion-bluetooth.conf",
     "companion-usb.nmconnection": "device/config/companion-usb.nmconnection",
     "companion-var-dirs.service": "device/readonly/companion-var-dirs.service",
     "companion-data-check.service": "device/readonly/companion-data-check.service",

@@ -56,6 +56,7 @@ SYSTEM_FILES = {
     "companion-usb.service": "etc/systemd/system/companion-usb.service",
     "companion-usb-dhcp.service": "etc/systemd/system/companion-usb-dhcp.service",
     "99-companion-backlight.rules": "etc/udev/rules.d/99-companion-backlight.rules",
+    "companion-bluetooth.conf": "etc/dbus-1/system.d/companion-bluetooth.conf",
     # NetworkManager reads only connection files that nobody but root can read (see below).
     "companion-usb.nmconnection": "usr/lib/NetworkManager/system-connections/companion-usb.nmconnection",
     # Power-cut protection's own units (installed by images built with it).

@@ -164,7 +164,7 @@ rm -rf "$ROOT/root/.cache" "$ROOT/var/lib/apt/lists/"*
 if [ "$READ_ONLY" = 1 ]; then
     say "Power-cut protection: a read-only system and a data partition"
     DATA_STAGE="$WORK/data"
-    mkdir -p "$DATA_STAGE/system/nm-connections" "$DATA_STAGE/system/time"
+    mkdir -p "$DATA_STAGE/system/nm-connections" "$DATA_STAGE/system/time" "$DATA_STAGE/system/bluetooth"
     CUID="$(chroot "$ROOT" id -u companion)"
     CGID="$(chroot "$ROOT" id -g companion)"
     # The models the device comes with stay on the read-only system (safe even if the data partition has to
@@ -177,6 +177,7 @@ if [ "$READ_ONLY" = 1 ]; then
     fi
     mv "$ROOT/var/lib/companion" "$DATA_STAGE/companion"
     install -d -m 0750 -o "$CUID" -g "$CGID" "$ROOT/var/lib/companion"
+    install -d -m 0700 "$ROOT/var/lib/bluetooth"
     if ls "$ROOT"/etc/NetworkManager/system-connections/* >/dev/null 2>&1; then
         mv "$ROOT"/etc/NetworkManager/system-connections/* "$DATA_STAGE/system/nm-connections/"
     fi
@@ -196,6 +197,7 @@ LABEL=companion-data  /data  ext4  defaults,noatime,nofail,x-systemd.device-time
 overlay  /var  overlay  lowerdir=/var,upperdir=/run/companion-var/upper,workdir=/run/companion-var/work,x-systemd.requires=companion-var-dirs.service  0  0
 /data/companion  /var/lib/companion  none  bind,nofail,x-systemd.requires-mounts-for=/data  0  0
 /data/system/nm-connections  /etc/NetworkManager/system-connections  none  bind,nofail,x-systemd.requires-mounts-for=/data  0  0
+/data/system/bluetooth  /var/lib/bluetooth  none  bind,nofail,x-systemd.requires-mounts-for=/data  0  0
 FSTAB
     install -m 0644 "$REPO"/device/readonly/companion-var-dirs.service "$REPO"/device/readonly/companion-data-check.service \
         "$REPO"/device/readonly/companion-firstboot.service "$ROOT/etc/systemd/system/"
@@ -228,7 +230,7 @@ if [ "$READ_ONLY" = 1 ]; then
     cp -a "$DATA_STAGE/." "$WORK/datamnt/"
     chown "$CUID:$CGID" "$WORK/datamnt/companion" "$WORK/datamnt/system/time"
     chmod 0750 "$WORK/datamnt/companion"
-    chmod 0700 "$WORK/datamnt/system/nm-connections"
+    chmod 0700 "$WORK/datamnt/system/nm-connections" "$WORK/datamnt/system/bluetooth"
     umount "$WORK/datamnt"
     losetup -d "$LOOP"
     LOOP=""

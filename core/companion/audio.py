@@ -53,10 +53,38 @@ def detect_card(cards_text=None):
     return ""
 
 
+def detect_bluetooth_playback(pcms_text=None):
+    """Return a BlueALSA ALSA PCM name if a Bluetooth A2DP speaker is connected, else ''."""
+    import re
+    import subprocess
+    if pcms_text is None:
+        if not shutil.which("bluealsa-cli"):
+            return ""
+        try:
+            res = subprocess.run(
+                ["bluealsa-cli", "list-pcms"],
+                capture_output=True, text=True, timeout=0.5, check=False,
+            )
+            if res.returncode != 0:
+                return ""
+            pcms_text = res.stdout
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    # A connected Bluetooth speaker appears on the Pi (A2DP source) as .../dev_AA_BB_CC_DD_EE_FF/a2dpsrc/sink.
+    m = re.search(r"/dev_([0-9A-Fa-f]{2}(?:_[0-9A-Fa-f]{2}){5})/a2dpsrc/sink\b", pcms_text or "")
+    if not m:
+        return ""
+    mac = m.group(1).replace("_", ":").upper()
+    return "bluealsa:DEV=%s,PROFILE=a2dp" % mac
+
+
 def _alsa_device(kind):
     """COMPANION_ALSA_PLAYBACK / COMPANION_ALSA_CAPTURE name an ALSA device; otherwise one is detected."""
     import os
-    value = os.environ.get("COMPANION_ALSA_" + kind, "") or detect_card()
+    value = os.environ.get("COMPANION_ALSA_" + kind, "")
+    if not value and kind == "PLAYBACK":
+        value = detect_bluetooth_playback()
+    value = value or detect_card()
     return ["-D", value] if value else []
 
 
