@@ -866,3 +866,37 @@ rejected. Settled entries are not reopened without new evidence.
 - Its rules come after the character's description and say they come first; a reminder ends the
   instructions; the memory's work is told too; strong swearing is taken out of what is said as a second
   line. A child with the settings page open on a parent's phone cannot turn it off.
+
+## D-061 — A Live2D model's own idle motions play underneath the device's movement, added to it
+
+- Date: 2026-11-21. Status: built (`stage/src/live2d_motion.rs`).
+- Live2D's own player replaces its idle motion with whatever else plays. The device's movement (gaze,
+  nods, gestures timed to speech, moods) is the product, so the model's motion is a base instead: its
+  change from the rest pose is added, as Live2D's player adds dragging and breathing. Gestures take back
+  the parts of the body they hold; the motion shows less while listening, talking and dozing.
+- Blinks and the mouth stay the device's (its blinks follow speech and gaze; its mouth the voice), so the
+  model's EyeBlink and LipSync parameters are left out of its motions.
+- Characters made with Character Studio start with it off: the rigger's generic idle loop would double the
+  device's own living motion. Imported models start with it on, as their artist made them.
+
+## D-062 — A wide head turn is a control of its own; flat characters make an ordinary turn instead
+
+- Date: 2026-11-21. Status: built.
+- Widening the ordinary head turn's range would have made every existing nod, glance and look-away three
+  times bigger on 3D avatars. A separate control, `head_turn`, leaves them as they are; a VRM avatar offers
+  it as `ParamHeadTurn` (90 degrees each way, a quarter of it in the chest and spine).
+- On a character without it, it adds to the ordinary turn as far as that goes, so a gesture written with
+  it still works; gestures that need it say so and have a substitute (`look_back` -> `look_away`).
+- 2D profiles still need drawn side artwork (D-043).
+
+## D-063 — Character Studio starts from one Python launcher on every system
+
+- Date: 2026-11-21. Status: built; tested on Windows, macOS and Linux on GitHub (`.github/workflows/studio.yml`).
+- `studio/launch.py` uses only Python's own library, so it runs before anything is installed, and does
+  what `start.sh` did in bash: the studio's own environment, PyTorch for the computer's graphics, the
+  packages, then the app. The per-system starters (`start.bat`, `start-mac.command`, `start.sh`) only find
+  Python and run it. One place to get right, and testable.
+- The rigger is installed from GitHub's zip of its fixed commit rather than with git, which Windows does not
+  have. Text is UTF-8 everywhere (`PYTHONUTF8`), so names with accents survive Windows.
+- Not a packaged program (.exe, .app): those need code signing to open without warnings, and PyTorch makes
+  them several GB. Python from python.org is the one thing a buyer installs.

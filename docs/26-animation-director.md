@@ -39,7 +39,8 @@ a frame, next to nothing beside drawing it.
    breathing and blinking, the head dropping.
 4. **Idle actions** when nobody is talking: a look around, gazing out of
    the window, a glance at you, settling, a contented sway, a stretch, a
-   yawn, nodding off.
+   yawn, nodding off; on 3D avatars, a look over the shoulder (the wide
+   head turn, below).
 5. **Speech**: the mouth's opening and shape, beats on stressed syllables,
    and movements tied to words.
 6. **Gestures**: nineteen clips the conversation can ask for, the words
@@ -47,11 +48,30 @@ a frame, next to nothing beside drawing it.
    laugh, sigh, sway, look away, look down, lean in, lean back, start in
    surprise, think, hands on hips, wave, raised brows, shrug), plus any
    added on the device.
+   **The wide head turn** (`head_turn`, 2026-11-21) is a control of its own beside the ordinary head turn:
+   up to 90 degrees, a profile, on a 3D avatar (its `ParamHeadTurn`). A character without a parameter for it
+   turns as far as its ordinary turn goes instead, so a gesture written with it works everywhere; gestures
+   that need it (`look_back`, `look_over_shoulder`) say so, and a flat character looks away instead.
 7. **Reactions**: looking up when spoken to, waking with a start, raised
    brows and a smile for someone back after a long gap.
 8. **A model's own expressions**, as chosen under *Feelings* on the
    settings page; **physics** for hair and clothing; and the **mapping** of
    the generic controls onto the character's own parameters.
+
+**A Live2D model's own idle motions** (2026-11-21, `stage/src/live2d_motion.rs`) go underneath all of this.
+Most models come with idle animations their artist made (`.motion3.json` files in the model's `Idle`
+group). The stage reads them as Live2D's own player does (linear, Bézier, stepped and inverse-stepped
+curves; fades; parts that take turns, such as two sets of arms) and plays them one after another, at random,
+each crossfading into the next. Each motion's change from the model's rest pose is **added** to the layers
+above, the way Live2D's player adds dragging and breathing to a motion: where the motion turns the head 8
+degrees, a nod nods from there. A gesture holding part of the body takes 80% of that part back while it
+plays; the motion shows 60% while the character listens, 70% while it talks, 80% while it thinks and 30%
+while it dozes, eased. The device keeps blinking, the mouth and the speech shapes its own (the model's
+`EyeBlink` and `LipSync` groups), so the motions' own blinks are left out. The owner chooses *as made*,
+*gentler* (half) or *off* per character; characters made with Character Studio start off, since the
+rigger's generic idle loop would only double the device's own living motion. Checked on Live2D's sample
+model: all 1,602 curve segments of its ten motions reach their points without a jump, its nine idle
+motions play in turn, and the cost per frame is too small to measure.
 
 ### Channels: several things at once
 

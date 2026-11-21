@@ -166,6 +166,13 @@ on. If something moves wrongly, the **Movement** section under the
 character lets you choose the right setting for each movement and test it
 on the screen. **Feelings** maps the model's own expressions to the
 character's moods.
+- **Its own idle motions.** Most models come with idle animations made by their artist. The device plays
+  them, one after another, and its own movement (looking at you, nodding, gestures) adds to them, so the
+  character moves as its artist intended and still reacts to you. While it listens or talks they show a
+  little less, and a gesture takes over the part of the body it needs. The device still does the blinking
+  and the mouth itself (following the voice), so the motions' own blinks are left out. Under the
+  character, **Its own idle motions** chooses *as its artist made them*, *gentler* or *off*. (Characters
+  made with Character Studio start with it off: the device's own movement is made for them.)
 
 ### An Inochi2D model you rigged
 
@@ -196,6 +203,10 @@ sync. Under **3D animation** you choose how it moves:
 - **Show**: head to thighs, head and shoulders, or the whole body.
 - **Simplify the drawing**: no outlines and smaller pictures, for a slow
   device. The device does this by itself if the screen gets slow.
+
+A 3D avatar can turn its head much further than a flat character: as far as a profile (90 degrees), with
+its shoulders following a little, to look back over its shoulder when the conversation calls for it, or
+now and then by itself when nobody is talking. Flat characters turn as far as their drawing allows.
 
 **Its own animations**: add VRM Animation files (`.vrma`, from VRoid Hub,
 VRM Posing Desktop or Blender) as an idle pose (for a mood, or for

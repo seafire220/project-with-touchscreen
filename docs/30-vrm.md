@@ -90,6 +90,7 @@ avatars, which face the other way, are turned round first.
 | Control | VRM avatar |
 |---|---|
 | Head turn, nod, tilt | head (two thirds) and neck (one third) |
+| Wide head turn (`head_turn`, the avatar's `ParamHeadTurn`, up to 90 degrees each way: a profile) | a quarter in the spine, chest and upper chest, then the neck (40% of the rest) and the head; added to clips in the full-body style too |
 | Body turn, lean, sway | spine, chest and upper chest, shared |
 | Breath | the chest lifts a little; the shoulders too |
 | Shoulders | both shoulder bones up |
@@ -206,10 +207,14 @@ and beats are layered on; the kit writes standard `.vrma` files.
 The turning clips **step**: the feet lift and set down in turn (the kit's
 stepping helper), with the knees following the way the body faces, so the
 avatar never spins on a fixed pair of feet. Each is also played mirrored.
-They are gestures only full-body animation can play (`clip_only` in
+The first three are gestures only full-body animation can play (`clip_only` in
 `stage/motions/library.json`): a 2D character has no back to show, so it
 never asks for them, and the model is offered them only when the avatar
-can.
+can. `look_back` also plays from the controls (2026-11-21), so a light-style
+avatar looks back too: the eyes first, then the wide head turn to about 77
+degrees with the shoulders following; a flat character looks away instead.
+A new idle action for 3D avatars, `look_over_shoulder`, does the same now and
+then when nobody is talking.
 
 Head-only gestures (nods, shakes, tilts, glances) stay with the motion
 library, which times them to speech. The device installs the clips beside

@@ -64,6 +64,7 @@ One JSON object per line, on standard input or the local socket:
 | `{"describe": true}` | Send the whole library (a `library` event with `clips`). |
 | `{"overlay": {"slot": "caption", "image": "caption-3.png", "anchor": "bottom"}}` | Show a picture from the overlay folder (`--overlays`, by default `overlays` beside the socket) over the character, in a slot (one picture each, fading in and out); `"image": null` fades it out. Anchors: `top`, `bottom`, `center`, `top_left`, `top_right`, `bottom_left`, `bottom_right`. The core draws captions, the microphone-off sign and hints this way (`src/overlay.rs`) |
 | `{"screen": "dim"}` | `on`, `dim` or `off`: a dark veil over everything; `off` also stops moving and drawing the character, to save power |
+| `{"model_motions": 0.5}` | How much of a Live2D-format model's own idle motions shows, 0 (off) to 1 (as made); eased in. Also `--model-motions` and the settings file's `model_motions` (`src/live2d_motion.rs`) |
 | `{"quit": true}` | Exit. |
 
 Several fields can share one line.
@@ -130,9 +131,17 @@ textures; clipping masks, also inverted ones; Cubism's additive and
 multiplicative blends; the newer blend modes, worked out in the shader
 against a copy of what is already drawn; parts drawn off screen first; and
 back-face culling. Textures larger than the graphics chip allows are scaled
-down. Motions and expressions in the model are not played yet: the stage
-drives the standard parameters itself. `--view` is in canvas pixels for these
-models, and `--no-physics` stops hair and clothes swinging (for comparisons).
+down. The model's own expressions show with the moods (*Feelings*), its pose
+file's parts take turns, and its own **idle motions** (`.motion3.json`, its
+`Idle` group) play underneath the stage's movement, added to it, crossfading
+from one to the next (`src/live2d_motion.rs`; blinks and the mouth stay the
+stage's). Its other motions are not played. `--view` is in canvas pixels for
+these models, and `--no-physics` stops hair and clothes swinging (for
+comparisons).
+
+**VRM avatars** (`.vrm`): see `docs/30-vrm.md`. They also take the **wide
+head turn** (`head_turn`, up to 90 degrees) that flat characters make as an
+ordinary turn.
 
 Controls are connected automatically when the puppet uses conventional
 parameter names, either Inochi2D style (`Mouth:: Shape`, `Eye:: Left:: Blink`,

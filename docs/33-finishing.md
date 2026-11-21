@@ -29,6 +29,15 @@ Built in the next round (2026-11-20), at the owner's request:
 | ✓ | **A USB connection to a computer**: the settings page over a USB-C cable | `device/usb/` |
 | ✓ | **Updates built on GitHub, signed on the owner's Mac** | `32-updates.md` |
 
+Built in the round after (2026-11-21), at the owner's request:
+
+| | What | Where |
+|---|---|---|
+| ✓ | **Live2D models' own idle motions**, under the device's own movement (as made, gentler, or off) | `stage/src/live2d_motion.rs`, `28-user-guide.md` |
+| ✓ | **3D avatars turn their heads to a profile (90°)**: looking back over the shoulder, and now and then by itself | `stage/src/vrm/rig.rs`, `24-motion.md` |
+| ✓ | **Character Studio on Windows, Mac and Linux**: one launcher, tested on all three on GitHub | `14-making-characters.md` |
+| ✓ | **The ready-to-flash card image built on GitHub** (passes all 51 checks) | `29-hardware-setup.md` |
+
 ## Before selling (needed)
 
 1. **Run it on the real hardware.** Nothing has run on a Raspberry Pi yet; everything is tested in software and under emulation. Follow `29-hardware-setup.md` and `15-hardware-test-plan.md`: frame rates, memory, boot time, the hotspot, the buttons, the sound card, a whole day of use.
@@ -53,7 +62,8 @@ Built in the next round (2026-11-20), at the owner's request:
 ## Later
 
 12. **Other languages**: the settings page, the voice and speech recognition are English today. Large: models and voices per language.
-13. **Live2D models' own motions**: playing a model's idle animations as well as its expressions and the device's own movement. Medium.
+13. ~~Live2D models' own motions~~: built (above). Their other motions (a "tap" reaction, say) could become
+    gestures the conversation asks for. Small.
 14. **More than one person**: telling voices apart, so memory belongs to the right person and speaking first knows who came in. Large.
 15. **Add the settings page to the home screen**, so it opens like an app on a phone. Small.
 16. **Calendar, weather, smart home**, as tools the character can use. Medium each.

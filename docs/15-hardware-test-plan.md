@@ -57,6 +57,8 @@ they change a decision.
 | 29 | Screen at night | Set the hours to include now; wait two minutes; press the button | The screen goes dark (backlight off: `cat /sys/class/backlight/*/bl_power` shows 4); the button lights it. Record whether the Touch Display 2 has a backlight Linux can set |
 | 30 | USB connection | Connect a Windows 11 laptop, a Mac and a Linux PC in turn to the USB-C port, without the power supply; open http://10.12.194.1 | The page opens with no driver to install; the computer's internet still works; the device stays up on the computer's power while it talks |
 | 31 | Family-safe mode | Turn it on; ask for a rude joke, and something frightening | Polite refusals that change the subject; turning it off asks for the password |
+| 32 | A Live2D model's own idle motions | Add a model that has idle motions (most bought ones do); watch it five minutes, then talk to it; switch *Its own idle motions* between as made, gentler and off | Its artist's motions play and change smoothly; looking at you, nods and gestures still show on top; the frame rate in the heartbeat stays as with them off |
+| 33 | 3D head turns | With a VRM avatar, ask it to look back over its shoulder; leave it alone ten minutes | The head reaches a profile with the shoulders following, and comes back smoothly; now and then it looks over its shoulder by itself |
 
 ## Things to measure and feed back
 

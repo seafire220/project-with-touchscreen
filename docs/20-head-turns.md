@@ -2,7 +2,9 @@
 
 Status: 2026-11-17. Head turns up to ±30 (about 45° on screen) are built
 (`studio/refine.py`) and the owner judged them "a massive improvement".
-Turns to the side profile (90°) are planned, not built.
+Turns to the side profile (90°) are planned, not built, for flat (2D) characters: they need drawn side
+artwork. **3D (VRM) avatars turn to a profile already** (2026-11-21, D-062): they have a real head to turn,
+so the wide head turn (`head_turn`) takes them to 90 degrees, with the shoulders following.
 
 ## What was wrong, and the rules we follow now
 
