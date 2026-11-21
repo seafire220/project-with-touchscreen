@@ -54,7 +54,11 @@ DEFAULT_SETTINGS = {
 }
 
 # The secret names the device accepts: one key per provider.
-SECRET_NAMES = ("openai", "anthropic", "openai_compatible", "elevenlabs", "groq", "openrouter", "search", "local_llm")
+SECRET_NAMES = (
+    "openai", "anthropic", "openai_compatible", "elevenlabs",
+    "cartesia", "fishaudio", "inworld", "minimax",
+    "groq", "openrouter", "search", "local_llm",
+)
 
 
 def write_atomic(path, data, mode=0o644):

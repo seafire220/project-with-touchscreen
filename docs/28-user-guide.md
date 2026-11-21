@@ -234,9 +234,14 @@ file from other AI-companion apps) fills it in for you to check and save.
 ### Its voice
 
 The device's own voice is free and works without the internet. With a voice
-service (ElevenLabs, or an OpenAI-style one), each character can have its
-own voice: put its voice ID under the character. **Clone a voice** makes a
-voice from a recording, with ElevenLabs.
+service (ElevenLabs, Cartesia, Fish Audio, Inworld AI, MiniMax, OpenAI or
+an OpenAI-style server), each character can have its own voice service and
+voice ID under the character (with **List voices** to pick from your
+account). **Clone a voice** creates a custom voice from a clear audio
+recording (WAV, MP3, M4A, OGG, FLAC or WebM depending on the service) on
+ElevenLabs, Cartesia, Fish Audio, Inworld AI or MiniMax, and switches that
+character to the cloned voice straight away. If a character package includes
+its own `voice/sample.wav`, you can also clone directly from it.
 
 ## How it moves
 
@@ -323,7 +328,9 @@ Under **AI services**, in three parts:
 2. **Voice**: the free on-device voice, with 72 voices to choose from in
    English accents from around the world (English, Scottish, Irish, Welsh,
    American, Canadian, Australian, New Zealand, South African and Indian), or
-   a voice service.
+   a cloud voice service: ElevenLabs, Cartesia, Fish Audio, Inworld AI,
+   MiniMax (all supporting custom voice cloning), OpenAI, or any
+   OpenAI-compatible server.
 3. **Speech recognition** (hearing you): free and on the device by default,
    or a cloud service.
 

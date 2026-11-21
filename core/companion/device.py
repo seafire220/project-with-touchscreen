@@ -318,15 +318,19 @@ class Device:
                 self._stt_key = key
             return self._stt
         if which == "tts":
-            if settings["tts"].get("provider") == "local":
+            active_provider = extra.get("provider") or settings["tts"].get("provider", "")
+            if active_provider == "local":
                 # The on-device voice is kept loaded too (about 110 MB, a second to load); only the
                 # speaker changes from character to character.
-                key = json.dumps(settings["tts"], sort_keys=True)
+                model_dir = self.model_dir("tts")
+                key = json.dumps({"provider": "local", "speed": settings["tts"].get("speed", 1.0), "dir": model_dir},
+                                 sort_keys=True)
                 if getattr(self, "_tts_key", None) != key:
                     self._tts = None
-                    self._tts = providers.build_tts(settings, self.store, model_dir=self.model_dir("tts"))
+                    self._tts = providers.build_tts(settings, self.store, provider="local", model_dir=model_dir)
                     self._tts_key = key
-                self._tts.set_voice(extra.get("voice") or settings["tts"].get("voice", ""))
+                default_voice = settings["tts"].get("voice", "") if settings["tts"].get("provider") == "local" else ""
+                self._tts.set_voice(extra.get("voice") or default_voice)
                 return self._tts
             return providers.build_tts(settings, self.store, **extra)
         raise ValueError(which)
@@ -493,11 +497,13 @@ class Device:
         cid = self.active_id()
         if not cid:
             raise ProviderError("no character is installed yet")
-        voice = self.characters.device_settings(cid).get("voice") or None
+        char_settings = self.characters.device_settings(cid)
+        voice = char_settings.get("voice") or None
+        voice_provider = char_settings.get("voice_provider") or None
         settings = self.store.settings()
         self.speaker.volume = float(settings.get("volume", 0.8))
         conversation = Conversation(
-            llm=self.build("llm"), tts=self.build("tts", voice=voice),
+            llm=self.build("llm"), tts=self.build("tts", voice=voice, provider=voice_provider),
             speaker=self.speaker, stage=self.stage, memory=self.memory(cid),
             persona=self.characters.persona(cid),
             history_turns=int(settings["conversation"].get("history_turns", 12)),
@@ -505,8 +511,7 @@ class Device:
             gestures=None if settings["conversation"].get("gestures", True) else [], on_caption=self._caption,
             family_safe=bool(settings.get("family_safe", {}).get("on")))
         # A reserved character's words call for fewer gestures; an expressive one's for more.
-        conversation.planner.expressiveness = temperament.for_stage(
-            self.characters.device_settings(cid).get("temperament"))[1]
+        conversation.planner.expressiveness = temperament.for_stage(char_settings.get("temperament"))[1]
         return conversation
 
     def _search_function(self, settings):

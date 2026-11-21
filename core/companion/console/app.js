@@ -4,10 +4,40 @@
 const $ = (id) => document.getElementById(id);
 const KEY_NAMES = {
   openai: "OpenAI", anthropic: "Anthropic", groq: "Groq", openrouter: "OpenRouter",
-  openai_compatible: "Gemini / other", elevenlabs: "ElevenLabs", deepgram: "Deepgram", search: "Web search",
-  local_llm: "Your own model server",
+  openai_compatible: "Gemini / other", elevenlabs: "ElevenLabs", cartesia: "Cartesia",
+  fishaudio: "Fish Audio", inworld: "Inworld AI", minimax: "MiniMax", deepgram: "Deepgram",
+  search: "Web search", local_llm: "Your own model server",
+};
+const VOICE_LIST_PROVIDERS = new Set(["local", "elevenlabs", "cartesia", "fishaudio", "inworld", "minimax"]);
+const CLONE_INFO = {
+  elevenlabs: {
+    label: "ElevenLabs", key: "elevenlabs", languages: false,
+    accept: ".wav,.mp3,.m4a,.ogg,.flac,.webm,audio/*",
+    hint: "Clear WAV, MP3, M4A, OGG, FLAC or WebM recording (30 s to a few minutes, up to 20 MB).",
+  },
+  cartesia: {
+    label: "Cartesia", key: "cartesia", languages: true,
+    accept: ".wav,.mp3,.ogg,.flac,.webm,audio/*",
+    hint: "Clear WAV, MP3, OGG, FLAC or WebM clip (10–60 seconds, up to 16 MB). Fast, low-latency cloning.",
+  },
+  fishaudio: {
+    label: "Fish Audio", key: "fishaudio", languages: false,
+    accept: ".wav,.mp3,.m4a,.ogg,audio/*",
+    hint: "Clear WAV, MP3, M4A or OGG clip (10–60 seconds, up to 20 MB).",
+  },
+  inworld: {
+    label: "Inworld AI", key: "inworld", languages: true,
+    accept: ".wav,.mp3,.webm,audio/*",
+    hint: "Clear WAV, MP3 or WebM clip (5–15 seconds, up to 12 MB).",
+  },
+  minimax: {
+    label: "MiniMax", key: "minimax", languages: false,
+    accept: ".wav,.mp3,.m4a,audio/*",
+    hint: "Clear WAV, MP3 or M4A clip (10 seconds to 5 minutes, up to 20 MB). Speak with it once within 7 days so MiniMax keeps it.",
+  },
 };
 let state = { active: "", characters: [], settings: null, editing: "" };
+let keyStatus = {};
 
 async function api(method, path, body, raw) {
   const opts = { method, headers: { "X-Companion": "1" }, credentials: "same-origin" };
@@ -406,7 +436,8 @@ function setStatus(s) {
 // What a new owner still has to do, with links to where it is done.
 function showSteps(s) {
   const keyFor = { openai: "openai", anthropic: "anthropic", groq: "groq", openrouter: "openrouter",
-                   gemini: "openai_compatible", custom: "openai_compatible", elevenlabs: "elevenlabs" };
+                   gemini: "openai_compatible", custom: "openai_compatible", elevenlabs: "elevenlabs",
+                   cartesia: "cartesia", fishaudio: "fishaudio", inworld: "inworld", minimax: "minimax" };
   const hasKey = (p) => !p || p === "local" || !keyFor[p] || s.keys[keyFor[p]];
   const steps = [
     ["Choose a language model and add its key", s.providers.llm && hasKey(s.providers.llm), "services"],
@@ -507,6 +538,17 @@ async function editCharacter(c) {
   text($("edit-name"), c.name);
   $("edit-persona").value = data.persona;
   $("edit-voice").value = (data.device && data.device.voice) || "";
+  $("edit-voice-provider").value = (data.device && data.device.voice_provider) || "";
+  $("btn-clone-sample").hidden = !data.has_voice_sample;
+  text($("char-voices-msg"), "");
+  text($("edit-msg"), "");
+  const charProvider = data.device && data.device.voice_provider;
+  const ttsProvider = state.settings && state.settings.tts && state.settings.tts.provider;
+  const keyed = (data.cloning_providers || []).find((p) => p.has_key);
+  $("clone-provider").value = CLONE_INFO[charProvider] ? charProvider :
+    CLONE_INFO[ttsProvider] ? ttsProvider : keyed ? keyed.id : "elevenlabs";
+  shapeCharVoice();
+  shapeClone();
   for (const q of PERSONA_QUESTIONS) $("pf-" + q).value = (data.form && data.form[q]) || "";
   if (!$("pf-name").value) $("pf-name").value = c.name;
   $("char-edit").hidden = false;
@@ -835,23 +877,90 @@ $("btn-write-persona").addEventListener("click", async () => {
   } catch (err) { text($("edit-msg"), err.message); }
 });
 
+function shapeCharVoice() {
+  const vp = $("edit-voice-provider").value || (state.settings && state.settings.tts && state.settings.tts.provider) || "";
+  $("btn-char-voices").hidden = !VOICE_LIST_PROVIDERS.has(vp);
+}
+
+function shapeClone() {
+  const provider = $("clone-provider").value || "elevenlabs";
+  const info = CLONE_INFO[provider] || CLONE_INFO.elevenlabs;
+  $("clone-lang-row").hidden = !info.languages;
+  $("voice-file").accept = info.accept;
+  const help = $("clone-help");
+  help.replaceChildren();
+  help.append(info.hint + " ");
+  if (keyStatus[info.key]) {
+    help.append(info.label + " key saved ✓.");
+  } else {
+    help.append("No " + info.label + " key saved yet — ");
+    const link = document.createElement("a");
+    link.href = "#services";
+    text(link, "add it under AI services");
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      show("services");
+      const details = $("keys").closest("details");
+      if (details) details.open = true;
+      $("keys").scrollIntoView();
+    });
+    help.append(link, ".");
+  }
+}
+
+$("edit-voice-provider").addEventListener("change", () => {
+  shapeCharVoice();
+  text($("char-voices-msg"), "");
+});
+$("clone-provider").addEventListener("change", shapeClone);
+
+$("btn-char-voices").addEventListener("click", async () => {
+  const vp = $("edit-voice-provider").value;
+  text($("char-voices-msg"), "Loading…");
+  try {
+    const r = await api("GET", "/api/voices" + (vp ? "?provider=" + encodeURIComponent(vp) : ""));
+    const list = $("edit-voice-list");
+    list.replaceChildren();
+    for (const v of r.voices) { const o = document.createElement("option"); o.value = v.id; o.label = v.name; list.append(o); }
+    text($("char-voices-msg"), r.ok ? r.voices.length + " voices found: click the Voice ID box to choose" : "Could not list voices: " + r.message);
+  } catch (err) { text($("char-voices-msg"), err.message); }
+});
+
 $("btn-save-persona").addEventListener("click", async () => {
   try {
-    await api("PUT", "/api/characters/" + state.editing + "/persona", { persona: $("edit-persona").value, voice: $("edit-voice").value });
+    await api("PUT", "/api/characters/" + state.editing + "/persona", {
+      persona: $("edit-persona").value,
+      voice: $("edit-voice").value,
+      voice_provider: $("edit-voice-provider").value,
+    });
     text($("edit-msg"), "Saved.");
   } catch (err) { text($("edit-msg"), err.message); }
 });
 
-$("btn-clone").addEventListener("click", async () => {
-  const file = $("voice-file").files[0];
-  if (!file) return text($("edit-msg"), "Choose a WAV recording first.");
-  text($("edit-msg"), "Cloning…");
+async function runClone(useSample) {
+  const provider = $("clone-provider").value || "elevenlabs";
+  const info = CLONE_INFO[provider] || CLONE_INFO.elevenlabs;
+  let file;
+  if (!useSample) {
+    file = $("voice-file").files[0];
+    if (!file) return text($("edit-msg"), "Choose an audio recording first.");
+  }
+  const q = new URLSearchParams({ provider });
+  if (info.languages) q.set("language", $("clone-language").value || "en");
+  if (useSample) q.set("use_package_sample", "1");
+  text($("edit-msg"), "Cloning with " + info.label + "…");
   try {
-    const r = await api("POST", "/api/characters/" + state.editing + "/voice", undefined, file);
+    const r = await api("POST", "/api/characters/" + state.editing + "/voice?" + q, undefined, useSample ? "" : file);
     $("edit-voice").value = r.voice;
-    text($("edit-msg"), "Done: this character now speaks with the cloned voice.");
+    $("edit-voice-provider").value = r.provider || provider;
+    shapeCharVoice();
+    if (!useSample) $("voice-file").value = "";
+    text($("edit-msg"), "Done: this character now speaks with the cloned " + info.label + " voice.");
   } catch (err) { text($("edit-msg"), err.message); }
-});
+}
+
+$("btn-clone").addEventListener("click", () => runClone(false));
+$("btn-clone-sample").addEventListener("click", () => runClone(true));
 
 // ----- memory
 async function loadMemory() {
@@ -1009,10 +1118,13 @@ const SERVICES = {
   gemini: { key: "openai_compatible", hint: "Get a key at aistudio.google.com → Get API key (has a free tier).", llm: "e.g. gemini-3.5-flash-lite" },
   custom: { key: "openai_compatible", hint: "The key for the service at the address below, if it needs one.", llm: "", stt: "", tts: "" },
   elevenlabs: { key: "elevenlabs", hint: "Get a key at elevenlabs.io → Developers → API keys.", tts: "eleven_flash_v2_5" },
+  cartesia: { key: "cartesia", hint: "Get a key at play.cartesia.ai → API keys.", tts: "sonic-3.6" },
+  fishaudio: { key: "fishaudio", hint: "Get a key at fish.audio → API keys (includes a free model: s2.1-pro-free).", tts: "s2.1-pro" },
+  inworld: { key: "inworld", hint: "Get a Basic key at platform.inworld.ai → Settings → API keys.", tts: "inworld-tts-2" },
+  minimax: { key: "minimax", hint: "Get a key at platform.minimax.io → API keys.", tts: "speech-2.8-turbo" },
   local: { key: "", hint: "Runs on the device: no key and no cost." },
   selfhosted: { key: "local_llm", hint: "Free, and private: the model runs on your own computer. A key only if your server asks for one.", llm: "press Find on my network, or List models" },
 };
-let keyStatus = {};
 
 async function loadSettings() {
   const s = state.settings = await api("GET", "/api/settings");
@@ -1067,7 +1179,7 @@ function shapeGroup(group) {
   for (const el of box.querySelectorAll(".for-elevenlabs")) el.hidden = provider !== "elevenlabs";
   for (const el of box.querySelectorAll(".for-cloud")) el.hidden = provider === "local";
   for (const el of box.querySelectorAll(".for-local")) el.hidden = provider !== "local";
-  for (const el of box.querySelectorAll(".for-voicelist")) el.hidden = provider !== "local" && provider !== "elevenlabs";
+  for (const el of box.querySelectorAll(".for-voicelist")) el.hidden = !VOICE_LIST_PROVIDERS.has(provider);
   const model = $(group + "-model");
   if (model && info[group] !== undefined) model.placeholder = info[group];
   const keybox = box.querySelector(".keybox");
@@ -1108,7 +1220,7 @@ function renderKeys(status) {
     const input = document.createElement("input"); input.type = "password"; input.autocomplete = "off";
     input.placeholder = set ? "replace key" : "paste key";
     const save = document.createElement("button"); text(save, "Save");
-    save.addEventListener("click", async () => { keyStatus = await api("PUT", "/api/keys/" + name, { value: input.value }); refreshKeys(); });
+    save.addEventListener("click", async () => { keyStatus = await api("PUT", "/api/keys/" + name, { value: input.value.trim() }); refreshKeys(); });
     row.append(label, input, save);
     if (set) {
       const clear = document.createElement("button"); clear.className = "danger"; text(clear, "Remove");
@@ -1118,6 +1230,8 @@ function renderKeys(status) {
     box.append(row);
   }
   for (const g of Object.keys(FIELDS)) shapeGroup(g);
+  shapeCharVoice();
+  shapeClone();
 }
 
 async function saveServices() {
@@ -1129,7 +1243,8 @@ async function saveServices() {
       if (el) changes[group][n] = el.type === "number" ? Number(el.value) : el.value.trim();
     }
   }
-  await api("PUT", "/api/settings", changes);
+  state.settings = await api("PUT", "/api/settings", changes);
+  shapeCharVoice();
 }
 
 for (const b of document.querySelectorAll("[data-test]")) {

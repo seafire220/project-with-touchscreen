@@ -26,7 +26,7 @@ from . import backup as backup_module
 from . import support as support_module
 from . import updates as updates_module
 from .network import NetworkError
-from .providers import ProviderError, clone_voice_elevenlabs
+from .providers import ProviderError
 from .stage_link import CONTROL_NAMES, CONTROLS
 
 SESSION_COOKIE = "companion_session"
@@ -239,8 +239,11 @@ class Console:
         return web.json_response({"servers": found})
 
     async def voices(self, request):
+        provider = (request.query.get("provider") or "").strip().lower() or None
+        if provider and provider not in providers.TTS_PROVIDERS:
+            return web.json_response({"ok": False, "message": "unknown voice service: %s" % provider, "voices": []})
         try:
-            tts = self.device.build("tts")
+            tts = self.device.build("tts", provider=provider, require_voice=False)
             names = await asyncio.wait_for(tts.voices(), 30)
         except AttributeError:
             return web.json_response({"ok": False, "message": "this voice service has no voice list", "voices": []})
@@ -310,8 +313,23 @@ class Console:
     async def get_persona(self, request):
         cid = self._cid(request)
         device = self.device.characters.device_settings(cid)
-        return web.json_response({"persona": self.device.characters.persona(cid), "device": device,
-                                  "form": device.get("persona_form") or {}, "questions": list(persona.NAMES)})
+        keys = self.device.store.secret_status()
+        cloning = [{
+            "id": pid,
+            "label": info["label"],
+            "has_key": bool(keys.get(info["secret"])),
+            "formats": list(info["formats"]),
+            "max_mb": info["max_bytes"] // (1024 * 1024),
+            "languages": bool(info["languages"]),
+        } for pid, info in providers.VOICE_CLONING_PROVIDERS.items()]
+        return web.json_response({
+            "persona": self.device.characters.persona(cid),
+            "device": device,
+            "form": device.get("persona_form") or {},
+            "questions": list(persona.NAMES),
+            "has_voice_sample": os.path.isfile(self.device.characters.file(cid, "voice/sample.wav")),
+            "cloning_providers": cloning,
+        })
 
     async def get_emotions(self, request):
         cid = self._cid(request)
@@ -645,6 +663,11 @@ class Console:
                     self.device.use_character_motion(cid)
             if "voice" in body:
                 self.device.characters.set_device_settings(cid, {"voice": str(body["voice"])[:200]})
+            if "voice_provider" in body:
+                vp = str(body["voice_provider"] or "").strip().lower()
+                if vp and vp not in providers.TTS_PROVIDERS:
+                    raise ValueError("unknown voice service: %s" % vp)
+                self.device.characters.set_device_settings(cid, {"voice_provider": vp})
         except ValueError as error:
             raise web.HTTPBadRequest(text=str(error))
         self.device.conversation = None
@@ -652,20 +675,42 @@ class Console:
 
     async def clone_voice(self, request):
         cid = self._cid(request)
-        key = self.device.store.secret("elevenlabs")
+        default_provider = self.device.store.settings()["tts"].get("provider", "")
+        provider = (request.query.get("provider") or (
+            default_provider if default_provider in providers.VOICE_CLONING_PROVIDERS else "elevenlabs")).strip().lower()
+        info = providers.VOICE_CLONING_PROVIDERS.get(provider)
+        if not info:
+            raise web.HTTPBadRequest(text="unknown voice cloning service: %s" % provider)
+        key = self.device.store.secret(info["secret"])
         if not key:
-            raise web.HTTPBadRequest(text="set an ElevenLabs key first")
-        sample = await request.read()
-        if not sample.startswith(b"RIFF") or len(sample) > 20 * 1024 * 1024:
-            raise web.HTTPBadRequest(text="send a WAV recording of up to 20 MB")
+            raise web.HTTPBadRequest(text="set a %s key first (under AI services)" % info["label"])
+        language = (request.query.get("language") or "en").strip()[:20]
+        if request.query.get("use_package_sample") == "1":
+            path = self.device.characters.file(cid, "voice/sample.wav")
+            if not os.path.isfile(path):
+                raise web.HTTPBadRequest(text="this character has no voice sample of its own")
+            with open(path, "rb") as f:
+                sample = f.read()
+        else:
+            sample = await request.read()
+        try:
+            ext, _ = providers.sniff_audio(sample)
+        except ProviderError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        if ext not in info["formats"]:
+            raise web.HTTPBadRequest(text="%s accepts %s recordings for voice cloning (got %s)" % (
+                info["label"], ", ".join(f.upper() for f in info["formats"]), ext.upper()))
+        if len(sample) > info["max_bytes"]:
+            raise web.HTTPBadRequest(text="%s accepts recordings up to %d MB" % (
+                info["label"], info["max_bytes"] // (1024 * 1024)))
         name = self.device.characters.manifest(cid).get("name", cid)
         try:
-            voice = await clone_voice_elevenlabs(key, name, sample)
+            voice = await providers.clone_voice(provider, key, name, sample, language=language)
         except ProviderError as error:
             raise web.HTTPBadGateway(text=str(error))
-        self.device.characters.set_device_settings(cid, {"voice": voice})
+        self.device.characters.set_device_settings(cid, {"voice": voice, "voice_provider": provider})
         self.device.conversation = None
-        return web.json_response({"voice": voice})
+        return web.json_response({"voice": voice, "provider": provider})
 
     # ----- memory
     async def get_memory(self, request):

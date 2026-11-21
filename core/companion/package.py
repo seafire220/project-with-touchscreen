@@ -66,6 +66,8 @@ ALLOWED = [
 # Things that look like credentials. A package containing one is refused.
 SECRET_PATTERNS = [
     re.compile(r"sk-(ant-|proj-)?[A-Za-z0-9_\-]{20,}"),
+    re.compile(r"\bsk_car_[A-Za-z0-9_\-]{16,}"),
+    re.compile(r"\bsk_[0-9a-f]{32,}"),
     re.compile(r"\bAIza[0-9A-Za-z_\-]{30,}"),
     re.compile(r"\bgsk_[A-Za-z0-9]{20,}"),
     re.compile(r"\bxai-[A-Za-z0-9]{20,}"),

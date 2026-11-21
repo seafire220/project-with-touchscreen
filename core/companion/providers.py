@@ -8,10 +8,12 @@ Speech recognition takes 16-bit mono PCM and returns text.
 Voices stream 16-bit mono PCM at `tts.rate` samples per second.
 """
 import asyncio
+import base64
 import io
 import ipaddress
 import json
 import re
+import secrets
 import socket
 import urllib.parse
 import wave
@@ -145,8 +147,13 @@ def _status_error(service, status, body):
     detail = ""
     try:
         data = json.loads(body)
-        err = data.get("error", data)
-        detail = err.get("message", "") if isinstance(err, dict) else str(err)
+        err = data.get("error", data) if isinstance(data, dict) else data
+        if isinstance(err, dict):
+            detail = err.get("message") or err.get("detail") or err.get("title") or ""
+            if isinstance(detail, dict):
+                detail = detail.get("message") or str(detail)
+        else:
+            detail = str(err)
     except (ValueError, AttributeError):
         detail = body[:200] if isinstance(body, str) else ""
     if status in (401, 403):
@@ -172,6 +179,24 @@ async def iter_sse(response):
             line = line.rstrip(b"\r")
             if line.startswith(b"data:"):
                 yield line[5:].strip().decode("utf-8", "replace")
+    tail = buffer.rstrip(b"\r")
+    if tail.startswith(b"data:"):
+        yield tail[5:].strip().decode("utf-8", "replace")
+
+
+async def iter_ndjson(response):
+    """Yield each non-empty line of a newline-delimited JSON stream (handles lines larger than 64 KiB)."""
+    buffer = b""
+    async for chunk in response.content.iter_any():
+        buffer += chunk
+        while b"\n" in buffer:
+            line, buffer = buffer.split(b"\n", 1)
+            line = line.strip()
+            if line:
+                yield line.decode("utf-8", "replace")
+    tail = buffer.strip()
+    if tail:
+        yield tail.decode("utf-8", "replace")
 
 
 class OpenAICompatibleLLM:
@@ -651,23 +676,149 @@ class LocalTTS:
         return "spoke %.1f seconds of audio on the device" % (size / 2 / self.rate)
 
 
+# Voice services that support custom voice cloning from a recording.
+VOICE_CLONING_PROVIDERS = {
+    "elevenlabs": {
+        "label": "ElevenLabs",
+        "secret": "elevenlabs",
+        "default_model": "eleven_flash_v2_5",
+        "max_bytes": 20 * 1024 * 1024,
+        "formats": ("wav", "mp3", "m4a", "ogg", "flac", "webm"),
+        "languages": False,
+    },
+    "cartesia": {
+        "label": "Cartesia",
+        "secret": "cartesia",
+        "default_model": "sonic-3.6",
+        "max_bytes": 16 * 1024 * 1024,
+        "formats": ("wav", "mp3", "ogg", "flac", "webm"),
+        "languages": True,
+    },
+    "fishaudio": {
+        "label": "Fish Audio",
+        "secret": "fishaudio",
+        "default_model": "s2.1-pro",
+        "max_bytes": 20 * 1024 * 1024,
+        "formats": ("wav", "mp3", "m4a", "ogg"),
+        "languages": False,
+    },
+    "inworld": {
+        "label": "Inworld AI",
+        "secret": "inworld",
+        "default_model": "inworld-tts-2",
+        "max_bytes": 12 * 1024 * 1024,
+        "formats": ("wav", "mp3", "webm"),
+        "languages": True,
+    },
+    "minimax": {
+        "label": "MiniMax",
+        "secret": "minimax",
+        "default_model": "speech-2.8-turbo",
+        "max_bytes": 20 * 1024 * 1024,
+        "formats": ("wav", "mp3", "m4a"),
+        "languages": False,
+    },
+}
+
+TTS_PROVIDERS = ("local",) + tuple(VOICE_CLONING_PROVIDERS) + tuple(OPENAI_COMPATIBLE)
+
+_INWORLD_LANGS = {
+    "auto": "AUTO", "en": "EN_US", "zh": "ZH_CN", "ja": "JA_JP", "ko": "KO_KR",
+    "es": "ES_ES", "fr": "FR_FR", "de": "DE_DE", "it": "IT_IT", "pt": "PT_BR",
+    "ru": "RU_RU", "ar": "AR_SA", "pl": "PL_PL", "nl": "NL_NL",
+}
+
+
+def _bearer(key):
+    key = (key or "").strip()
+    return key if key.lower().startswith("bearer ") else "Bearer " + key
+
+
+def _inworld_auth(key):
+    key = (key or "").strip()
+    return key if key.lower().startswith(("basic ", "bearer ")) else "Basic " + key
+
+
+def sniff_audio(data):
+    """Identify an audio recording from its header bytes -> (extension, mime_type)."""
+    if not data or len(data) < 4:
+        raise ProviderError("send a WAV, MP3, M4A, OGG, FLAC or WebM audio recording")
+    if data[:4] == b"RIFF":
+        if len(data) >= 12 and data[8:12] not in (b"WAVE", b"\0\0\0\0"):
+            raise ProviderError("that RIFF file is not a WAV audio recording")
+        return "wav", "audio/wav"
+    if data[:3] == b"ID3" or (data[0] == 0xFF and (data[1] & 0xE0) == 0xE0):
+        return "mp3", "audio/mpeg"
+    if data[:4] == b"fLaC":
+        return "flac", "audio/flac"
+    if data[:4] == b"OggS":
+        return "ogg", "audio/ogg"
+    if data[:4] == b"\x1a\x45\xdf\xa3":
+        return "webm", "audio/webm"
+    if len(data) >= 12 and data[4:8] == b"ftyp":
+        return "m4a", "audio/mp4"
+    raise ProviderError("send a WAV, MP3, M4A, OGG, FLAC or WebM audio recording")
+
+
+def _cartesia_lang(language):
+    code = (language or "en").strip().lower().replace("_", "-").split("-")[0]
+    if not code or code == "auto" or not re.fullmatch(r"[a-z]{2}", code):
+        return "en"
+    return code
+
+
+def _inworld_lang(language):
+    raw = (language or "en").strip()
+    if re.fullmatch(r"[A-Z]{2}_[A-Z]{2}", raw) or raw == "AUTO":
+        return raw
+    code = raw.lower().replace("_", "-").split("-")[0]
+    return _INWORLD_LANGS.get(code, "AUTO")
+
+
+def _minimax_voice_id(name):
+    """Build a valid unique MiniMax voice_id: 8-256 chars, starts with a letter, ends with alnum."""
+    slug = re.sub(r"[^A-Za-z0-9_-]+", "_", (name or "voice")).strip("_-")[:32]
+    if not slug or not slug[0].isalpha():
+        slug = "v_" + slug if slug else "voice"
+    return "c_%s_%s" % (slug, secrets.token_hex(4))
+
+
+def _minimax_check(data):
+    """Raise ProviderError when MiniMax reports a non-zero business status inside HTTP 200."""
+    if not isinstance(data, dict):
+        return
+    base = data.get("base_resp") or {}
+    code = base.get("status_code")
+    if code in (None, 0):
+        return
+    msg = base.get("status_msg") or "request failed"
+    if code in (1004, 2049):
+        raise ProviderError("MiniMax refused the key (%s). Check the key in Settings." % msg)
+    if code in (1000, 1001, 1002, 1039):
+        raise ProviderError("MiniMax is busy or rate-limiting (%s: %s)" % (code, msg), retry=True)
+    raise ProviderError("MiniMax refused the request (%s: %s)" % (code, msg))
+
+
 class ElevenLabsTTS:
     """ElevenLabs voices, including cloned ones, streamed as raw 24 kHz PCM."""
 
     rate = 24000
     base_url = "https://api.elevenlabs.io/v1"
 
-    def __init__(self, key, voice, model="eleven_flash_v2_5"):
+    def __init__(self, key, voice="", model="eleven_flash_v2_5", require_voice=True):
         if not key:
             raise ProviderError("no ElevenLabs key is set")
-        if not voice:
+        if require_voice and not voice:
             raise ProviderError("no ElevenLabs voice is chosen")
         self.key = key
-        self.voice = voice
+        self.voice = voice or ""
         self.model = model or "eleven_flash_v2_5"
 
     async def stream(self, text):
-        url = "%s/text-to-speech/%s/stream?output_format=pcm_%d" % (self.base_url, self.voice, self.rate)
+        if not self.voice:
+            raise ProviderError("no ElevenLabs voice is chosen")
+        vid = urllib.parse.quote(self.voice, safe="")
+        url = "%s/text-to-speech/%s/stream?output_format=pcm_%d" % (self.base_url, vid, self.rate)
         body = {"text": text, "model_id": self.model}
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             try:
@@ -681,11 +832,18 @@ class ElevenLabsTTS:
 
     async def voices(self):
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-            async with session.get(self.base_url + "/voices", headers={"xi-api-key": self.key}) as r:
-                if r.status != 200:
-                    raise _status_error("ElevenLabs", r.status, await r.text())
-                data = await r.json(content_type=None)
-        return [{"id": v.get("voice_id"), "name": v.get("name")} for v in data.get("voices", [])]
+            try:
+                async with session.get(self.base_url + "/voices", headers={"xi-api-key": self.key}) as r:
+                    if r.status != 200:
+                        raise _status_error("ElevenLabs", r.status, await r.text())
+                    data = await r.json(content_type=None)
+            except aiohttp.ClientError as error:
+                raise ProviderError("ElevenLabs could not be reached (%s)" % type(error).__name__, retry=True)
+        items = [v for v in (data or {}).get("voices", []) if v.get("voice_id")]
+        items.sort(key=lambda v: 0 if v.get("category") == "cloned" else 1)
+        return [{"id": v["voice_id"],
+                 "name": "%s (cloned)" % v.get("name", v["voice_id"]) if v.get("category") == "cloned"
+                 else v.get("name", v["voice_id"])} for v in items]
 
     async def test(self):
         size = 0
@@ -694,17 +852,490 @@ class ElevenLabsTTS:
         return "spoke %.1f seconds of audio" % (size / 2 / self.rate)
 
 
-async def clone_voice_elevenlabs(key, name, sample_wav):
-    """Make a cloned voice from a sample; returns its voice id. The voice lives in the owner's account."""
+async def clone_voice_elevenlabs(key, name, sample_wav, filename="sample.wav", content_type="audio/wav", base_url=None):
+    """Make a cloned voice on ElevenLabs from a sample; returns its voice id."""
     form = aiohttp.FormData()
-    form.add_field("name", name[:100])
-    form.add_field("files", sample_wav, filename="sample.wav", content_type="audio/wav")
+    form.add_field("name", (name or "Voice")[:100])
+    form.add_field("files", sample_wav, filename=filename, content_type=content_type)
+    url = (base_url or ElevenLabsTTS.base_url).rstrip("/") + "/voices/add"
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
-        async with session.post(ElevenLabsTTS.base_url + "/voices/add", data=form, headers={"xi-api-key": key}) as r:
-            if r.status != 200:
-                raise _status_error("ElevenLabs", r.status, await r.text())
-            data = await r.json(content_type=None)
-    return data["voice_id"]
+        try:
+            async with session.post(url, data=form, headers={"xi-api-key": key}) as r:
+                if r.status not in (200, 201):
+                    raise _status_error("ElevenLabs", r.status, await r.text())
+                data = await r.json(content_type=None)
+        except aiohttp.ClientError as error:
+            raise ProviderError("ElevenLabs could not be reached (%s)" % type(error).__name__, retry=True)
+    voice_id = (data or {}).get("voice_id")
+    if not voice_id:
+        raise ProviderError("ElevenLabs did not return a voice id")
+    return voice_id
+
+
+class CartesiaTTS:
+    """Cartesia Sonic voices, including instant clones, streamed as raw 24 kHz PCM."""
+
+    rate = 24000
+    base_url = "https://api.cartesia.ai"
+    api_version = "2026-08-14"
+
+    def __init__(self, key, voice="", model="sonic-3.6", require_voice=True):
+        if not key:
+            raise ProviderError("no Cartesia key is set")
+        if require_voice and not voice:
+            raise ProviderError("no Cartesia voice is chosen")
+        self.key = key
+        self.voice = voice or ""
+        self.model = model or "sonic-3.6"
+
+    def _headers(self):
+        return {"Authorization": _bearer(self.key), "Cartesia-Version": self.api_version}
+
+    async def stream(self, text):
+        if not self.voice:
+            raise ProviderError("no Cartesia voice is chosen")
+        body = {
+            "model_id": self.model,
+            "transcript": text,
+            "voice": self.voice,
+            "output_format": {
+                "container": "raw",
+                "encoding": "pcm_s16le",
+                "sample_rate": self.rate,
+            },
+        }
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.post(self.base_url + "/tts/bytes", json=body, headers=self._headers()) as r:
+                    if r.status != 200:
+                        raise _status_error("Cartesia", r.status, await r.text())
+                    async for chunk in r.content.iter_chunked(4800):
+                        yield chunk
+            except aiohttp.ClientError as error:
+                raise ProviderError("Cartesia could not be reached (%s)" % type(error).__name__, retry=True)
+
+    async def voices(self):
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.get(self.base_url + "/voices?limit=100", headers=self._headers()) as r:
+                    if r.status != 200:
+                        raise _status_error("Cartesia", r.status, await r.text())
+                    data = await r.json(content_type=None)
+            except aiohttp.ClientError as error:
+                raise ProviderError("Cartesia could not be reached (%s)" % type(error).__name__, retry=True)
+        raw = data.get("data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        items = [v for v in raw if isinstance(v, dict) and v.get("id")]
+        items.sort(key=lambda v: 0 if v.get("is_owner") else 1)
+        return [{"id": v["id"],
+                 "name": "%s (yours)" % v.get("name", v["id"]) if v.get("is_owner")
+                 else v.get("name", v["id"])} for v in items]
+
+    async def test(self):
+        size = 0
+        async for chunk in self.stream("Testing."):
+            size += len(chunk)
+        return "spoke %.1f seconds of audio" % (size / 2 / self.rate)
+
+
+async def clone_voice_cartesia(key, name, sample, language="en", filename="sample.wav", content_type="audio/wav",
+                               base_url=None):
+    """Make an instant cloned voice on Cartesia; returns its voice id."""
+    form = aiohttp.FormData()
+    form.add_field("clip", sample, filename=filename, content_type=content_type)
+    form.add_field("name", (name or "Voice")[:100])
+    form.add_field("language", _cartesia_lang(language))
+    form.add_field("access", "private")
+    headers = {"Authorization": _bearer(key), "Cartesia-Version": CartesiaTTS.api_version}
+    url = (base_url or CartesiaTTS.base_url).rstrip("/") + "/voices/clone"
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+        try:
+            async with session.post(url, data=form, headers=headers) as r:
+                if r.status not in (200, 201):
+                    raise _status_error("Cartesia", r.status, await r.text())
+                data = await r.json(content_type=None)
+        except aiohttp.ClientError as error:
+            raise ProviderError("Cartesia could not be reached (%s)" % type(error).__name__, retry=True)
+    voice_id = (data or {}).get("id")
+    if not voice_id:
+        raise ProviderError("Cartesia did not return a voice id")
+    return voice_id
+
+
+class FishAudioTTS:
+    """Fish Audio voices, including cloned voice models, streamed as raw 24 kHz PCM."""
+
+    rate = 24000
+    base_url = "https://api.fish.audio"
+
+    def __init__(self, key, voice="", model="s2.1-pro", require_voice=True):
+        if not key:
+            raise ProviderError("no Fish Audio key is set")
+        if require_voice and not voice:
+            raise ProviderError("no Fish Audio voice is chosen")
+        self.key = key
+        self.voice = voice or ""
+        self.model = model or "s2.1-pro"
+
+    async def stream(self, text):
+        if not self.voice:
+            raise ProviderError("no Fish Audio voice is chosen")
+        headers = {"Authorization": _bearer(self.key), "model": self.model}
+        body = {
+            "text": text,
+            "reference_id": self.voice,
+            "format": "pcm",
+            "sample_rate": self.rate,
+            "latency": "balanced",
+        }
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.post(self.base_url + "/v1/tts", json=body, headers=headers) as r:
+                    if r.status != 200:
+                        raise _status_error("Fish Audio", r.status, await r.text())
+                    async for chunk in r.content.iter_chunked(4800):
+                        yield chunk
+            except aiohttp.ClientError as error:
+                raise ProviderError("Fish Audio could not be reached (%s)" % type(error).__name__, retry=True)
+
+    async def voices(self):
+        headers = {"Authorization": _bearer(self.key)}
+        seen, out = set(), []
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                for query, tag in (("self=true&page_size=50", " (yours)"), ("page_size=50&sort_by=task_count", "")):
+                    async with session.get("%s/model?%s" % (self.base_url, query), headers=headers) as r:
+                        if r.status != 200:
+                            if out:
+                                break
+                            raise _status_error("Fish Audio", r.status, await r.text())
+                        data = await r.json(content_type=None)
+                    for item in (data or {}).get("items", []):
+                        vid = item.get("_id") or item.get("id")
+                        if not vid or vid in seen:
+                            continue
+                        seen.add(vid)
+                        title = item.get("title") or vid
+                        out.append({"id": vid, "name": title + tag})
+            except aiohttp.ClientError as error:
+                raise ProviderError("Fish Audio could not be reached (%s)" % type(error).__name__, retry=True)
+        return out
+
+    async def test(self):
+        size = 0
+        async for chunk in self.stream("Testing."):
+            size += len(chunk)
+        return "spoke %.1f seconds of audio" % (size / 2 / self.rate)
+
+
+async def clone_voice_fishaudio(key, name, sample, filename="sample.wav", content_type="audio/wav", base_url=None):
+    """Create a private cloned voice model on Fish Audio; returns its model id."""
+    form = aiohttp.FormData()
+    form.add_field("type", "tts")
+    form.add_field("title", (name or "Voice")[:100])
+    form.add_field("train_mode", "fast")
+    form.add_field("visibility", "private")
+    form.add_field("enhance_audio_quality", "true")
+    form.add_field("voices", sample, filename=filename, content_type=content_type)
+    url = (base_url or FishAudioTTS.base_url).rstrip("/") + "/model"
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+        try:
+            async with session.post(url, data=form, headers={"Authorization": _bearer(key)}) as r:
+                if r.status not in (200, 201):
+                    raise _status_error("Fish Audio", r.status, await r.text())
+                data = await r.json(content_type=None)
+        except aiohttp.ClientError as error:
+            raise ProviderError("Fish Audio could not be reached (%s)" % type(error).__name__, retry=True)
+    voice_id = (data or {}).get("_id") or (data or {}).get("id")
+    if not voice_id:
+        raise ProviderError("Fish Audio did not return a voice id")
+    return voice_id
+
+
+class InworldTTS:
+    """Inworld AI Realtime TTS voices, including instant clones, streamed as raw 24 kHz PCM."""
+
+    rate = 24000
+    base_url = "https://api.inworld.ai"
+
+    def __init__(self, key, voice="", model="inworld-tts-2", require_voice=True):
+        if not key:
+            raise ProviderError("no Inworld AI key is set")
+        if require_voice and not voice:
+            raise ProviderError("no Inworld AI voice is chosen")
+        self.key = key
+        self.voice = voice or ""
+        self.model = model or "inworld-tts-2"
+
+    def _headers(self):
+        return {
+            "Authorization": _inworld_auth(self.key),
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
+    async def stream(self, text):
+        if not self.voice:
+            raise ProviderError("no Inworld AI voice is chosen")
+        body = {
+            "text": text,
+            "voiceId": self.voice,
+            "modelId": self.model,
+            "audioConfig": {
+                "audioEncoding": "PCM",
+                "sampleRateHertz": self.rate,
+            },
+        }
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.post(self.base_url + "/tts/v1/voice:stream", json=body, headers=self._headers()) as r:
+                    if r.status != 200:
+                        raise _status_error("Inworld AI", r.status, await r.text())
+                    async for line in iter_ndjson(r):
+                        try:
+                            event = json.loads(line)
+                        except ValueError:
+                            continue
+                        if isinstance(event, dict) and event.get("error"):
+                            err = event["error"]
+                            msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+                            code = err.get("code") if isinstance(err, dict) else None
+                            raise ProviderError("Inworld AI: %s" % msg, retry=code in (8, 13, 14))
+                        result = event.get("result") if isinstance(event, dict) else None
+                        payload = result if isinstance(result, dict) else (event if isinstance(event, dict) else {})
+                        b64 = payload.get("audioContent")
+                        if b64:
+                            try:
+                                pcm = base64.b64decode(b64)
+                            except ValueError:
+                                continue
+                            if pcm:
+                                yield pcm
+            except aiohttp.ClientError as error:
+                raise ProviderError("Inworld AI could not be reached (%s)" % type(error).__name__, retry=True)
+
+    async def voices(self):
+        headers = {"Authorization": _inworld_auth(self.key)}
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.get(self.base_url + "/voices/v1/voices", headers=headers) as r:
+                    if r.status == 404:
+                        async with session.get(self.base_url + "/tts/v1/voices", headers=headers) as r2:
+                            if r2.status != 200:
+                                raise _status_error("Inworld AI", r2.status, await r2.text())
+                            data = await r2.json(content_type=None)
+                    elif r.status != 200:
+                        raise _status_error("Inworld AI", r.status, await r.text())
+                    else:
+                        data = await r.json(content_type=None)
+            except aiohttp.ClientError as error:
+                raise ProviderError("Inworld AI could not be reached (%s)" % type(error).__name__, retry=True)
+        items = [v for v in (data or {}).get("voices", []) if isinstance(v, dict) and v.get("voiceId")]
+        is_custom = lambda v: bool(v.get("isCustom") or v.get("owned") or v.get("source") in ("IVC", "PVC", "TVD"))
+        items.sort(key=lambda v: 0 if is_custom(v) else 1)
+        return [{"id": v["voiceId"],
+                 "name": "%s (yours)" % (v.get("displayName") or v["voiceId"]) if is_custom(v)
+                 else (v.get("displayName") or v["voiceId"])} for v in items]
+
+    async def test(self):
+        size = 0
+        async for chunk in self.stream("Testing."):
+            size += len(chunk)
+        return "spoke %.1f seconds of audio" % (size / 2 / self.rate)
+
+
+async def clone_voice_inworld(key, name, sample, language="en", base_url=None):
+    """Make an instant cloned voice on Inworld AI; returns its voiceId."""
+    body = {
+        "displayName": (name or "Voice")[:100],
+        "langCode": _inworld_lang(language),
+        "voiceSamples": [{"audioData": base64.b64encode(sample).decode("ascii")}],
+        "audioProcessingConfig": {"removeBackgroundNoise": True},
+    }
+    headers = {"Authorization": _inworld_auth(key), "Content-Type": "application/json"}
+    url = (base_url or InworldTTS.base_url).rstrip("/") + "/voices/v1/voices:clone"
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+        try:
+            async with session.post(url, json=body, headers=headers) as r:
+                if r.status not in (200, 201):
+                    raise _status_error("Inworld AI", r.status, await r.text())
+                data = await r.json(content_type=None)
+        except aiohttp.ClientError as error:
+            raise ProviderError("Inworld AI could not be reached (%s)" % type(error).__name__, retry=True)
+    voice = (data or {}).get("voice") if isinstance(data, dict) else None
+    voice_id = (voice.get("voiceId") if isinstance(voice, dict) else None) or (
+        data.get("voiceId") if isinstance(data, dict) else None)
+    if not voice_id:
+        raise ProviderError("Inworld AI did not return a voice id")
+    return voice_id
+
+
+class MiniMaxTTS:
+    """MiniMax Speech voices, including rapid clones, streamed as raw 24 kHz PCM."""
+
+    rate = 24000
+    base_url = "https://api.minimax.io/v1"
+
+    def __init__(self, key, voice="", model="speech-2.8-turbo", require_voice=True):
+        if not key:
+            raise ProviderError("no MiniMax key is set")
+        if require_voice and not voice:
+            raise ProviderError("no MiniMax voice is chosen")
+        self.key = key
+        self.voice = voice or ""
+        self.model = model or "speech-2.8-turbo"
+
+    def _headers(self):
+        return {"Authorization": _bearer(self.key), "Content-Type": "application/json"}
+
+    async def stream(self, text):
+        if not self.voice:
+            raise ProviderError("no MiniMax voice is chosen")
+        body = {
+            "model": self.model,
+            "text": text,
+            "stream": True,
+            "stream_options": {"exclude_aggregated_audio": True},
+            "voice_setting": {
+                "voice_id": self.voice,
+                "speed": 1.0,
+                "vol": 1.0,
+                "pitch": 0,
+            },
+            "audio_setting": {
+                "sample_rate": self.rate,
+                "format": "pcm",
+                "channel": 1,
+            },
+            "output_format": "hex",
+        }
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.post(self.base_url + "/t2a_v2", json=body, headers=self._headers()) as r:
+                    if r.status != 200:
+                        raise _status_error("MiniMax", r.status, await r.text())
+                    if "json" in (r.content_type or "").lower():
+                        data = await r.json(content_type=None)
+                        _minimax_check(data)
+                        hex_audio = ((data or {}).get("data") or {}).get("audio") or ""
+                        if hex_audio:
+                            yield bytes.fromhex(hex_audio)
+                        return
+                    emitted = False
+                    async for raw in iter_sse(r):
+                        if not raw or raw == "[DONE]":
+                            continue
+                        try:
+                            event = json.loads(raw)
+                        except ValueError:
+                            continue
+                        _minimax_check(event)
+                        chunk_data = (event.get("data") or {}) if isinstance(event, dict) else {}
+                        hex_audio = chunk_data.get("audio") or ""
+                        status = chunk_data.get("status")
+                        # Without exclude_aggregated_audio, MiniMax repeats all audio on status == 2.
+                        if status == 2 and emitted:
+                            continue
+                        if hex_audio:
+                            try:
+                                pcm = bytes.fromhex(hex_audio)
+                            except ValueError:
+                                continue
+                            if pcm:
+                                emitted = True
+                                yield pcm
+            except aiohttp.ClientError as error:
+                raise ProviderError("MiniMax could not be reached (%s)" % type(error).__name__, retry=True)
+
+    async def voices(self):
+        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+            try:
+                async with session.post(self.base_url + "/get_voice", json={"voice_type": "all"},
+                                        headers=self._headers()) as r:
+                    if r.status != 200:
+                        raise _status_error("MiniMax", r.status, await r.text())
+                    data = await r.json(content_type=None)
+            except aiohttp.ClientError as error:
+                raise ProviderError("MiniMax could not be reached (%s)" % type(error).__name__, retry=True)
+        _minimax_check(data)
+        out, seen = [], set()
+        for group, tag in (("voice_cloning", " (cloned)"), ("voice_generation", " (designed)"), ("system_voice", "")):
+            for v in (data or {}).get(group) or []:
+                vid = v.get("voice_id") if isinstance(v, dict) else None
+                if not vid or vid in seen:
+                    continue
+                seen.add(vid)
+                label = v.get("voice_name") or vid
+                out.append({"id": vid, "name": label + tag})
+        return out
+
+    async def test(self):
+        size = 0
+        async for chunk in self.stream("Testing."):
+            size += len(chunk)
+        return "spoke %.1f seconds of audio" % (size / 2 / self.rate)
+
+
+async def clone_voice_minimax(key, name, sample, filename="sample.wav", content_type="audio/wav", base_url=None):
+    """Upload a voice sample and create a rapid cloned voice on MiniMax; returns its voice_id."""
+    base = (base_url or MiniMaxTTS.base_url).rstrip("/")
+    form = aiohttp.FormData()
+    form.add_field("purpose", "voice_clone")
+    form.add_field("file", sample, filename=filename, content_type=content_type)
+    auth = {"Authorization": _bearer(key)}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
+        try:
+            async with session.post(base + "/files/upload", data=form, headers=auth) as r:
+                if r.status not in (200, 201):
+                    raise _status_error("MiniMax", r.status, await r.text())
+                uploaded = await r.json(content_type=None)
+            _minimax_check(uploaded)
+            file_id = ((uploaded or {}).get("file") or {}).get("file_id")
+            if not file_id:
+                raise ProviderError("MiniMax did not return a file id for the uploaded sample")
+            voice_id = _minimax_voice_id(name)
+            body = {
+                "file_id": file_id,
+                "voice_id": voice_id,
+                "need_noise_reduction": True,
+                "need_volume_normalization": True,
+            }
+            async with session.post(base + "/voice_clone", json=body,
+                                    headers={**auth, "Content-Type": "application/json"}) as r:
+                if r.status not in (200, 201):
+                    raise _status_error("MiniMax", r.status, await r.text())
+                cloned = await r.json(content_type=None)
+            _minimax_check(cloned)
+        except aiohttp.ClientError as error:
+            raise ProviderError("MiniMax could not be reached (%s)" % type(error).__name__, retry=True)
+    return voice_id
+
+
+async def clone_voice(provider, key, name, sample, language="en"):
+    """Clone a voice on the chosen service from an audio recording; returns its voice id."""
+    info = VOICE_CLONING_PROVIDERS.get(provider)
+    if not info:
+        raise ProviderError("choose a voice cloning service: %s" % ", ".join(
+            v["label"] for v in VOICE_CLONING_PROVIDERS.values()))
+    if not key:
+        raise ProviderError("set a %s key first (under AI services)" % info["label"])
+    ext, content_type = sniff_audio(sample)
+    if ext not in info["formats"]:
+        raise ProviderError("%s accepts %s recordings for voice cloning (got %s)" % (
+            info["label"], ", ".join(f.upper() for f in info["formats"]), ext.upper()))
+    if len(sample) > info["max_bytes"]:
+        raise ProviderError("%s accepts recordings up to %d MB" % (info["label"], info["max_bytes"] // (1024 * 1024)))
+    filename = "sample." + ext
+    if provider == "elevenlabs":
+        return await clone_voice_elevenlabs(key, name, sample, filename=filename, content_type=content_type)
+    if provider == "cartesia":
+        return await clone_voice_cartesia(key, name, sample, language=language, filename=filename, content_type=content_type)
+    if provider == "fishaudio":
+        return await clone_voice_fishaudio(key, name, sample, filename=filename, content_type=content_type)
+    if provider == "inworld":
+        return await clone_voice_inworld(key, name, sample, language=language)
+    if provider == "minimax":
+        return await clone_voice_minimax(key, name, sample, filename=filename, content_type=content_type)
+    raise ProviderError("unsupported voice cloning service: %s" % provider)
 
 
 def build_llm(settings, store):
@@ -751,16 +1382,29 @@ def build_stt(settings, store, model_dir):
     raise ProviderError("no speech recognition is chosen yet")
 
 
-def build_tts(settings, store, voice=None, model_dir=None):
+def build_tts(settings, store, voice=None, model_dir=None, provider=None, require_voice=True):
     tts = settings["tts"]
-    provider = tts.get("provider", "")
-    chosen = voice or tts.get("voice", "")
-    if provider == "local":
+    default_provider = tts.get("provider", "")
+    active = provider or default_provider
+    same_provider = active == default_provider
+    chosen = voice if voice is not None else (tts.get("voice", "") if same_provider else "")
+    model = tts.get("model", "") if same_provider else ""
+    if active == "local":
         return LocalTTS(model_dir or "", chosen, tts.get("speed", 1.0))
-    if provider == "elevenlabs":
-        return ElevenLabsTTS(store.secret("elevenlabs"), chosen, tts.get("model", ""))
-    if provider in OPENAI_COMPATIBLE:
-        known = OPENAI_COMPATIBLE[provider]
-        return OpenAICompatibleTTS(tts.get("base_url") or known["base_url"], store.secret(known["secret"]),
-                                   tts.get("model", ""), chosen)
+    if active == "elevenlabs":
+        return ElevenLabsTTS(store.secret("elevenlabs"), chosen, model, require_voice=require_voice)
+    if active == "cartesia":
+        return CartesiaTTS(store.secret("cartesia"), chosen, model, require_voice=require_voice)
+    if active == "fishaudio":
+        return FishAudioTTS(store.secret("fishaudio"), chosen, model, require_voice=require_voice)
+    if active == "inworld":
+        return InworldTTS(store.secret("inworld"), chosen, model, require_voice=require_voice)
+    if active == "minimax":
+        return MiniMaxTTS(store.secret("minimax"), chosen, model, require_voice=require_voice)
+    if active in OPENAI_COMPATIBLE:
+        known = OPENAI_COMPATIBLE[active]
+        base = (tts.get("base_url") if same_provider else "") or known["base_url"]
+        if not model and active == "openai" and not same_provider:
+            model = "gpt-4o-mini-tts"
+        return OpenAICompatibleTTS(base, store.secret(known["secret"]), model, chosen)
     raise ProviderError("no voice service is chosen yet")

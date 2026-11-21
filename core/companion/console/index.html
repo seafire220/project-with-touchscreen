@@ -103,8 +103,21 @@
         <button id="btn-card" class="small">Use this card</button> <span id="card-msg"></span></p>
       <label>Persona (who the character is, and its greeting; edit freely)
         <textarea id="edit-persona" rows="14"></textarea></label>
-      <label>Voice ID for this character (from your voice service; blank uses the default)
-        <input id="edit-voice"></label>
+      <label>Voice service for this character <select id="edit-voice-provider">
+        <option value="">(same as AI services)</option>
+        <option value="local">On this device (free)</option>
+        <option value="elevenlabs">ElevenLabs</option>
+        <option value="cartesia">Cartesia</option>
+        <option value="fishaudio">Fish Audio</option>
+        <option value="inworld">Inworld AI</option>
+        <option value="minimax">MiniMax</option>
+        <option value="openai">OpenAI</option>
+        <option value="custom">Other (OpenAI-compatible)</option></select></label>
+      <label>Voice ID for this character (blank uses the default)
+        <input id="edit-voice" list="edit-voice-list">
+        <button type="button" id="btn-char-voices" class="small">List voices</button>
+        <span id="char-voices-msg" class="muted"></span></label>
+      <datalist id="edit-voice-list"></datalist>
       <p><button id="btn-save-persona">Save</button></p>
       <div id="edit-feelings" hidden>
         <h4>Feelings</h4>
@@ -187,9 +200,32 @@
             automatic</button> <span id="move-msg"></span></p>
         </div>
       </div>
-      <h4>Clone a voice (ElevenLabs)</h4>
-      <p>A clear WAV recording of 30 seconds to a few minutes. The voice is created in your own ElevenLabs account. Only use a voice you have the right to use.</p>
-      <p><input type="file" id="voice-file" accept=".wav,audio/wav"> <button id="btn-clone">Clone</button></p>
+      <h4>Clone a voice</h4>
+      <p class="muted">Make a custom voice for this character from a clear recording, saved in your own account on the service you choose. Only use a voice you have the right to use.</p>
+      <label>Cloning service <select id="clone-provider">
+        <option value="elevenlabs">ElevenLabs</option>
+        <option value="cartesia">Cartesia</option>
+        <option value="fishaudio">Fish Audio</option>
+        <option value="inworld">Inworld AI</option>
+        <option value="minimax">MiniMax</option></select></label>
+      <label id="clone-lang-row" hidden>Language <select id="clone-language">
+        <option value="en">English</option>
+        <option value="es">Spanish</option>
+        <option value="fr">French</option>
+        <option value="de">German</option>
+        <option value="it">Italian</option>
+        <option value="pt">Portuguese</option>
+        <option value="ja">Japanese</option>
+        <option value="ko">Korean</option>
+        <option value="zh">Chinese</option>
+        <option value="ru">Russian</option>
+        <option value="nl">Dutch</option>
+        <option value="pl">Polish</option>
+        <option value="ar">Arabic</option></select></label>
+      <p id="clone-help" class="muted"></p>
+      <p><input type="file" id="voice-file" accept=".wav,.mp3,.m4a,.ogg,.flac,.webm,audio/*">
+        <button type="button" id="btn-clone">Clone</button>
+        <button type="button" id="btn-clone-sample" class="small" hidden>Use character's sample</button></p>
       <p id="edit-msg"></p>
     </div>
   </section>
@@ -274,7 +310,12 @@
       <legend>2. Voice</legend>
       <label>Service <select id="tts-provider">
         <option value="">choose…</option><option value="local">On this device (free)</option>
-        <option value="elevenlabs">ElevenLabs (includes cloned voices)</option><option value="openai">OpenAI</option>
+        <option value="elevenlabs">ElevenLabs (voice cloning)</option>
+        <option value="cartesia">Cartesia (voice cloning)</option>
+        <option value="fishaudio">Fish Audio (voice cloning)</option>
+        <option value="inworld">Inworld AI (voice cloning)</option>
+        <option value="minimax">MiniMax (voice cloning)</option>
+        <option value="openai">OpenAI</option>
         <option value="custom">Other (OpenAI-compatible)</option></select></label>
       <div class="keybox" data-key-for="tts"></div>
       <label class="for-custom">Address <input id="tts-base_url"></label>
