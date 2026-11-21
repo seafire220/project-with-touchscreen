@@ -900,3 +900,20 @@ rejected. Settled entries are not reopened without new evidence.
   have. Text is UTF-8 everywhere (`PYTHONUTF8`), so names with accents survive Windows.
 - Not a packaged program (.exe, .app): those need code signing to open without warnings, and PyTorch makes
   them several GB. Python from python.org is the one thing a buyer installs.
+
+## D-064 — Character Studio is installed as a real app, with its own Python (replaces the last point of D-063)
+
+- Date: 2026-11-21. Status: built; built, installed and run on Windows, macOS and Linux on GitHub
+  (`.github/workflows/studio-apps.yml`).
+- D-063 left buyers to install Python, download the project's files and watch a terminal. That is not the
+  one-click app the plan promised. Now: a Windows installer (Inno Setup, per user, no administrator), a Mac
+  disk image (an app dragged to Applications) and a Linux AppImage. Each holds its own relocatable Python
+  (python-build-standalone, about 30 MB of a download), so nothing else is installed.
+- The heavy AI libraries (1-3 GB) are not in the download: the first start fetches the build of PyTorch that
+  suits the computer (NVIDIA, Apple, or the processor), showing each step and the download's progress on a
+  page in the browser, with Try again and Repair. Shipping them inside would make the download 1-3 GB and
+  could not suit every computer.
+- The studio stays a page in the browser (as it was), with no window of its own: one less thing to go
+  wrong on three systems. It gets a Quit button and stops by itself once its page has been closed a while.
+- Unsigned for now: Windows SmartScreen and macOS Gatekeeper warn once, and the guide says what to press.
+  Signing costs a yearly fee, so it is the owner's decision; the workflow is ready to gain it.

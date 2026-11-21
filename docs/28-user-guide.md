@@ -131,11 +131,19 @@ personality, voice, movement and memory.
 
 ### Making one from a picture: Character Studio
 
-Character Studio runs on your computer (not the device) and turns one
-picture into a moving character. How to install it is in
-`14-making-characters.md`.
+Character Studio is an app for your computer (Windows, Mac or Linux), not the device, that turns one
+picture into a moving character. Download it for your computer and install it like any other app
+(details, and what to do about the first-time security questions, are in `14-making-characters.md`):
 
-1. Drop in a picture and give the character a name.
+- **Windows**: run `CharacterStudio-Setup-<version>.exe`; it is then in the Start menu.
+- **Mac**: open `CharacterStudio-<version>.dmg` and drag Character Studio to Applications.
+- **Linux**: make the `.AppImage` file executable and double-click it.
+
+The first time it opens, a page in your browser shows it downloading its tools (about 1 GB, a few
+minutes); then the studio opens. After that:
+
+1. Drop in a picture and give the character a name. (The very first time, it downloads its part-finding
+   model too: one click, about 1.3 GB.)
 2. Watch it being made; a preview of it moving appears (about a minute).
 3. **Check the arms in the preview.** If an arm moves wrongly (a sleeve
    with no hand, a coat taken for an arm), untick that arm and make it

@@ -18,28 +18,46 @@ it to the device through its settings page.
 
 ## The easy way: Character Studio
 
-Character Studio is the character maker: a program for a laptop or desktop computer (**Windows, Mac or
-Linux**) that shows its page in the browser and runs on that computer only (`studio/app.py`). Adding and
-managing characters afterwards is done on the device's own settings page, in any browser.
+Character Studio is the character maker: an app for a laptop or desktop computer (**Windows, Mac or
+Linux**). It runs on that computer only and shows its page in the browser. Adding and managing characters
+afterwards is done on the device's own settings page, in any browser.
 
-**You need** Python 3.10 or newer (3.12 or 3.13 is best; from [python.org](https://www.python.org/downloads/),
-or Homebrew on a Mac), about 6 GB of free space, and the internet the first time. Get the project's files
-(on GitHub: **Code → Download ZIP**, then unzip it), then start the studio:
+### Installing it (buyers)
 
-| Computer | Start it |
-|---|---|
-| **Windows 10 or 11** | Double-click `studio\start.bat`. If Python is missing it says so: install it from python.org, ticking **Add python.exe to PATH**, and double-click again |
-| **Mac** (Apple silicon: M1 or newer) | Double-click `studio/start-mac.command`. The first time, macOS may refuse a file from the internet: Control-click it, choose **Open**, then **Open** again |
-| **Linux** | Run `studio/start.sh` |
+Download the app for your computer and install it like any other. It brings everything it needs, its own
+Python included: nothing else to install, no terminal.
 
-A window shows what it is doing; closing that window stops the studio. All three run `studio/launch.py`,
-which the first time sets up the studio's own Python environment in your home folder
-(`.character-studio`; `CHARACTER_STUDIO_HOME` chooses another): PyTorch built for that computer, the
-rigger and the model's libraries (a few GB, several minutes). PyTorch comes for the computer's graphics:
-an NVIDIA card on Windows or Linux, the Mac's own graphics on Apple silicon, otherwise the processor, which
-also works (about 30 seconds a picture on four cores). Later starts take seconds. No `git` is needed.
+| Computer | Download | Install and open |
+|---|---|---|
+| **Windows 10 or 11** (64-bit) | `CharacterStudio-Setup-<version>.exe` | Double-click it, then **Install**. Character Studio is then in the Start menu (and on the desktop). Remove it in **Settings → Apps** |
+| **Mac** with Apple silicon (M1 or newer), macOS 12 or newer | `CharacterStudio-<version>.dmg` | Open it and drag **Character Studio** to **Applications**, then open it from there |
+| **Linux** (64-bit) | `CharacterStudio-<version>-x86_64.AppImage` | Allow it to run (right-click → **Properties** → **Permissions** → *Allow executing as a program*), then double-click it |
 
-The page then offers to download the part-finding model once (about 1.3 GB, from its authors' pages).
+**The first start sets it up**: a page in the browser shows it downloading its AI tools, once (about 1 GB;
+about 3 GB with an NVIDIA graphics card), step by step with a progress bar, in a few minutes. Then the
+studio opens in its place. Later starts take a few seconds. If the internet drops, the page says so, with
+**Try again** (what is downloaded is kept) and **Repair** (download it all again).
+
+The studio's page has a **Quit** button. Closing the page is enough, too: the studio stops by itself 15
+minutes later (never while it is making a character or downloading). Opening the app again while it runs
+just shows its page again.
+
+**Until the apps are signed** (see *Code signing* below), Windows and macOS warn about an app from a new
+publisher. Once per computer:
+- **Windows**: the browser may say the file is not commonly downloaded: choose **Keep**. Then "Windows
+  protected your PC": choose **More info**, then **Run anyway**.
+- **Mac** (macOS 15 or newer): it says Apple could not check Character Studio: choose **Done**. Open
+  **System Settings → Privacy & Security**, scroll down to *Character Studio was blocked*, choose **Open
+  Anyway** and confirm with your password. (On macOS 14 or older: Control-click the app, choose **Open**,
+  then **Open**.)
+
+Where it keeps things: the downloaded tools and the part-finding model are in a folder in your home
+folder, `.character-studio` (several GB). The Windows uninstaller asks whether to delete it; on a Mac or
+Linux, delete that folder by hand to get the space back.
+
+### Using it
+
+The page first offers to download the part-finding model once (about 1.3 GB, from its authors' pages).
 After that:
 
 1. Drop a picture in and give the character a name. A character card (the
@@ -57,23 +75,49 @@ After that:
    upload and not kept. Or save the `.char` file and add it on the device's
    settings page.
 
-**Checked** (2026-11-21): on Linux here, a first run of `launch.py` in an empty folder, the model download
-from the page, a character made with the real part-finding model, and sending it into the device's real
-settings-page API. On **Windows, macOS and Linux** on GitHub's computers, every time the studio changes
-(`.github/workflows/studio.yml`): the same first-run setup as a buyer's computer, the studio's tests with
-that environment (a drawn test figure made into a character, rigged and packaged), and the studio started
-and answering. See the latest run under **Actions → Character Studio on Windows, macOS and Linux**. The
-first run (2026-11-21) passed on all three: each installed PyTorch 2.15 and the studio in two to four
-minutes, passed 99 tests, and started. (Two tests need things only a developer's computer has, the device's
-screen program and a photo of a face, and wait for those.) GitHub's Macs have no graphics in their virtual
-machines, so the Mac's graphics were not tried there; on a real Apple-silicon Mac PyTorch uses them.
+PyTorch, the AI library, comes for the computer's graphics: an NVIDIA card on Windows or Linux, the Mac's
+own graphics on Apple silicon, otherwise the processor, which also works (about 30 seconds a picture on
+four cores).
 
-**Older computers.** An Intel Mac gets no new PyTorch (its last is 2.2, for Python 3.12 or older), so the
-studio may not install there: use Apple silicon, Windows or Linux. A Mac on macOS 13 or older gets an older
-PyTorch, which should work, *unchecked*. An older NVIDIA card is served by the CUDA 12.6 build the studio
-asks for on Windows; on Linux, if PyTorch says the card is too old, set
-`CHARACTER_STUDIO_TORCH_INDEX=https://download.pytorch.org/whl/cu126` and delete
-`~/.character-studio/venv` to set up again.
+### Making the apps (the owner)
+
+On GitHub: **Actions → Make the Character Studio apps → Run workflow**, with a version (`2026.11.21`).
+In about ten minutes the run's page has three files under *Artifacts*: the Windows installer, the Mac disk
+image and the Linux AppImage. The workflow builds each with its own Python
+(`studio/packaging/build_app.py`), then **installs it the way a buyer would and runs it**: the first start
+with its downloads, the page, the studio answering, Quit; on Windows also through the Start-menu icon's
+own program and an uninstall; on a Mac also after moving the app (which must not download again).
+
+Put the three files where buyers download from: your web site, or the releases of a public GitHub
+repository *for the studio*. Not the update repository: devices read its newest release as their update.
+
+**Code signing** takes away the warnings above. It needs, once a year:
+- **Apple**: the Apple Developer Program (US$99, about A$150). The workflow can then sign and notarize the
+  Mac app; that needs your certificate and an app-specific password added as secrets.
+- **Windows**: a code-signing certificate (prices vary by seller; Microsoft's own signing service is the
+  cheapest where it is offered to your kind of business). Windows may still warn for a while, until
+  enough people have installed the app.
+
+Neither is built in yet: tell me when you have them.
+
+### From the project's files (developers)
+
+`studio/start.sh` (Linux, Mac), `studio/start-mac.command` (a Mac, double-clicked) and `studio/start.bat`
+(Windows) start the studio from a copy of this repository, with a Python 3.10 or newer already installed,
+writing what they do in a window. They use the same launcher (`studio/launch.py`) and the same folder.
+
+**Checked** (2026-11-21): on Linux here, the AppImage built and started from two different places with the
+studio's tools already downloaded (it pointed its environment at its own Python again and downloaded
+nothing), and a first start in an empty folder up to the download this sandbox refuses (the page showed
+each step, then *Try again*). On **Windows, macOS and Linux** on GitHub's computers: the apps are built,
+installed and run as above (`.github/workflows/studio-apps.yml`), and the studio's own tests run with the
+same environment a buyer's computer gets (`.github/workflows/studio.yml`).
+
+**Older computers.** An Intel Mac gets no new PyTorch (its last is 2.2), so the app is made for Apple
+silicon only: with an Intel Mac, use a Windows or Linux computer instead. A Mac on macOS 13 or older gets an
+older PyTorch, which should work, *unchecked*. An older NVIDIA card is served by the CUDA 12.6 build the
+studio asks for on Windows; on Linux, if PyTorch says the card is too old, set
+`CHARACTER_STUDIO_TORCH_INDEX=https://download.pytorch.org/whl/cu126` and use **Repair** on the setup page.
 
 ## From the command line
 
@@ -194,17 +238,17 @@ of your own, or to make one look more like a real person, film it:
    light, head and shoulders or the upper body in view, doing the gesture
    once and starting and ending still. A phone video is fine.
 2. Install what the tool needs once, in the studio's Python (set up by
-   `studio/start.sh`):
+   the app or `studio/start.sh`; `python3 studio/launch.py --print-python` says where it is):
 
 ```bash
-~/.character-studio/venv/bin/pip install -r studio/requirements-motion.txt
+"$(python3 studio/launch.py --print-python)" -m pip install -r studio/requirements-motion.txt
 ```
 
 3. Make the gesture, and save it on the device (it asks for the
    settings-page password):
 
 ```bash
-~/.character-studio/venv/bin/python studio/record_motion.py my-video.mp4 --name little_dance --words "do a little dance" --send companion.local
+"$(python3 studio/launch.py --print-python)" studio/record_motion.py my-video.mp4 --name little_dance --words "do a little dance" --send companion.local
 ```
 
 The first run downloads MediaPipe's face and body landmark models (about

@@ -35,7 +35,7 @@ Built in the round after (2026-11-21), at the owner's request:
 |---|---|---|
 | ✓ | **Live2D models' own idle motions**, under the device's own movement (as made, gentler, or off) | `stage/src/live2d_motion.rs`, `28-user-guide.md` |
 | ✓ | **3D avatars turn their heads to a profile (90°)**: looking back over the shoulder, and now and then by itself | `stage/src/vrm/rig.rs`, `24-motion.md` |
-| ✓ | **Character Studio on Windows, Mac and Linux**: one launcher, tested on all three on GitHub | `14-making-characters.md` |
+| ✓ | **Character Studio as a real app on Windows, Mac and Linux**: an installer, a disk image and an AppImage, each with its own Python; the first start shows its one-time download in the browser. Built, installed and run on all three on GitHub | `14-making-characters.md` |
 | ✓ | **The ready-to-flash card image built on GitHub** (passes all 51 checks) | `29-hardware-setup.md` |
 
 ## Before selling (needed)
@@ -45,12 +45,15 @@ Built in the round after (2026-11-21), at the owner's request:
 3. **Test power-cut protection on the board** (built; "Power cuts" below): pull the plug 50 times, at
    random moments and while it saves, and check that it always starts, keeps its data, and repairs itself.
 4. **A character in the box.** Commission original art (no existing character may ship, D-024), so a new device greets its buyer with someone rather than text.
-5. **The paperwork:**
+5. **Code signing for Character Studio** (optional but strongly recommended): without it, Windows and macOS
+   warn buyers about an unknown publisher the first time (`14-making-characters.md`). Apple's developer
+   programme is US$99 a year; Windows certificates vary.
+6. **The paperwork:**
    - the seven questions for a lawyer (`19-live2d-format-licensing.md`), including whether advertising the import of buyers' own Live2D models is safe;
    - in Australia, an electrical safety and EMC declaration (RCM) for the finished product. A pre-certified Pi and power supply help, but don't cover the whole device;
    - a privacy statement, saying what goes to the AI services the buyer chooses;
    - warranty and returns terms.
-6. **A quick-start card in the box:** a QR code for the setup steps, and one for the user guide.
+7. **A quick-start card in the box:** a QR code for the setup steps, and one for the user guide.
 
 ## Strongly recommended
 

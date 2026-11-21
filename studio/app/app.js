@@ -209,9 +209,8 @@ let stopped = false;
 function showStopped() {
   stopped = true;
   clearTimeout(timer);
-  for (const el of document.querySelectorAll("main > section")) el.hidden = true;
+  for (const el of document.querySelectorAll("main > section")) el.hidden = el.id !== "stopped";
   $("btn-quit").hidden = true;
-  $("stopped").hidden = false;
 }
 $("btn-quit").addEventListener("click", async () => {
   const busy = $("job-steps").querySelector(".now");
