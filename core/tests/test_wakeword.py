@@ -144,7 +144,11 @@ class DeviceTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_missing_model_is_reported_once_and_left_off(self):
         self.assertIsNone(self.device.wake_listener())
-        await asyncio.sleep(0.3)
+        # The model is looked for in the background: wait for that (a busy computer can take a while).
+        for _ in range(100):
+            if self.device.wake_error:
+                break
+            await asyncio.sleep(0.05)
         self.assertIsNone(self.device.wake_listener())
         self.assertRegex(self.device.wake_error, "not on this device|not installed")
         self.assertEqual(sum(1 for e in self.device.log if "wake word cannot" in e.get("message", "")), 1)
