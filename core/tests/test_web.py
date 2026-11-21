@@ -97,6 +97,40 @@ class WebTest(unittest.IsolatedAsyncioTestCase):
         r = await self.client.post("/api/characters", data=b"PK\x05\x06" + b"\0" * 18, headers=H)
         self.assertEqual(r.status, 400)
 
+    async def test_a_live2d_models_own_idle_motions_can_be_turned_down(self):
+        from test_package import model_folder_zip
+        await self.login()
+        r = await self.client.post("/api/characters?name=Aria", data=model_folder_zip(), headers=H)
+        cid = (await r.json())["id"]
+        with open(self.device.stage_settings) as f:
+            self.assertEqual(json.load(f), {"model_motions": 1.0}, "an imported model's motions play as made")
+        r = await self.client.get("/api/characters/%s/movement" % cid, headers=H)
+        own = (await r.json())["own_motions"]
+        self.assertEqual(own, {"setting": "full", "idle": ["idle"], "studio": False})
+        self.stage.commands.clear()
+        r = await self.client.put("/api/characters/%s/own-motions" % cid, json={"setting": "gentle"}, headers=H)
+        self.assertEqual(r.status, 200, await r.text())
+        self.assertEqual((await r.json())["own_motions"]["setting"], "gentle")
+        self.assertIn({"model_motions": 0.5}, self.stage.commands, "changed on the screen at once")
+        with open(self.device.stage_settings) as f:
+            self.assertEqual(json.load(f), {"model_motions": 0.5}, "and kept for the next start")
+        r = await self.client.put("/api/characters/%s/own-motions" % cid, json={"setting": "loud"}, headers=H)
+        self.assertEqual(r.status, 400)
+
+    async def test_studio_made_characters_start_without_their_generic_idle_loop(self):
+        from test_package import live2d_files
+        await self.login()
+        files = good_files()
+        files.update(live2d_files())
+        files["studio/report.json"] = "{}"
+        self.device.characters.install(package.build(files, manifest()))
+        self.device.activate("aria")
+        self.assertEqual(self.device.characters.own_motion_setting("aria"), "off")
+        with open(self.device.stage_settings) as f:
+            self.assertEqual(json.load(f), {"model_motions": 0.0})
+        r = await self.client.get("/api/characters/aria/movement", headers=H)
+        self.assertTrue((await r.json())["own_motions"]["studio"])
+
     async def test_a_vrm_avatar_can_be_uploaded(self):
         from vrm_sample import sample_vrm
         await self.login()

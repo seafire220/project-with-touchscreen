@@ -225,7 +225,11 @@ class Animations:
 
     def stage_settings(self, cid):
         """The stage's settings for this character on the screen."""
-        if not cid or self.characters.drawing(cid) != "vrm":
+        drawing = self.characters.drawing(cid) if cid else ""
+        if drawing == "live2d":
+            from .characters import OWN_MOTIONS
+            return {"model_motions": OWN_MOTIONS[self.characters.own_motion_setting(cid)]}
+        if drawing != "vrm":
             return {}
         s = self.settings(cid)
         return {"vrm_animation": s["animation"], "quality": s["quality"], "shot": s["shot"],

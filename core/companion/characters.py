@@ -12,6 +12,7 @@ live beside it and are never written back into a package.
 import io
 import json
 import os
+import posixpath
 import shutil
 import tempfile
 
@@ -137,6 +138,35 @@ class Characters:
         known = set(self.expressions(cid))
         return {k: v for k, v in mapping.items() if v in known}
 
+    def own_motions(self, cid):
+        """A Live2D-format model's own idle motions (its motion groups whose names start with "idle"), by name."""
+        names = []
+        try:
+            with open(self.file(cid, package.LIVE2D_MODEL), encoding="utf-8") as f:
+                groups = (json.load(f).get("FileReferences") or {}).get("Motions") or {}
+            for group, items in groups.items():
+                if not (isinstance(group, str) and group.lower().startswith("idle") and isinstance(items, list)):
+                    continue
+                for item in items:
+                    file = item.get("File") if isinstance(item, dict) else None
+                    if isinstance(file, str) and file.endswith(".motion3.json"):
+                        names.append(posixpath.basename(file)[:-len(".motion3.json")])
+        except (OSError, ValueError, AttributeError, TypeError):
+            return []
+        return names
+
+    def made_in_studio(self, cid):
+        """Made from a picture with Character Studio (whose own idle loop the device's movement replaces)."""
+        return os.path.exists(self.file(cid, "studio/report.json"))
+
+    def own_motion_setting(self, cid):
+        """How much of the model's own idle motions shows: "full", "gentle" or "off". Models made with
+        Character Studio start "off" (the device's own movement is made for them); others "full"."""
+        saved = self.device_settings(cid).get("own_motions")
+        if saved in OWN_MOTIONS:
+            return saved
+        return "off" if self.made_in_studio(cid) else "full"
+
     def device_settings(self, cid):
         try:
             with open(os.path.join(self._dir(cid), "device.json"), encoding="utf-8") as f:
@@ -163,6 +193,10 @@ class Characters:
                 with open(path, "rb") as f:
                     files[rel] = f.read()
         return package.build(files, self.manifest(cid))
+
+
+# How much of a model's own idle motions shows, for each choice on the settings page.
+OWN_MOTIONS = {"full": 1.0, "gentle": 0.5, "off": 0.0}
 
 
 def split_persona(text):

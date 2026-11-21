@@ -434,7 +434,33 @@ class Console:
             "gestures": list(getattr(link, "gestures", [])) if ready else [],
             "actions": list(getattr(link, "actions", [])) if ready else [],
             "saved": saved,
+            "own_motions": self._own_motions(cid),
             **self._temperament(cid)})
+
+    def _own_motions(self, cid):
+        chars = self.device.characters
+        if chars.drawing(cid) != "live2d":
+            return None
+        idle = chars.own_motions(cid)
+        if not idle:
+            return None
+        return {"setting": chars.own_motion_setting(cid), "idle": idle, "studio": chars.made_in_studio(cid)}
+
+    async def put_own_motions(self, request):
+        """How much of a Live2D-format model's own idle motions shows: full, gentle or off."""
+        from .characters import OWN_MOTIONS
+        cid = self._cid(request)
+        body = await request.json()
+        setting = body.get("setting") if isinstance(body, dict) else None
+        if setting not in OWN_MOTIONS:
+            raise web.HTTPBadRequest(text="setting is full, gentle or off")
+        if self._own_motions(cid) is None:
+            raise web.HTTPBadRequest(text="this character has no idle motions of its own")
+        self.device.characters.set_device_settings(cid, {"own_motions": setting})
+        if cid == self.device.active_id():
+            self.device.write_stage_settings(cid)
+            self.device.stage.send({"model_motions": OWN_MOTIONS[setting]})
+        return web.json_response({"ok": True, "own_motions": self._own_motions(cid)})
 
     def _temperament(self, cid):
         settings = self.device.characters.device_settings(cid)
@@ -1019,6 +1045,7 @@ def make_app(device):
     r.add_put("/api/characters/{cid}/movement", console.put_movement)
     r.add_delete("/api/characters/{cid}/movement", console.reset_movement)
     r.add_put("/api/characters/{cid}/temperament", console.put_temperament)
+    r.add_put("/api/characters/{cid}/own-motions", console.put_own_motions)
     r.add_get("/api/characters/{cid}/animations", console.get_animations)
     r.add_put("/api/characters/{cid}/animations", console.put_animations)
     r.add_post("/api/characters/{cid}/animations/{role}", console.add_animation)

@@ -636,8 +636,23 @@ function showTemperament(values) {
   $("tp-expressiveness").value = values.expressiveness;
 }
 
+function showOwnMotions(own) {
+  $("edit-own-motions").hidden = !own;
+  text($("own-msg"), "");
+  if (!own) return;
+  const n = own.idle.length;
+  text($("own-about"), own.studio
+    ? "This character was made with Character Studio, which gave it a simple idle loop. The device's own " +
+      "movement is made for characters like this, so the loop is off at first."
+    : "This model came with " + n + " idle motion" + (n === 1 ? "" : "s") + " made by its artist. They play " +
+      "one after another, and the device's own movement (looking at you, nodding, gestures) adds to them. " +
+      "The device still blinks and moves the mouth itself.");
+  $("own-setting").value = own.setting;
+}
+
 async function loadMovement(cid) {
   movement = await api("GET", "/api/characters/" + cid + "/movement");
+  showOwnMotions(movement.own_motions);
   showTemperament(movement.temperament || movement.suggested);
   text($("temper-msg"), movement.temperament ? "" : "Suggested from the personality; not saved yet.");
   const switches = $("switch-list");
@@ -747,6 +762,14 @@ $("btn-save-move").addEventListener("click", async () => {
     text($("move-msg"), "Saved. The character restarts on the screen with it.");
     setTimeout(() => loadMovement(state.editing).catch(() => {}), 4000);
   } catch (err) { text($("move-msg"), err.message); }
+});
+
+$("btn-save-own").addEventListener("click", async () => {
+  try {
+    const out = await api("PUT", "/api/characters/" + state.editing + "/own-motions", { setting: $("own-setting").value });
+    showOwnMotions(out.own_motions);
+    text($("own-msg"), "Saved.");
+  } catch (err) { text($("own-msg"), err.message); }
 });
 
 $("btn-save-temper").addEventListener("click", async () => {
