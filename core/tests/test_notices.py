@@ -63,7 +63,8 @@ class NoticesTest(unittest.TestCase):
                 f.write("2026.11.21\n")
             with mock.patch.object(notices, "IMAGE_FILE", image):
                 text = notices.device_notice()
-        self.assertIn("device-image-2026.11.21", text)
+        self.assertIn("https://github.com/seafire220/project-with-touchscreen/releases/tag/device-image-2026.11.21", text)
+        self.assertIn("BlueZ", text)
         self.assertIn("WITHOUT ANY WARRANTY", text)
         self.assertIn("trademarks or registered trademarks of Live2D Inc.", text)
         self.assertLess(text.index("Inochi2D models are played"), text.index("Live2D-style"), "Inochi2D comes first")

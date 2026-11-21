@@ -19,7 +19,7 @@ The runtime is under the MIT licence. It is built with these libraries inside it
 SOURCE CODE (LGPL-2.1). libfuse's licence entitles you to its source code and to what you need to rebuild
 the runtime with a changed libfuse. Every Linux release of Character Studio is published with
 "CharacterStudio-appimage-runtime-source.tar.gz" on the same release page as the AppImage
-(https://github.com/seafire220/repo/releases). It holds the runtime's complete source at that
+(https://github.com/seafire220/project-with-touchscreen/releases). It holds the runtime's complete source at that
 release (with its build scripts and the libfuse patch), the libfuse 3.15.0 source and the squashfuse
 0.5.2 source. The runtime's build scripts (scripts/docker or scripts/chroot) rebuild it from those,
 with your own libfuse if you like; an AppImage's runtime can be replaced by extracting the AppImage

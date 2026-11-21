@@ -2,5 +2,5 @@
  "about": "The maker's details for this device's notices (core/companion/notices/device.txt). Fill in your business name and a contact (an email address or a postal address) before selling; source_url is where each card image's source code is published.",
  "maker": "",
  "contact": "",
- "source_url": "https://github.com/seafire220/repo/releases/tag/device-image-{image_version}"
+ "source_url": "https://github.com/seafire220/project-with-touchscreen/releases/tag/device-image-{image_version}"
 }

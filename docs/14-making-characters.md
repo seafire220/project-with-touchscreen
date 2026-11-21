@@ -95,7 +95,7 @@ own program and an uninstall; on a Mac also after moving the app (which must not
 
 Once published, it is the repository's latest release, and these links always give the newest apps, for
 your web site or the campaign page:
-`https://github.com/seafire220/repo/releases/latest/download/CharacterStudio-Setup.exe`, `.../CharacterStudio.dmg`
+`https://github.com/seafire220/project-with-touchscreen/releases/latest/download/CharacterStudio-Setup.exe`, `.../CharacterStudio.dmg`
 and `.../CharacterStudio-x86_64.AppImage`. Not the update repository: devices read its newest release as
 their update.
 

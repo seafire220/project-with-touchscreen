@@ -8,7 +8,7 @@ OPEN-SOURCE SOFTWARE, AND THE OFFER OF SOURCE CODE
 This device's operating system is based on Raspberry Pi OS, which is based on Debian GNU/Linux, and it
 runs other open-source software too. Some of it is licensed under the GNU General Public License (GPL) or
 the GNU Lesser General Public License (LGPL), among them the Linux kernel, the GNU C library, systemd,
-NetworkManager, ALSA, espeak-ng and dnsmasq. Those licences entitle you to their complete corresponding
+NetworkManager, ALSA, BlueZ, espeak-ng and dnsmasq. Those licences entitle you to their complete corresponding
 source code.
 
 The source code of every operating-system package on this device, at the versions installed on its memory

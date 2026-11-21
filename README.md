@@ -71,9 +71,9 @@ after the last one is sold ([docs/34-licences.md](docs/34-licences.md)).
 app and the Linux AppImage, installs and tests each, and puts them on a release, **Character Studio
 \<version\>** (a draft until published). Once published, these links always give the newest:
 
-- Windows: `https://github.com/seafire220/repo/releases/latest/download/CharacterStudio-Setup.exe`
-- Mac: `https://github.com/seafire220/repo/releases/latest/download/CharacterStudio.dmg`
-- Linux: `https://github.com/seafire220/repo/releases/latest/download/CharacterStudio-x86_64.AppImage`
+- Windows: `https://github.com/seafire220/project-with-touchscreen/releases/latest/download/CharacterStudio-Setup.exe`
+- Mac: `https://github.com/seafire220/project-with-touchscreen/releases/latest/download/CharacterStudio.dmg`
+- Linux: `https://github.com/seafire220/project-with-touchscreen/releases/latest/download/CharacterStudio-x86_64.AppImage`
 
 Installing and using it: [docs/14-making-characters.md](docs/14-making-characters.md).
 
