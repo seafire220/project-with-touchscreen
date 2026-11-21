@@ -81,15 +81,20 @@ four cores).
 
 ### Making the apps (the owner)
 
-On GitHub: **Actions → Make the Character Studio apps → Run workflow**, with a version (`2026.11.21`).
-In about ten minutes the run's page has three files under *Artifacts*: the Windows installer, the Mac disk
-image and the Linux AppImage. The workflow builds each with its own Python
+On GitHub: **Actions → Make the Character Studio apps → Run workflow**, with a version (`2026.11.21`)
+and what to do with the release: **draft** (the default), **publish**, or **none**. In about ten minutes
+**Releases → Character Studio 2026.11.21** has the Windows installer, the Mac disk image and the Linux
+AppImage (with the Linux runtime's source code and the files' checksums). A draft is seen only by you:
+check it, then **Edit → Publish release**. The workflow builds each app with its own Python
 (`studio/packaging/build_app.py`), then **installs it the way a buyer would and runs it**: the first start
 with its downloads, the page, the studio answering, Quit; on Windows also through the Start-menu icon's
 own program and an uninstall; on a Mac also after moving the app (which must not download again).
 
-Put the three files where buyers download from: your web site, or the releases of a public GitHub
-repository *for the studio*. Not the update repository: devices read its newest release as their update.
+Once published, it is the repository's latest release, and these links always give the newest apps, for
+your web site or the campaign page:
+`https://github.com/seafire220/repo/releases/latest/download/CharacterStudio-Setup.exe`, `.../CharacterStudio.dmg`
+and `.../CharacterStudio-x86_64.AppImage`. Not the update repository: devices read its newest release as
+their update.
 
 **Code signing** takes away the warnings above. It needs, once a year:
 - **Apple**: the Apple Developer Program (US$99, about A$150). The workflow can then sign and notarize the
@@ -204,9 +209,10 @@ Works, with limits:
   sides as arms.
 - No visible neck: a plain one is added under the face.
 
-## Also in the Live2D format (optional)
+## A second copy in the .model3.json format (optional)
 
-Add `--live2d` to put a Live2D-format copy of the character in the package
+Add `--live2d` to put a copy of the character in the `.model3.json` format
+(the format Live2D-style models use; played on the device by Ayagami) in the package
 as well (`visual/live2d/`: `model.moc3`, `model.model3.json`, textures,
 physics and motions):
 

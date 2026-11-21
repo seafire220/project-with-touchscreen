@@ -48,7 +48,9 @@ speech. What stands between this and a product, in order:
 1. ~~**A free local voice**~~: done (2026-11-18): a Piper voice with 904
    speakers runs on the device through sherpa-onnx, with phonemes from
    espeak-ng, and is the default; 24 clear voices, chosen by a survey of all
-   904, are offered on the settings page.
+   904, are offered on the settings page. (2026-11-21: replaced by Piper's
+   VCTK voice, 109 speakers, 72 offered, because the first voice's training
+   recordings were licensed for research only: `34-licences.md`.)
 2. ~~**A guided personality form**~~: done (2026-11-18).
 3. ~~**Memory that lasts**~~: done (2026-11-18), see below.
 4. **Characters from pictures without the command line**: Character Studio

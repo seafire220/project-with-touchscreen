@@ -181,10 +181,16 @@ and a third partition holds what the device saves (`33-finishing.md`).
 
 **Get the image (no Linux computer needed).** On GitHub, in this repository:
 1. **Actions → Make a device image → Run workflow.** Give a version, such as `2026.11.21` (updates you
-   publish later must be newer). It takes about half an hour.
-2. On the finished run's page, under *Artifacts*, download `companion-image-<version>` (about 1.5 GB)
-   and unzip it. You get `companion-<version>.img.xz` and its checksum. Keep it zipped as `.img.xz`:
-   Imager reads it as it is.
+   publish later must be newer), and leave the release as **draft**. It takes about half an hour, and
+   about as long again to add the operating system's source code.
+2. **Releases → Device image 2026.11.21** (a draft, seen only by you): download
+   `companion-<version>.img.xz` (about 1.5 GB) and its `.sha256`. Keep it as `.img.xz`: Imager reads it
+   as it is.
+3. Before selling devices with this image, **publish** the release (**Edit → Publish release**; leave
+   *Set as the latest release* unticked, so Character Studio's links keep working). The device's
+   notice sends owners to it for the source code of the open-source software, which the GPL requires us
+   to offer, so keep it for at least three years after the last device with that image is sold
+   (`34-licences.md`).
 
 (On a Linux computer, `device/build-image.sh` makes the same image; `--help` says how.)
 

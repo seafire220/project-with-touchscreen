@@ -65,7 +65,8 @@ class NoticesTest(unittest.TestCase):
                 text = notices.device_notice()
         self.assertIn("device-image-2026.11.21", text)
         self.assertIn("WITHOUT ANY WARRANTY", text)
-        self.assertIn("Live2D is a registered trademark of Live2D Inc.", text)
+        self.assertIn("trademarks or registered trademarks of Live2D Inc.", text)
+        self.assertLess(text.index("Inochi2D models are played"), text.index("Live2D-style"), "Inochi2D comes first")
         self.assertNotIn("{", text, "every blank is filled")
 
     def test_the_models_are_credited(self):
@@ -101,6 +102,11 @@ class PagesTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue((await r.text()).strip(), key)
         r = await self.client.get("/licences/stage.txt")
         self.assertIn("libraries", await r.text())
+        r = await self.client.get("/licences/libraries.txt")
+        text = await r.text()
+        self.assertIn("Eigen 5.0.1", text)
+        self.assertIn("gitlab.com/libeigen/eigen", text, "the MPL asks to say where Eigen's source is")
+        self.assertIn("THIRD PARTY SOFTWARE NOTICES", text, "ONNX Runtime's own notices are included")
         r = await self.client.get("/licences/secrets.txt")
         self.assertEqual(r.status, 404)
 

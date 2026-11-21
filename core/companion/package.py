@@ -167,7 +167,7 @@ def _check_puppet(name, data):
 
 def _check_moc3(name, data):
     if not data.startswith(MOC3_MAGIC) or len(data) < 64 or not 1 <= data[4] <= 6:
-        raise PackageError("%s is not a Live2D-format model file" % name)
+        raise PackageError("%s is not a valid .moc3 model file" % name)
     if contains_secret(data.decode("latin-1")):
         raise PackageError("%s appears to contain an API key; it was refused" % name)
 
@@ -186,7 +186,7 @@ def _check_live2d(files):
     if not any(n.startswith("visual/live2d/") for n in files):
         return
     if LIVE2D_MODEL not in files or "visual/live2d/model.moc3" not in files:
-        raise PackageError("a Live2D-format model needs visual/live2d/model.model3.json and model.moc3")
+        raise PackageError("a .model3.json model needs visual/live2d/model.model3.json and model.moc3")
     model = json.loads(files[LIVE2D_MODEL])
     refs = model.get("FileReferences") if isinstance(model, dict) else None
     if not isinstance(refs, dict) or refs.get("Moc") != "model.moc3":
@@ -198,7 +198,7 @@ def _check_live2d(files):
             named += [m.get("File") for m in group]
         named += [e.get("File") for e in (refs.get("Expressions") or [])]
     except (AttributeError, TypeError):
-        raise PackageError("model.model3.json is not laid out as a Live2D-format model index")
+        raise PackageError("model.model3.json is not laid out as a .model3.json model index")
     for item in named:
         if item is None:
             continue
@@ -288,7 +288,7 @@ def open_package(source):
     kind = manifest["kind"]
     if (kind == "puppet" and not any(n.startswith("visual/puppet.in") for n in files) and LIVE2D_MODEL not in files
             and VRM_MODEL not in files):
-        raise PackageError("a puppet character needs visual/puppet.inp, a Live2D-format model or a VRM avatar")
+        raise PackageError("a puppet character needs visual/puppet.inp (Inochi2D), a .model3.json model or a VRM avatar")
     if kind == "clips" and "visual/clips.json" not in files:
         raise PackageError("a clips character needs visual/clips.json")
     if kind == "sprite" and "visual/sprite.json" not in files:
@@ -350,7 +350,7 @@ def guess_emotions(names):
     return mapping
 
 
-IMPORT_LICENCE = ("Imported Live2D-format model. The person who imported it is responsible for having the "
+IMPORT_LICENCE = ("Imported 2D rigged model (.model3.json). The person who imported it is responsible for having the "
                   "right to use it on this device.")
 
 IMPORT_PERSONA = """# {name}
@@ -420,7 +420,7 @@ def from_live2d_zip(source, name=None):
             raise PackageError("the zip holds too many files")
         indexes = sorted(n for n in infos if _is_model_index(n))
         if not indexes:
-            raise PackageError("there is no Live2D-format model in the zip (no .model3.json file)")
+            raise PackageError("there is no 2D rigged model in the zip (no .model3.json file)")
         if len(indexes) > 1:
             raise PackageError("the zip holds several models (%s); put one model in each zip" % ", ".join(indexes[:4]))
         index = indexes[0]
@@ -458,7 +458,7 @@ def from_live2d_zip(source, name=None):
             motions = dict(refs.get("Motions") or {})
             expressions = list(refs.get("Expressions") or [])
         except (ValueError, KeyError, TypeError, AttributeError, UnicodeDecodeError):
-            raise PackageError("%s is not a Live2D-format model index" % posixpath.basename(index))
+            raise PackageError("%s is not a .model3.json model index" % posixpath.basename(index))
         if not textures:
             raise PackageError("the model lists no textures")
 

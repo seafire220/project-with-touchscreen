@@ -1,56 +1,89 @@
 # Low-cost AI character device
 
 An independently designed, lower-cost alternative to the SyBran CODE27
-Companion Hub: a desk device that shows a 2D anime-style character you can
-talk to. Built from commodity hardware and original software, using the
-owner's own AI service keys, with no lock-in to one AI or voice provider.
+Companion Hub: a desk device that shows a character you can talk to. The
+character is a 2D anime-style character (Inochi2D and other 2D rigged
+models, or one made from a single picture) or a 3D VRM avatar. It runs on
+commodity hardware (a Raspberry Pi with a small screen) and original
+software, uses the owner's own AI service keys or a free on-device voice,
+and is not tied to one AI or voice provider.
 
 Two tiers: **Lite** plays pre-rendered 2D animation; **Standard** drives a
-rigged 2D puppet. Standard is being built first.
+rigged character. Standard is being built first.
 
-## Status
+**Status:** written and tested in software, including a ready-to-flash card
+image built and checked on GitHub; not yet run on real hardware. What is
+done and what comes next: [docs/21-roadmap.md](docs/21-roadmap.md).
 
-| Phase | State |
-|---|---|
-| 1. Reference product research | First pass done |
-| 2. Requirements interview | Answered |
-| 3. Requirements specification | Draft 2 |
-| 4. Hardware selection and BOM | Prototype board chosen: Raspberry Pi 4, 1 GB. Nothing bought yet |
-| 5. Architecture | Revision 2 |
-| 6. Software | Written and tested off the device: the stage (character drawing), the core service (conversation, providers, memory, characters, timers and alarms, web search, emotions and gestures, Wi-Fi setup), the web settings page, and character making from one picture |
-| 7. Install, boot and appliance behaviour | Ready-to-flash device image builder, installer, services, setup screens with QR codes, Wi-Fi hotspot setup, resets, update/rollback. Built from the official Raspberry Pi OS image and checked under emulation; not yet on a Pi |
-| 8. Guides | Build and install, making characters, hardware test plan |
+## What's where
 
-**Tested so far:** 25 stage tests, 48 character-making tests, 54 core tests (one with the real on-device speech model),
-11 browser checks of the settings page, the real core driving the real stage through a spoken reply (`core/tests/stack_check.py`), the installer run in a Debian 13
-environment, and the Pi build of the stage started under ARM emulation.
-Characters were judged by eye on eleven pictures, on software graphics.
-**Not yet tested:** anything on real hardware; live AI services (no keys
-here); the character maker on a Mac.
+| Folder | What it is | Where it ends up |
+|---|---|---|
+| [`core/`](core/) | The device's main program (Python): conversation, voices, speech recognition, memory, characters, alarms, Wi-Fi setup, updates, and the settings page you open in a browser | On the device |
+| [`stage/`](stage/README.md) | The screen program (Rust, OpenGL ES): draws and animates the character, with Inox2D for Inochi2D models, Ayagami for `.model3.json` models, and our own VRM renderer | On the device, built for the Pi's 64-bit ARM processor |
+| [`device/`](device/) | What turns Raspberry Pi OS into the device: the card-image builder (`build-image.sh`) and checker (`check-image.sh`), the installer (`install.sh`), system services and settings, the updater, the update-signing tool (`release.py`), and the operating system's source-code collector (`fetch-sources.py`) | The services, settings and updater go on the device; the tools run on GitHub or the owner's computer |
+| [`studio/`](studio/) | Character Studio, the app that makes a character from one picture and sends it to the device | On the buyer's computer (Windows, Mac or Linux), never on the device |
+| [`docs/`](docs/) | Design, guides, measurements and decisions (list below) | Nowhere: for reading |
+| [`.github/workflows/`](.github/workflows/) | The builds GitHub runs: the card image, updates, and the Character Studio apps | On GitHub |
+| [`THIRD_PARTY.md`](THIRD_PARTY.md) | Every third-party part and its licence, in short ([docs/34-licences.md](docs/34-licences.md) in full) | Also on the device and in the app |
 
-Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
-(Radxa Zero 3W option), against roughly A$850 for the reference product.
+### What goes on the device
 
-## Code
+Only these parts of the repository: `core/companion/` (the main program and its settings page),
+the stage program built from `stage/` (one binary file) with `stage/motions/`, and the services and
+system settings from `device/`. With them come the speech-recognition, voice and wake-word models,
+downloaded during the build from their publishers and checked against fixed hashes, and the licence
+notices. Nothing else is copied to the device: not Character Studio, the docs, the tests or the tools.
 
-- [`stage/`](stage/README.md): draws and animates the character on the
-  device screen (Rust, Inochi2D puppets, OpenGL ES). Cross-builds for the
-  Pi from a PC.
-- [`core/`](core/): the device's service (Python): conversation pipeline,
-  provider adapters (OpenAI-compatible chat, speech and transcription;
-  Anthropic; ElevenLabs with voice cloning; on-device speech recognition),
-  character store and package checks, memory, timers and alarms, Wi-Fi
-  setup, and the web settings page. Run it without hardware or keys with
-  `core/tests/virtual_device.py`.
-- [`studio/`](studio/): character making on a laptop.
-  `make_character.py` turns one picture into a `.char` package: it finds
-  the body parts with the See-through model (`parts_model.py`), removes a
-  plain background (`prepare.py`), cuts the picture into layers and draws
-  the closed eyes and open mouth it lacks (`partsplit.py`), rigs it with
-  image2live2d, and refines head movement and the mouth (`refine.py`).
-- [`device/`](device/): `build-image.sh` makes a ready-to-flash card image
-  from the official Raspberry Pi OS Lite image; `check-image.sh` checks one;
-  `install.sh` sets up a Pi by hand; services and system settings.
+`device/install.sh` is the one list of what is installed and where (under `/opt/companion`).
+`build-image.sh` runs it inside an official Raspberry Pi OS Lite image to make the card image, and
+updates (`release.py`) carry the same parts.
+
+### Making a card image and putting it on a card
+
+1. On GitHub: **Actions → Make a device image → Run workflow**, with a version such as `2026.11.21`.
+   About half an hour.
+2. The image goes on a release, **Releases → Device image 2026.11.21**: a draft only you can see until
+   you publish it. Download `companion-<version>.img.xz` from it.
+3. Write it to a microSD card with **Raspberry Pi Imager**, Raspberry Pi's free app
+   (raspberrypi.com/software; it is not part of this repository): *Choose OS → Use custom*, pick the
+   file, choose the card, and say *No* to customisation. Step by step:
+   [docs/29-hardware-setup.md](docs/29-hardware-setup.md).
+4. After that, sold devices update themselves over the internet from signed updates published in
+   [`seafire220/update-repo`](https://github.com/seafire220/update-repo), with no reflashing:
+   [docs/32-updates.md](docs/32-updates.md).
+
+The image's release also gets the source code of every operating-system package in it, which the
+GNU GPL and LGPL require to be offered with the device. The device's notice sends owners there, so
+publish the release before selling devices with that image, and keep it for at least three years
+after the last one is sold ([docs/34-licences.md](docs/34-licences.md)).
+
+### Character Studio, for buyers' computers
+
+**Actions → Make the Character Studio apps → Run workflow** builds the Windows installer, the Mac
+app and the Linux AppImage, installs and tests each, and puts them on a release, **Character Studio
+\<version\>** (a draft until published). Once published, these links always give the newest:
+
+- Windows: `https://github.com/seafire220/repo/releases/latest/download/CharacterStudio-Setup.exe`
+- Mac: `https://github.com/seafire220/repo/releases/latest/download/CharacterStudio.dmg`
+- Linux: `https://github.com/seafire220/repo/releases/latest/download/CharacterStudio-x86_64.AppImage`
+
+Installing and using it: [docs/14-making-characters.md](docs/14-making-characters.md).
+
+Built files (card images, apps, updates) are never committed to the repository: they are made by the
+workflows and kept on releases (and, for two weeks, on each run's page under *Artifacts*).
+
+## Licences
+
+This repository's own code and documents are the owner's (all rights reserved; no licence to reuse
+them is given). The third-party software, models and data it uses are each under their own licence:
+all allow commercial use without a negotiated licence, and their notices are shipped with the device
+and the app. The audit, with what each licence asks of us and the questions left for a lawyer:
+[docs/34-licences.md](docs/34-licences.md); the short list: [THIRD_PARTY.md](THIRD_PARTY.md).
+
+Live2D and Cubism are trademarks or registered trademarks of Live2D Inc.; Raspberry Pi is a
+trademark of Raspberry Pi Ltd. This project is not affiliated with or endorsed by either. No Live2D
+software is used.
 
 ## Documents
 
@@ -67,50 +100,34 @@ Estimated prototype cost: about A$239 (Raspberry Pi 4 option) or A$294
 11. [Finding the parts with an existing model](docs/11-part-labelling-model.md)
 12. [Trial on five fresh images, and the third head-movement design](docs/12-fresh-image-trial.md)
 13. [Building and installing the device](docs/13-build-and-install.md)
-14. [Making a character from a picture](docs/14-making-characters.md)
+14. [Making a character from a picture (Character Studio)](docs/14-making-characters.md)
 15. [Hardware test plan and troubleshooting](docs/15-hardware-test-plan.md)
 16. [Measurements](docs/16-measurements.md)
 17. [Evaluation: Ayagami, Umamo and Godot](docs/17-engine-evaluation.md)
 18. [How the device works out of the box](docs/18-out-of-the-box.md)
-19. [Licensing check: Live2D-format models without Live2D's software](docs/19-live2d-format-licensing.md)
+19. [Licensing check: .model3.json models without Live2D's software](docs/19-live2d-format-licensing.md)
 20. [How heads turn](docs/20-head-turns.md)
 21. [Roadmap: what is done, what comes next, how to resume](docs/21-roadmap.md)
 22. [Board options for the Standard device](docs/22-board-options.md)
 23. [Drawing workflow: hidden areas, alternate poses, new views (candidate assessment)](docs/23-drawing-workflow.md)
 24. [Motion: a generic skeleton every character is fitted to](docs/24-motion.md)
 25. [Does the whole product fit together?](docs/25-product-review.md)
-26. [Animation: how the character moves (the director: idle life, listening, speech, gestures, temperament, the Animation tab)](docs/26-animation-director.md)
+26. [Animation: how the character moves](docs/26-animation-director.md)
 27. [Animation tested on all eleven test characters](docs/27-character-tests.md)
 28. [User guide: your character device (for buyers)](docs/28-user-guide.md)
 29. [Setting up the first device, once the parts arrive](docs/29-hardware-setup.md)
 30. [VRM avatars: 3D characters beside the 2D ones](docs/30-vrm.md)
+31. [Memory: conversations, lasting memories and a diary](docs/31-memory.md)
+32. [Software updates for sold devices](docs/32-updates.md)
+33. [What else would make it complete and polished](docs/33-finishing.md)
+34. [Licences: what we use, what each licence asks, what is left for a lawyer](docs/34-licences.md)
 - [Decision log](docs/decision-log.md)
-
-## Awaiting the owner
-
-- A verdict on the new head movement, blinks and mouths (review images and
-  motion clips sent on 2026-11-17).
-- Buying the prototype parts, so the hardware test plan can start.
-- AI service keys, to test the providers against the real services (they
-  are entered on the device, never in this repository).
 
 ## Known gaps
 
-- No part has been bought or tested; every hardware statement is from
-  documentation. The display overlay line and the sound card's name must be
-  checked on first build.
-- Memory use, boot time, frame rate and speech-recognition speed on the Pi
-  are estimates until measured.
-- The provider adapters follow each service's documentation and are tested
-  against stand-ins only.
-- Interrupting by speaking is an option, off by default, until the sound
-  card's echo cancellation is confirmed on the device (the button always
-  interrupts).
-- Arm gestures are left out: the rig's arm swings leave smears behind the
-  arm (D-035). Head, body and blush gestures work.
-- Faces partly in profile show a small patch beside the face at the far
-  ends of a head turn; tiny, heavily compressed pictures show faint lines
-  round the eyes when enlarged.
-- Lite tier, and a background-removal model for busy backgrounds, are not
-  started.
-- Compliance cost for selling in Australia has not been researched.
+- Nothing has run on real hardware yet; memory use, boot time, frame rate and speech speed on the Pi
+  are estimates until measured (`15-hardware-test-plan.md`).
+- The AI service adapters follow each service's documentation and are tested against stand-ins.
+- Before selling: the questions for a lawyer in `19` and `34`, an original default character,
+  signing the apps and the maker's details in the device's notice (`core/companion/notices/product.json`).
+- The Lite tier is not started.

@@ -9,6 +9,8 @@ licence leaflet in a box) shows:
   `stage/tools/notices.py`);
 - every Python package installed, with the licence files it carries, read from the installed packages
   themselves, so it is always what is on the device;
+- the libraries built into the speech package (sherpa-onnx), which its own files do not list, with
+  ONNX Runtime's third-party notices (`notices/libraries.txt`, `notices/onnxruntime-notices.txt`);
 - every operating-system package, with its Debian copyright file (which holds its licence);
 - the speech and voice models, with their credits (some licences require them) and the licence files
   that came with them.
@@ -133,6 +135,16 @@ def python_licences(title="Python packages on this device", where=""):
                      "carries (numbered below, each text once)." % (where, len(packages)), lines, texts)
 
 
+def speech_libraries():
+    """The libraries built into the speech package (sherpa-onnx), whose own files do not list them, and
+    ONNX Runtime's third-party notices (notices/libraries.txt, notices/onnxruntime-notices.txt)."""
+    out = []
+    for name in ("libraries.txt", "onnxruntime-notices.txt"):
+        with open(os.path.join(OWN, name), encoding="utf-8") as f:
+            out.append(f.read().rstrip() + "\n")
+    return ("\n" + "=" * 100 + "\n").join(out)
+
+
 def os_packages(status="/var/lib/dpkg/status"):
     """The operating system's installed packages: (name, version, source package)."""
     out = []
@@ -200,6 +212,7 @@ DOCUMENTS = {
     "third-party": ("What is in it, in short", "third_party"),
     "stage": ("The screen program's libraries", "stage_licences"),
     "python": ("Python packages", "python_licences"),
+    "libraries": ("Libraries inside the speech package (ONNX Runtime, Eigen and others)", "speech_libraries"),
     "os": ("Operating-system packages", "os_licences"),
     "models": ("Speech, voice and other models", "model_licences"),
 }

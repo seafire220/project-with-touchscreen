@@ -157,7 +157,7 @@ class Live2DPackageTest(unittest.TestCase):
             self.assertIn(why, str(e.exception))
 
     def test_damaged_or_secret_bearing_model_files_are_refused(self):
-        for moc, why in ((b"NOPE" + b"\0" * 124, "not a Live2D-format"),
+        for moc, why in ((b"NOPE" + b"\0" * 124, "not a valid .moc3"),
                          (b"MOC3\x01" + b"\0" * 20 + b"sk-ant-" + b"a" * 40 + b"\0" * 60, "API key")):
             files = good_files()
             files.update(live2d_files())

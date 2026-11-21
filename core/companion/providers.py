@@ -549,7 +549,7 @@ class OpenAICompatibleTTS:
 class LocalTTS:
     """A voice on the device: a Piper voice played by sherpa-onnx, with phonemes from espeak-ng.
     Free; no network. `model_dir` holds the voice (`*.onnx`, its `.onnx.json`, `tokens.txt`);
-    `voice` picks a speaker by number in voices with several (LibriTTS-R has 904)."""
+    `voice` picks a speaker by number in voices with several (the VCTK voice has 109)."""
 
     CHUNK = 0.2      # seconds of sound per piece handed to the speaker
 

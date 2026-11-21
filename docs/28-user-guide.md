@@ -14,9 +14,9 @@ it nods, waves, tilts its head and gestures with what it says. Left alone,
 it looks around, gazes out of the window, stretches and, late at night,
 dozes off. It remembers what you tell it.
 
-You choose the character: make one from a picture, bring a Live2D-format
-model or a 3D VRM avatar you already have, or bring a character card's
-personality.
+You choose the character: make one from a picture, bring an Inochi2D model
+or another 2D rigged model, or a 3D VRM avatar you already have, or bring a
+character card's personality.
 
 ## What you need
 
@@ -164,9 +164,16 @@ Pictures that work best:
   face, wide sleeves, capes and long hair over the arms all keep the arms
   still (the rest of the character still moves).
 
-### A Live2D model you rigged, or bought
+### An Inochi2D model you rigged
 
-On **Characters → Add a character**, choose a `.zip` of the model's folder: the folder with its `.model3.json`, as used by VTube Studio.
+[Inochi Creator](https://inochi2d.com) is a free, open-source rigging program. Export your model as an `.inp` file and choose it on **Characters → Add a character**; Inochi Creator's own `.inx` project files work too.
+- The device reads the model's name, artist and licence from the file.
+- It works out which parameters turn the head, blink and open the mouth, from Inochi2D's standard names ("Head:: Yaw-Pitch", "Eye:: Left:: Blink", "Mouth:: Open") or the `.model3.json` format's ("ParamAngleX").
+- If a movement is wrong, the **Movement** section under the character lets you choose the right parameter and test it on the screen.
+
+### Another 2D rigged model you made or bought
+
+The device also plays other 2D rigged models: Live2D-style models, the kind with a `.model3.json` file. On **Characters → Add a character**, choose a `.zip` of the model's folder: the folder with its `.model3.json`, as used by VTube Studio.
 - The device plays the model itself (with Ayagami), with its physics (hair and clothes swaying) and its expressions.
 - If the model shows alternate parts in turn (two sets of arms, say), its pose file is respected. The device
 works out which of its settings turn the head, blink, open the mouth and so
@@ -181,13 +188,6 @@ character's moods.
   and the mouth itself (following the voice), so the motions' own blinks are left out. Under the
   character, **Its own idle motions** chooses *as its artist made them*, *gentler* or *off*. (Characters
   made with Character Studio start with it off: the device's own movement is made for them.)
-
-### An Inochi2D model you rigged
-
-[Inochi Creator](https://inochi2d.com) is a free, open-source rigging program, similar to Live2D Cubism. Export your model as an `.inp` file and choose it on **Characters → Add a character**; Inochi Creator's own `.inx` project files work too.
-- The device reads the model's name, artist and licence from the file.
-- It works out which parameters turn the head, blink and open the mouth, from Inochi2D's standard names ("Head:: Yaw-Pitch", "Eye:: Left:: Blink", "Mouth:: Open") or Live2D's ("ParamAngleX").
-- If a movement is wrong, the **Movement** section under the character lets you choose the right parameter and test it on the screen.
 
 ### A 3D avatar (VRM) you already have
 

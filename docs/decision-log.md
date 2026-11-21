@@ -917,3 +917,48 @@ rejected. Settled entries are not reopened without new evidence.
   wrong on three systems. It gets a Quit button and stops by itself once its page has been closed a while.
 - Unsigned for now: Windows SmartScreen and macOS Gatekeeper warn once, and the guide says what to press.
   Signing costs a yearly fee, so it is the owner's decision; the workflow is ready to gain it.
+
+## D-065 — The free voice is Piper's VCTK voice: no research-only recordings in it
+
+- Date: 2026-11-21. Status: done (`core/companion/piper_voice.py`, `device/install.sh`).
+- The first free voice (Piper "LibriTTS-R medium", 904 speakers) was fine-tuned from Piper's lessac voice,
+  whose recordings (Blizzard Challenge 2013) are licensed for research only, excluding the sale of speech
+  synthesis products. Piper's current VCTK voice is trained on VCTK from a base voice trained on Hi-Fi TTS,
+  both CC BY 4.0: commercial use with credit, which the notices give.
+- 109 speakers, 72 offered after the survey; real-time factor 0.07-0.08 on the PC (the old voice: 0.045),
+  still far ahead of speech. Measurements: `16-measurements.md`.
+
+## D-066 — Licences ship with the product; the OS source goes with every image; nothing copyleft is linked into our code
+
+- Date: 2026-11-21. Status: done (`34-licences.md`).
+- The device and Character Studio each have a *Licences and notices* page with every licence text and
+  credit, read from what is installed where possible, so it stays true.
+- The GPL and LGPL are met by a written offer in the device's notice, and by the source of every package
+  in each image published on the image's release (`device/fetch-sources.py`), so the offer can always be
+  honoured.
+- Our own software stays the owner's. That means keeping copyleft code out of it:
+  - espeak-ng runs as a separate program, and sherpa-onnx is pinned to 2.x, which has none of it inside;
+  - the LGPL libraries used are the operating system's shared ones;
+  - the Linux app's Python leaves out its AGPL Berkeley DB module;
+  - the AppImage runtime's LGPL libfuse has its source published with each release.
+
+## D-067 — Inochi2D is the format we name; Live2D-style models are described, not advertised
+
+- Date: 2026-11-21. Status: done. The owner's instruction.
+- Guides and the settings page promote Inochi2D and "other 2D rigged models"; where the other format must
+  be named, it is "Live2D-style" or "`.model3.json`". No Live2D names or logos in branding. The notices
+  credit the trademarks and say no Live2D software is included.
+- Fits the open Cubism Editor question in `19`: the import still works, but it is not advertised.
+
+## D-068 — Builds put their files on GitHub releases, as drafts unless told to publish
+
+- Date: 2026-11-21. Status: built (`.github/workflows/make-image.yml`, `studio-apps.yml`).
+- Artifacts last two weeks, need a GitHub login and come zipped; a release keeps the files, at a fixed
+  address. Each workflow run (by hand) makes a release:
+  - `device-image-<version>`, with the image and, from a second job, its operating system's source;
+  - `studio-v<version>`, with the three apps under names that stay the same.
+- A draft by default, so the owner checks before anything is public; "publish" makes it public at once.
+- Character Studio's releases are the repository's "latest", so `releases/latest/download/...` links
+  always give the newest apps. Image releases are never "latest".
+- Updates for sold devices stay in `seafire220/update-repo`, whose latest release devices read; nothing
+  else is released there.

@@ -95,7 +95,7 @@ No separate storage module: the microSD card is the device's storage. On the Rad
 | The wake-word model | 5 MB |
 | The data partition's own space | 512 MB at first; then the rest of the card |
 | Logs | in memory, at most 20 MB (on the card, at most 40 MB, on images without power-cut protection) |
-| **A 2D character** (picture-made, Live2D or Inochi2D) | 5 to 50 MB each |
+| **A 2D character** (picture-made, Inochi2D or another 2D rigged model) | 5 to 50 MB each |
 | **A 3D avatar** (VRM, after import shrinks its textures) | 10 to 160 MB each, typically 20 to 60 |
 | **Memory**: conversations, every word, memories, diary | about 5 MB per character per year of daily talk |
 | While making a backup | a temporary copy of the characters and memories |

@@ -64,10 +64,10 @@
     <p>Choose one of these:</p>
     <ul class="plain">
       <li>a <code>.char</code> file made with the character maker on your computer;</li>
-      <li>your own rigged Live2D model: a <code>.zip</code> of its folder (the folder with its <code>.model3.json</code>,
-        as used by VTube Studio);</li>
-      <li>your own Inochi2D model: its <code>.inp</code> file (as exported from Inochi Creator, which is free), or its
-        <code>.inx</code>;</li>
+      <li>your own rigged Inochi2D model: its <code>.inp</code> file (as exported from Inochi Creator, which is free),
+        or its <code>.inx</code>;</li>
+      <li>another 2D rigged model (Live2D-style, with a <code>.model3.json</code> file, as used by VTube Studio): a
+        <code>.zip</code> of its folder;</li>
       <li>a 3D avatar's <code>.vrm</code> file (as made with VRoid Studio; adding one takes up to a minute while its
         pictures are fitted to this device).</li>
     </ul>
@@ -383,9 +383,9 @@
       character's description says</label>
     <label id="dev-family-pw-row" hidden>To turn family-safe mode off, the settings-page password
       <input type="password" id="dev-family-pw" autocomplete="current-password"></label>
-    <label>Character drawing <select id="dev-format">
-      <option value="live2d">Live2D-format copy when the character has one (recommended)</option>
-      <option value="inochi2d">Inochi2D puppet when the character has one</option></select></label>
+    <label>Characters made with Character Studio carry two copies of their drawing; show <select id="dev-format">
+      <option value="live2d">the .model3.json copy (recommended)</option>
+      <option value="inochi2d">the Inochi2D copy</option></select></label>
     <label><input type="checkbox" id="dev-search"> Allow web search (Claude searches by itself; other services need a free "Web search" key from tavily.com, under AI services → All saved keys)</label>
     <p><button id="btn-save-device">Save</button> <span id="device-msg"></span></p>
     <details>

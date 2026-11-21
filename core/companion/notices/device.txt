@@ -5,10 +5,11 @@ notices, which are each under their own licence.
 
 OPEN-SOURCE SOFTWARE, AND THE OFFER OF SOURCE CODE
 
-This device runs Raspberry Pi OS (based on Debian GNU/Linux) and other open-source software. Some of it is
-licensed under the GNU General Public License (GPL) or the GNU Lesser General Public License (LGPL), among
-them the Linux kernel, the GNU C library, systemd, NetworkManager, ALSA, espeak-ng and dnsmasq. Those
-licences entitle you to their complete corresponding source code.
+This device's operating system is based on Raspberry Pi OS, which is based on Debian GNU/Linux, and it
+runs other open-source software too. Some of it is licensed under the GNU General Public License (GPL) or
+the GNU Lesser General Public License (LGPL), among them the Linux kernel, the GNU C library, systemd,
+NetworkManager, ALSA, espeak-ng and dnsmasq. Those licences entitle you to their complete corresponding
+source code.
 
 The source code of every operating-system package on this device, at the versions installed on its memory
 card (card image version {image_version}), is published at:
@@ -30,12 +31,13 @@ installing other software yourself.)
 
 TRADEMARKS
 
-Live2D is a registered trademark of Live2D Inc. Raspberry Pi is a trademark of Raspberry Pi Ltd. Python is
+Live2D and Cubism are trademarks or registered trademarks of Live2D Inc. Raspberry Pi is a trademark of
+Raspberry Pi Ltd. VTube Studio is a trademark of its developer, DenchiSoft. Python is
 a registered trademark of the Python Software Foundation. Linux is a registered trademark of Linus
 Torvalds. Claude is a trademark of Anthropic, PBC. OpenAI and ChatGPT are trademarks of OpenAI. Other
 names are trademarks of their owners. This device and its maker are not affiliated with, sponsored or
 endorsed by any of them; the names are used only to say what the device works with.
 
-No Live2D software is included: models in the Live2D style are played by Ayagami, an independent
-open-source player (MIT or Apache-2.0), and Inochi2D models by Inox2D (BSD 2-Clause), the Inochi2D
-project's own player.
+Inochi2D models are played by Inox2D (BSD 2-Clause), the Inochi2D project's own player. Other 2D rigged
+models (Live2D-style models, in the .model3.json format) are played by Ayagami, an independent open-source
+player (MIT or Apache-2.0). No Live2D software is included.
