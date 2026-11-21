@@ -49,7 +49,8 @@ Built in the round after (2026-11-21), at the owner's request:
    warn buyers about an unknown publisher the first time (`14-making-characters.md`). Apple's developer
    programme is US$99 a year; Windows certificates vary.
 6. **The paperwork:**
-   - the seven questions for a lawyer (`19-live2d-format-licensing.md`), including whether advertising the import of buyers' own Live2D models is safe;
+   - the seven questions for a lawyer (`19-live2d-format-licensing.md`), including whether advertising the import of buyers' own Live2D models is safe (until then the product names Inochi2D and "other 2D rigged models", D-067);
+   - the licence audit's remaining points (`34-licences.md`): the maker's name and contact in the device's notice (`core/companion/notices/product.json`), publishing each sale image's release with its source code and keeping it three years, the wake-word model's training data, and Inno Setup's request for a commercial licence;
    - in Australia, an electrical safety and EMC declaration (RCM) for the finished product. A pre-certified Pi and power supply help, but don't cover the whole device;
    - a privacy statement, saying what goes to the AI services the buyer chooses;
    - warranty and returns terms.

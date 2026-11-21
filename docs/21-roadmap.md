@@ -38,6 +38,11 @@ Done and tested in software (not yet on real hardware):
 - Licensing check for the Live2D format (`19`); owner's decision: Ayagami
   plays everything on the device, Inox2D stays as a fallback (D-044). Six
   questions remain for a lawyer before selling.
+- 2026-11-21, licences (`34-licences.md`, D-065 to D-068): every part of the device and Character
+  Studio checked. Nothing needs a negotiated licence. Licence texts and credits ship with both. Each
+  card image's release carries its operating system's source code. The voice was replaced (its training
+  data was research-only). Inochi2D is the format the product names. Builds put their files on GitHub
+  releases (drafts until published).
 
 ## Next, in order
 
