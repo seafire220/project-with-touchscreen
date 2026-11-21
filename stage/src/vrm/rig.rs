@@ -15,6 +15,9 @@ use super::model::{bone, Constraint, Model};
 pub struct Controls {
 	/// Head turn: yaw (towards the viewer's right), pitch (up), roll, in degrees.
 	pub head: Vec3,
+	/// A wide turn, to look beside or behind, in degrees (up to 90, a profile), the same way as the
+	/// head's yaw: shared between the head, the neck and the chest, as a person turns to look aside.
+	pub turn: f32,
 	/// Body turn, the same way, in degrees.
 	pub body: Vec3,
 	pub breath: f32,
@@ -87,13 +90,31 @@ pub fn normalised_pose(model: &Model, c: &Controls) -> [Quat; 55] {
 	let chest = if has("upperChest") { "upperChest" } else if has("chest") { "chest" } else { "spine" };
 	q[bone(chest)] = q[bone(chest)] * Quat::from_rotation_x(deg(-1.8 * c.breath));
 
-	// Head: the neck takes a third of each turn when there is one.
+	// A wide turn: a quarter of it in the chest and spine (a person turns the shoulders to look far
+	// aside), the rest in the neck and head.
+	let wide = c.turn.clamp(-90.0, 90.0);
+	if wide != 0.0 {
+		let torso: [(&str, f32); 3] = match (has("chest"), has("upperChest")) {
+			(true, true) => [("spine", 0.07), ("chest", 0.08), ("upperChest", 0.10)],
+			(true, false) => [("spine", 0.10), ("chest", 0.15), ("upperChest", 0.0)],
+			_ => [("spine", 0.25), ("chest", 0.0), ("upperChest", 0.0)],
+		};
+		for (name, share) in torso {
+			if share > 0.0 {
+				q[bone(name)] = Quat::from_rotation_y(deg(wide * share)) * q[bone(name)];
+			}
+		}
+	}
+	let wide = wide * 0.75;
+
+	// Head: the neck takes a third of each turn when there is one (and 40% of a wide one).
 	let neck_share = if has("neck") { 0.35 } else { 0.0 };
+	let neck_wide = if has("neck") { 0.4 } else { 0.0 };
 	if neck_share > 0.0 {
-		q[bone("neck")] = turn(c.head.x * neck_share, c.head.y * neck_share, -c.head.z * neck_share);
+		q[bone("neck")] = turn(c.head.x * neck_share + wide * neck_wide, c.head.y * neck_share, -c.head.z * neck_share);
 	}
 	let h = 1.0 - neck_share;
-	q[bone("head")] = turn(c.head.x * h, c.head.y * h, -c.head.z * h);
+	q[bone("head")] = turn(c.head.x * h + wide * (1.0 - neck_wide), c.head.y * h, -c.head.z * h);
 
 	// Shoulders up for a shrug (and a touch with each breath).
 	let lift = c.shoulders.clamp(-1.0, 1.0) * 14.0 + c.breath * 1.5;

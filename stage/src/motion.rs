@@ -30,10 +30,10 @@ use crate::behaviour::{Pose, State};
 use crate::smooth::Spring;
 
 /// The controls moods and gestures may move, in `Pose` field names.
-pub const KEYS: [&str; 20] = [
+pub const KEYS: [&str; 21] = [
 	"head_yaw", "head_pitch", "head_roll", "body_yaw", "body_pitch", "body_roll", "gaze_x", "gaze_y", "brows",
 	"brow_form", "smile", "eye_smile", "cheek", "arm_left", "arm_right", "arm_left_b", "arm_right_b", "shoulders",
-	"mouth_open", "blink",
+	"mouth_open", "blink", "head_turn",
 ];
 
 fn slot<'a>(pose: &'a mut Pose, key: usize) -> &'a mut f32 {
@@ -57,6 +57,7 @@ fn slot<'a>(pose: &'a mut Pose, key: usize) -> &'a mut f32 {
 		"arm_right_b" => &mut pose.arm_right_b,
 		"mouth_open" => &mut pose.mouth_open,
 		"blink" => &mut pose.blink,
+		"head_turn" => &mut pose.head_turn,
 		_ => &mut pose.shoulders,
 	}
 }
@@ -68,7 +69,7 @@ pub const CHANNELS: [&str; 9] =
 /// The channel a control belongs to.
 fn channel_of(key: usize) -> usize {
 	match KEYS[key] {
-		"head_yaw" | "head_pitch" | "head_roll" => 0,
+		"head_yaw" | "head_pitch" | "head_roll" | "head_turn" => 0,
 		"body_yaw" | "body_pitch" | "body_roll" | "shoulders" => 1,
 		"gaze_x" | "gaze_y" => 2,
 		"brows" | "brow_form" => 3,
@@ -181,7 +182,7 @@ fn mirrored_key(key: usize) -> (usize, f32) {
 		"arm_right_b" => "arm_left_b",
 		_ => name,
 	};
-	let sign = if matches!(name, "head_yaw" | "head_roll" | "body_yaw" | "body_roll" | "gaze_x") { -1.0 } else { 1.0 };
+	let sign = if matches!(name, "head_yaw" | "head_turn" | "head_roll" | "body_yaw" | "body_roll" | "gaze_x") { -1.0 } else { 1.0 };
 	(key_index(other).unwrap_or(key), sign)
 }
 
@@ -619,9 +620,9 @@ const QUEUE: usize = 2;
 /// Controls that belong to the face, which a model's own expression replaces.
 const FACE: [&str; 5] = ["smile", "eye_smile", "cheek", "brows", "brow_form"];
 /// Controls that make up the posture, which an avatar's own idle loop for a mood can show instead.
-const POSTURE: [&str; 11] = [
+const POSTURE: [&str; 12] = [
 	"head_yaw", "head_pitch", "head_roll", "body_yaw", "body_pitch", "body_roll", "arm_left", "arm_right", "arm_left_b",
-	"arm_right_b", "shoulders",
+	"arm_right_b", "shoulders", "head_turn",
 ];
 
 impl Motion {

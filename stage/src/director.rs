@@ -341,6 +341,8 @@ impl Director {
 			vec![
 				("look_around", (1.5 + 1.0 * b) * (1.0 - 0.9 * s)),
 				("look_out_window", (0.7 + 2.0 * b) * (1.0 - 0.6 * s)),
+				// 3D avatars only (it needs a wide turn): something behind caught its eye.
+				("look_over_shoulder", (0.5 + 0.8 * b) * (1.0 - 0.8 * s)),
 				("glance", 0.6 + 1.2 * a),
 				("settle", 1.0),
 				("hum_sway", 0.8 * e.min(1.2) * (1.0 - s) * self.temper_expression),

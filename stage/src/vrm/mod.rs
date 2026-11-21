@@ -74,8 +74,10 @@ pub fn looks_like_vrm(bytes: &[u8]) -> bool {
 }
 
 /// The parameters a VRM avatar offers, as Live2D names them: (name, min, max, default).
-const PARAMS: [(&str, f32, f32, f32); 30] = [
+const PARAMS: [(&str, f32, f32, f32); 31] = [
 	("ParamAngleX", -30.0, 30.0, 0.0),
+	// A wide turn, to look beside or behind: as far as a profile.
+	("ParamHeadTurn", -90.0, 90.0, 0.0),
 	("ParamAngleY", -30.0, 30.0, 0.0),
 	("ParamAngleZ", -30.0, 30.0, 0.0),
 	("ParamBodyAngleX", -10.0, 10.0, 0.0),
@@ -385,6 +387,7 @@ impl VrmPuppet {
 			let x = v.x;
 			match name.as_str() {
 				"ParamAngleX" => c.head.x = x,
+				"ParamHeadTurn" => c.turn = x,
 				"ParamAngleY" => c.head.y = x,
 				"ParamAngleZ" => c.head.z = x,
 				"ParamBodyAngleX" => c.body.x = x,

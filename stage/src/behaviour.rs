@@ -88,6 +88,9 @@ pub struct Pose {
 	pub vowel_u: f32,
 	pub vowel_e: f32,
 	pub vowel_o: f32,
+	/// -1 to 1: a wide turn of the head, to look beside or behind (as far as a profile, 90 degrees,
+	/// on 3D avatars); characters that cannot turn so far make an ordinary turn instead (mapping.rs).
+	pub head_turn: f32,
 }
 
 const BLINK_CLOSE: f32 = 0.07;
@@ -504,6 +507,7 @@ impl Behaviour {
 			vowel_u: 0.0,
 			vowel_e: 0.0,
 			vowel_o: 0.0,
+			head_turn: 0.0,
 		}
 	}
 }

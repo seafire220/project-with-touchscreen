@@ -245,6 +245,34 @@ fn the_head_turns_and_nods_the_stages_way() {
 }
 
 #[test]
+fn a_wide_turn_reaches_a_profile_and_the_shoulders_help() {
+	for version in [0, 1] {
+		let mut p = load(version);
+		// How far a bone has turned about the vertical since rest, towards the viewer's right (the world's
+		// +x, where a face turned to the viewer's right points), in degrees.
+		p.update(&values(&[]), 0.0);
+		let rest: Vec<glam::Quat> = ["head", "spine"].iter().map(|b| p.rig.world_rotation(p.model.bone(b).unwrap())).collect();
+		let facing = |p: &VrmPuppet, bone: &str| {
+			let i = if bone == "head" { 0 } else { 1 };
+			let turned = p.rig.world_rotation(p.model.bone(bone).unwrap()) * rest[i].inverse();
+			let ahead = turned * Vec3::Z;
+			ahead.x.atan2(ahead.z).to_degrees()
+		};
+		p.update(&values(&[("ParamHeadTurn", 90.0)]), 0.0);
+		let head = facing(&p, "head");
+		assert!((head - 90.0).abs() < 1.0, "{version}: the head faces the viewer's right, in profile: {head}");
+		let chest = facing(&p, "spine");
+		assert!(chest > 5.0 && chest < 35.0, "{version}: the body turns a little with it: {chest}");
+		assert!(nose(&p).x > at(&p, HEAD).x + 0.05, "{version}: the face points right");
+		// With an ordinary turn on top, still the same way; the other way, mirrored.
+		p.update(&values(&[("ParamHeadTurn", -90.0)]), 0.0);
+		assert!((facing(&p, "head") + 90.0).abs() < 1.0);
+		p.update(&values(&[("ParamHeadTurn", 0.0)]), 0.0);
+		assert!(facing(&p, "head").abs() < 0.5, "{version}: and back");
+	}
+}
+
+#[test]
 fn arms_wave_and_rest_on_the_hips() {
 	let mut p = load(1);
 	p.update(&values(&[("ParamArmLA", 5.0), ("ParamArmLB", 8.5)]), 0.0);

@@ -457,7 +457,7 @@ fn own_motion_left_alone(c: mapping::Control) -> bool {
 fn control_channel(c: mapping::Control) -> Option<usize> {
 	use mapping::Control::*;
 	let name = match c {
-		HeadYaw | HeadPitch | HeadRoll => "head",
+		HeadYaw | HeadPitch | HeadRoll | HeadTurn => "head",
 		BodyYaw | BodyPitch | BodyRoll | Shoulders => "torso",
 		GazeX | GazeY => "eyes",
 		BrowLeft | BrowRight | BrowFormLeft | BrowFormRight => "brows",

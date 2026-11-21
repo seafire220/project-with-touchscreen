@@ -14,7 +14,7 @@ from .store import write_atomic
 # The stage's controls (stage/src/motion.rs KEYS); a test keeps the two in step.
 CONTROLS = ("head_yaw", "head_pitch", "head_roll", "body_yaw", "body_pitch", "body_roll", "gaze_x", "gaze_y",
             "brows", "brow_form", "smile", "eye_smile", "cheek", "arm_left", "arm_right", "arm_left_b",
-            "arm_right_b", "shoulders", "mouth_open", "blink")
+            "arm_right_b", "shoulders", "mouth_open", "blink", "head_turn")
 CHANNELS = ("head", "torso", "eyes", "brows", "expression", "arm_left", "arm_right", "mouth", "eyelids")
 KINDS = ("gesture", "idle", "reaction")
 NAME = re.compile(r"[a-z_]{1,40}")

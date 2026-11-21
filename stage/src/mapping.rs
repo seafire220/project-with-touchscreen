@@ -41,10 +41,11 @@ pub enum Control {
 	VowelU,
 	VowelE,
 	VowelO,
+	HeadTurn,
 }
 
 impl Control {
-	pub const ALL: [Control; 30] = [
+	pub const ALL: [Control; 31] = [
 		Control::MouthOpen,
 		Control::BlinkLeft,
 		Control::BlinkRight,
@@ -75,6 +76,7 @@ impl Control {
 		Control::VowelU,
 		Control::VowelE,
 		Control::VowelO,
+		Control::HeadTurn,
 	];
 
 	pub fn key(self) -> &'static str {
@@ -109,6 +111,7 @@ impl Control {
 			Control::VowelU => "vowel_u",
 			Control::VowelE => "vowel_e",
 			Control::VowelO => "vowel_o",
+			Control::HeadTurn => "head_turn",
 		}
 	}
 
@@ -172,6 +175,7 @@ impl Control {
 			Control::VowelU => pose.vowel_u,
 			Control::VowelE => pose.vowel_e,
 			Control::VowelO => pose.vowel_o,
+			Control::HeadTurn => pose.head_turn,
 		}
 	}
 
@@ -183,6 +187,7 @@ impl Control {
 			Control::MouthOpen => &[("Mouth:: Shape", 1, false), ("Mouth:: Open", 0, false), ("ParamMouthOpenY", 0, false)],
 			Control::BlinkLeft => &[("Eye:: Left:: Blink", 0, false), ("ParamEyeLOpen", 0, true)],
 			Control::BlinkRight => &[("Eye:: Right:: Blink", 0, false), ("ParamEyeROpen", 0, true)],
+			Control::HeadTurn => &[("ParamHeadTurn", 0, false)],
 			Control::HeadYaw => &[("Head:: Yaw-Pitch", 0, false), ("ParamAngleX", 0, false)],
 			Control::HeadPitch => &[("Head:: Yaw-Pitch", 1, false), ("ParamAngleY", 0, false)],
 			Control::HeadRoll => &[("Head:: Roll", 0, false), ("ParamAngleZ", 0, false)],
@@ -334,6 +339,14 @@ impl Mapper {
 
 	/// Compute parameter values for a pose. Returns (parameter name, value).
 	pub fn resolve(&mut self, pose: &Pose) -> Vec<(String, Vec2)> {
+		// A wide turn becomes an ordinary one, as far as it goes, where the character cannot turn so far.
+		let folded;
+		let pose = if pose.head_turn == 0.0 || self.targets.iter().any(|(c, _)| *c == Control::HeadTurn) {
+			pose
+		} else {
+			folded = Pose { head_yaw: (pose.head_yaw + pose.head_turn).clamp(-1.0, 1.0), head_turn: 0.0, ..*pose };
+			&folded
+		};
 		for (control, t) in &self.targets {
 			let v = t.value(control.value(pose), control.bipolar());
 			if let Some(slot) = self.values.get_mut(&t.param) {
@@ -397,6 +410,27 @@ mod tests {
 		let out = m.resolve(&Pose { blink: 1.0, head_yaw: 0.5, ..Default::default() });
 		assert_eq!(value(&out, "ParamEyeLOpen").x, 0.0); // closed
 		assert_eq!(value(&out, "ParamAngleX").x, 15.0);
+	}
+
+	#[test]
+	fn a_wide_turn_is_an_ordinary_one_where_a_character_cannot_turn_so_far() {
+		let flat = PuppetInfo { params: vec![param("ParamAngleX", false, [-30.0, 0.0], [30.0, 0.0], [0.0, 0.0])], ..Default::default() };
+		let mut m = Mapper::auto(&flat);
+		assert!(!m.drives("head_turn"));
+		let out = m.resolve(&Pose { head_yaw: 0.3, head_turn: 0.9, ..Default::default() });
+		assert_eq!(value(&out, "ParamAngleX").x, 30.0, "as far as it goes");
+		let wide = PuppetInfo {
+			params: vec![
+				param("ParamAngleX", false, [-30.0, 0.0], [30.0, 0.0], [0.0, 0.0]),
+				param("ParamHeadTurn", false, [-90.0, 0.0], [90.0, 0.0], [0.0, 0.0]),
+			],
+			..Default::default()
+		};
+		let mut m = Mapper::auto(&wide);
+		assert!(m.drives("head_turn"));
+		let out = m.resolve(&Pose { head_yaw: 0.3, head_turn: -0.5, ..Default::default() });
+		assert_eq!(value(&out, "ParamAngleX").x, 9.0, "the ordinary turn stays itself");
+		assert_eq!(value(&out, "ParamHeadTurn").x, -45.0);
 	}
 
 	#[test]

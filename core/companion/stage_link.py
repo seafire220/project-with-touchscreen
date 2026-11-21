@@ -183,6 +183,7 @@ class StageLink:
 # The stage's motion controls, in the order the movement settings show them, with plain names.
 CONTROLS = (
     ("head_yaw", "Head turn"), ("head_pitch", "Head nod"), ("head_roll", "Head tilt"),
+    ("head_turn", "Wide head turn (to look aside; 3D avatars have it)"),
     ("body_yaw", "Body turn"), ("body_pitch", "Body lean"), ("body_roll", "Body sway"),
     ("gaze_x", "Eyes left and right"), ("gaze_y", "Eyes up and down"),
     ("arm_left", "Left arm"), ("arm_right", "Right arm"), ("arm_left_b", "Left elbow"), ("arm_right_b", "Right elbow"),
