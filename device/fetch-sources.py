@@ -9,9 +9,10 @@ installed package, with its source package and version), the image's own package
 and its archive keys (keyrings/).
 
 Each source package is downloaded at exactly the version in the image, with apt, from the image's own
-archives (Debian's and Raspberry Pi's), into OUT_DIR/<source package>/. One no longer in those archives
-is fetched from Debian's snapshot archive (snapshot.debian.org), each file checked against the hash it
-is listed with. OUT_DIR/README.txt says what is there; OUT_DIR/MISSING.txt lists any that could not be
+archives (Debian's and Raspberry Pi's), into OUT_DIR/<source package>/. One that has since been replaced
+by a newer version is taken from the archives' pool folders, where Raspberry Pi keeps old versions
+(each file checked against the SHA-256 its .dsc lists), or from Debian's snapshot archive
+(snapshot.debian.org, each file checked against the hash it is listed with). OUT_DIR/README.txt says what is there; OUT_DIR/MISSING.txt lists any that could not be
 found, and the script then ends with status 3.
 
 apt runs with its own settings in a scratch folder, so the computer's own package sources are not used
@@ -26,6 +27,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -124,11 +126,80 @@ def apt_command(work, packages_dir):
     return command
 
 
+def archives(packages_dir):
+    """The image's archives: (address, components) for each source entry, from its package sources."""
+    out = []
+    folder = os.path.join(packages_dir, "sources")
+    for name in sorted(os.listdir(folder)):
+        with open(os.path.join(folder, name), encoding="utf-8") as f:
+            text = f.read()
+        if name.endswith(".sources"):
+            for stanza in re.split(r"\n\s*\n", text):
+                fields = dict(re.findall(r"(?m)^([A-Za-z-]+):\s*(.*)$", stanza))
+                if fields.get("Enabled", "yes").lower() == "no":
+                    continue
+                for uri in fields.get("URIs", "").split():
+                    out.append((uri.rstrip("/"), fields.get("Components", "main").split()))
+        elif name.endswith(".list"):
+            for line in text.splitlines():
+                m = re.match(r"deb(?:-src)?\s+(?:\[[^\]]*\]\s+)?(\S+)\s+\S+\s+(.*)$", line.strip())
+                if m:
+                    out.append((m.group(1).rstrip("/"), m.group(2).split() or ["main"]))
+    seen, unique = set(), []
+    for uri, components in out:
+        for c in components:
+            if (uri, c) not in seen:
+                seen.add((uri, c))
+                unique.append((uri, c))
+    return unique
+
+
+def pool_folder(source):
+    return source[:4] if source.startswith("lib") and len(source) > 3 else source[0]
+
+
+def dsc_files(text):
+    """The (name, SHA-256) of each file a .dsc lists."""
+    m = re.search(r"(?ms)^Checksums-Sha256:\s*\n((?:[ \t]+\S+[ \t]+\d+[ \t]+\S+\n?)+)", text)
+    if not m:
+        return []
+    return [(parts[2], parts[0]) for parts in (line.split() for line in m.group(1).splitlines()) if len(parts) == 3]
+
+
+def from_pool(source, version, folder, places):
+    """A source package from an archive's pool folder, which may keep versions its index no longer lists."""
+    plain = version.split(":", 1)[-1]
+    for uri, component in places:
+        base = "%s/pool/%s/%s/%s/" % (uri, component, pool_folder(source), source)
+        dsc_name = "%s_%s.dsc" % (source, plain)
+        try:
+            dsc = _get(base + urllib.parse.quote(dsc_name), attempts=1)
+        except OSError:
+            continue
+        files = dsc_files(dsc.decode("utf-8", "replace"))
+        if not files:
+            continue
+        for name, digest in files:
+            data = _get(base + urllib.parse.quote(name))
+            if hashlib.sha256(data).hexdigest() != digest:
+                raise OSError("%s from %s does not match its .dsc" % (name, uri))
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(data)
+        with open(os.path.join(folder, dsc_name), "wb") as f:
+            f.write(dsc)
+        return True
+    return False
+
+
 def _get(url, attempts=4):
     for attempt in range(attempts):
         try:
             with urllib.request.urlopen(url, timeout=120) as r:
                 return r.read()
+        except urllib.error.HTTPError as error:
+            if error.code == 404 or attempt == attempts - 1:
+                raise
+            time.sleep(5 * (attempt + 1))
         except OSError:
             if attempt == attempts - 1:
                 raise
@@ -155,6 +226,7 @@ def from_snapshot(source, version, folder):
 
 def fetch(packages_dir, out):
     pairs = read_packages(os.path.join(packages_dir, "packages.tsv"))
+    places = archives(packages_dir)
     os.makedirs(out, exist_ok=True)
     work = tempfile.mkdtemp(prefix="apt-sources-")
     try:
@@ -164,22 +236,31 @@ def fetch(packages_dir, out):
                   "archive instead", flush=True)
         missing = []
         for source, version in pairs:
-            folder = os.path.join(out, source)
-            os.makedirs(folder, exist_ok=True)
+            # Each version into a folder of its own first: a failed try then leaves nothing behind.
+            folder = tempfile.mkdtemp(prefix=".fetching-", dir=out)
             got = subprocess.run(apt + ["source", "--download-only", "%s=%s" % (source, version)], cwd=folder,
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
             how = "archive"
+            if not got:
+                try:
+                    got, how = from_pool(source, version, folder, places), "archive's pool"
+                except OSError as error:
+                    print("pool: %s %s: %s" % (source, version, error), file=sys.stderr)
             if not got:
                 try:
                     got, how = from_snapshot(source, version, folder), "snapshot.debian.org"
                 except (OSError, ValueError, KeyError) as error:
                     print("snapshot archive: %s %s: %s" % (source, version, error), file=sys.stderr)
             if got and any(n.endswith(".dsc") for n in os.listdir(folder)):
+                final = os.path.join(out, source)
+                os.makedirs(final, exist_ok=True)
+                for name in os.listdir(folder):
+                    os.replace(os.path.join(folder, name), os.path.join(final, name))
                 print("%-40s %-40s %s" % (source, version, how), flush=True)
             else:
                 missing.append((source, version))
-                shutil.rmtree(folder, ignore_errors=True)
                 print("%-40s %-40s NOT FOUND" % (source, version), flush=True)
+            shutil.rmtree(folder, ignore_errors=True)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     shutil.copy2(os.path.join(packages_dir, "packages.tsv"), os.path.join(out, "packages.tsv"))

@@ -253,6 +253,24 @@ class SourceCodeTest(unittest.TestCase):
         self.assertEqual(out, "deb-src [signed-by=/work/keys/debian-archive-keyring.gpg] http://deb.debian.org/debian trixie main\n")
         self.assertEqual(self.tool.source_entries("anything", "notes.txt", "/k", {}), "")
 
+    def test_the_archives_and_their_pool_folders_are_read_from_the_image(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "sources"))
+            with open(os.path.join(d, "sources", "debian.sources"), "w") as f:
+                f.write("Types: deb\nURIs: http://deb.debian.org/debian/\nSuites: trixie trixie-updates\n"
+                        "Components: main non-free-firmware\n\nTypes: deb\nURIs: http://x.example/off\nSuites: a\n"
+                        "Components: main\nEnabled: no\n")
+            with open(os.path.join(d, "sources", "raspi.list"), "w") as f:
+                f.write("deb [arch=arm64] http://archive.raspberrypi.com/debian/ trixie main\n")
+            self.assertEqual(self.tool.archives(d), [("http://deb.debian.org/debian", "main"),
+                                                     ("http://deb.debian.org/debian", "non-free-firmware"),
+                                                     ("http://archive.raspberrypi.com/debian", "main")])
+        self.assertEqual(self.tool.pool_folder("libcamera"), "libc")
+        self.assertEqual(self.tool.pool_folder("raspi-config"), "r")
+        dsc = ("Format: 3.0 (native)\nChecksums-Sha256:\n abc123 38628 raspi-config_1.tar.xz\nFiles:\n"
+               " d41d 38628 raspi-config_1.tar.xz\n")
+        self.assertEqual(self.tool.dsc_files(dsc), [("raspi-config_1.tar.xz", "abc123")])
+
     def test_each_source_package_is_fetched_once_at_the_images_version(self):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "packages.tsv")

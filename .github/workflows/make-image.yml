@@ -140,6 +140,7 @@ jobs:
           MODE: ${{ inputs.release }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          command -v gh >/dev/null || sudo apt-get install -y -q gh
           cd "$RUNNER_TEMP"
           if [ "$(stat -c %s "companion-$VERSION.img.xz")" -ge 2147483648 ]; then
             echo "::error::The image is 2 GB or more, which is more than a GitHub release file can be. It is under Artifacts."
