@@ -87,7 +87,8 @@ def source_entries(text, name, keys, renamed):
     def key(m):
         base = os.path.basename(m.group(2).strip())
         return m.group(1) + os.path.join(keys, renamed.get(base, base))
-    text = re.sub(r"(?m)^(Signed-By:\s*)(/\S+)\s*$", key, text)
+    # [ \t] rather than \s: a newline must stay, or the blank line between two entries goes and they merge.
+    text = re.sub(r"(?m)^(Signed-By:[ \t]*)(/\S+)[ \t]*$", key, text)
     return re.sub(r"signed-by=(/[^\s\]]+)", lambda m: "signed-by=" + os.path.join(
         keys, renamed.get(os.path.basename(m.group(1)), os.path.basename(m.group(1)))), text)
 

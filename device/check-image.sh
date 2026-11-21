@@ -125,6 +125,7 @@ check "the device's end of the USB connection (readable by root only)" sh -c "[ 
 check "the gadget program is installed" test -x "$ROOT/opt/companion/bin/companion-usb-gadget"
 check "the screen's brightness can be set by the service" test -f "$ROOT/etc/udev/rules.d/99-companion-backlight.rules"
 check "quiet boot" sh -c "mtype -i '$IMG@@$BOOT_START' ::cmdline.txt | grep -q logo.nologo"
+check "no closed-source remote access (Raspberry Pi Connect)" sh -c "! dpkg-query --admindir='$ROOT/var/lib/dpkg' -W -f='\${db:Status-Abbrev}\n' rpi-connect-lite rpi-connect 2>/dev/null | grep -q '^.i'"
 check "licences and notices on board (the stage's libraries, the device's notice, the image's version)" sh -c "test -s '$ROOT/opt/companion/share/licenses/stage.txt' && test -s '$ROOT/opt/companion/core/companion/notices/device.txt' && test -s '$ROOT/etc/companion-image'"
 if [ "$PARTS" -ge 3 ]; then
     fstab="$ROOT/etc/fstab"

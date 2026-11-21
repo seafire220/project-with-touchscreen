@@ -266,6 +266,13 @@ class SourceCodeTest(unittest.TestCase):
         out = self.tool.source_entries(one_line, "debian.list", "/work/keys", {})
         self.assertEqual(out, "deb-src [signed-by=/work/keys/debian-archive-keyring.gpg] http://deb.debian.org/debian trixie main\n")
         self.assertEqual(self.tool.source_entries("anything", "notes.txt", "/k", {}), "")
+        two = ("Types: deb\nURIs: http://deb.debian.org/debian/\nSuites: trixie trixie-updates\nComponents: main\n"
+               "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp\n\nTypes: deb\n"
+               "URIs: http://deb.debian.org/debian-security/\nSuites: trixie-security\nComponents: main\n"
+               "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp\n")
+        out = self.tool.source_entries(two, "debian.sources", "/k", {"debian-archive-keyring.pgp": "d.gpg"})
+        self.assertEqual(len(out.split("\n\n")), 2, "the two entries stay apart")
+        self.assertEqual(out.count("Signed-By: /k/d.gpg\n"), 2)
 
     def test_the_archives_and_their_pool_folders_are_read_from_the_image(self):
         with tempfile.TemporaryDirectory() as d:

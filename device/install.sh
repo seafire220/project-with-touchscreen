@@ -309,6 +309,11 @@ if [ "$IMAGE" = 1 ]; then
     if [ -d /etc/cloud ]; then touch /etc/cloud/cloud-init.disabled; fi
     # No remote login on a sold unit.
     systemctl disable ssh.service sshswitch.service 2>/dev/null || true
+    # Nor Raspberry Pi Connect (remote access through Raspberry Pi's servers): it is closed-source, and
+    # without it every package on the card has its source code published with the image.
+    for pkg in rpi-connect-lite rpi-connect; do
+        if dpkg -s "$pkg" >/dev/null 2>&1; then apt-get purge -y -q "$pkg"; fi
+    done
     # http://companion.local reaches the settings page.
     echo companion > /etc/hostname
     if grep -q "^127.0.1.1" /etc/hosts; then
