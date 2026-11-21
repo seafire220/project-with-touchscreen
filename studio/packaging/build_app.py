@@ -11,7 +11,7 @@ Each opens the studio's page in the browser (launch.py --desktop): the first tim
 one-time download of its AI tools with its progress, then the studio.
 
     python3 studio/packaging/build_app.py --python PYTHON_DIR --version 2026.11.21 --out DIST
-        [--iscc PATH_TO_ISCC.exe] [--appimagetool PATH]
+        [--iscc PATH_TO_ISCC.exe] [--appimagetool PATH --appimage-runtime PATH]
 
 PYTHON_DIR is a relocatable Python 3.12 for the computer being built for (`uv python install 3.12
 --install-dir DIR` gets one; the "Make the Character Studio apps" workflow does). The app is built for
@@ -38,7 +38,11 @@ WINDOWS_APP_ID = "{8F3C2A51-6B7D-4E2A-9C1F-2D5E7A9B3C40}"
 # Parts of Python the studio never uses: its own tests, the IDLE editor, Tk windows and the like.
 PYTHON_LEFT_OUT = {"test", "idlelib", "tkinter", "turtledemo", "turtle.py", "pydoc_data", "lib2to3", "tcl", "tcl8.6",
                    "tk8.6", "tcl8", "share", "__pycache__"}
-PYTHON_LEFT_OUT_FILES = re.compile(r"^(_tkinter.*|tcl\d.*|tk\d.*|libtcl.*|libtk.*|.*\.a)$")
+# _dbm: in the Linux build it has Berkeley DB 6 inside, which is under the GNU AGPL; the studio never uses
+# it (Python's dbm module then uses its own simple format).
+PYTHON_LEFT_OUT_FILES = re.compile(r"^(_tkinter.*|_dbm\..*|tcl\d.*|tk\d.*|libtcl.*|libtk.*|.*\.a)$")
+# Tcl/Tk's own folders (tcl9.0, tk9.0, itcl4.3.5, thread3.0.4, ...): with Tkinter left out, nothing uses them.
+PYTHON_LEFT_OUT_DIRS = re.compile(r"^(tcl|tk|itcl|thread|tdbc)\d")
 
 
 def copy_python(src, dst):
@@ -46,7 +50,8 @@ def copy_python(src, dst):
     def ignore(folder, names):
         out = set()
         for n in names:
-            if n in PYTHON_LEFT_OUT or PYTHON_LEFT_OUT_FILES.match(n) or (n.startswith("config-") and "lib" in folder):
+            if n in PYTHON_LEFT_OUT or PYTHON_LEFT_OUT_FILES.match(n) or PYTHON_LEFT_OUT_DIRS.match(n) or \
+                    (n.startswith("config-") and "lib" in folder):
                 out.add(n)
         return out
     shutil.copytree(src, dst, symlinks=True, ignore=ignore)
@@ -68,6 +73,10 @@ def copy_studio(dst):
     shutil.copytree(os.path.join(ROOT, "core", "companion"), os.path.join(dst, "core", "companion"),
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     shutil.copy2(os.path.join(ROOT, "THIRD_PARTY.md"), os.path.join(dst, "THIRD_PARTY.md"))
+    # The app's notice and the licences of the Python inside (the studio's licences page shows them).
+    os.makedirs(os.path.join(dst, "licenses"), exist_ok=True)
+    shutil.copy2(os.path.join(HERE, "notice.txt"), os.path.join(dst, "licenses", "notice.txt"))
+    shutil.copy2(os.path.join(HERE, "python-licences.txt"), os.path.join(dst, "licenses", "python-components.txt"))
     with open(os.path.join(dst, "VERSION"), "w", encoding="utf-8") as f:
         f.write(ARGS.version + "\n")
 
@@ -92,9 +101,13 @@ def payload(dst, python_dir):
 def check_payload(exe, dst):
     """The copied Python starts, has what setting up needs, and the studio's launcher loads."""
     code = ("import ensurepip, venv, ssl, sqlite3, json, http.server, urllib.request; import sys; "
+            "import importlib.util as u; assert u.find_spec('_dbm') is None, 'the AGPL Berkeley DB module is in'; "
             "sys.path.insert(0, r'%s'); import launch; print('python', sys.version.split()[0], 'ok')"
             % os.path.join(dst, "studio"))
     subprocess.run([exe, "-I", "-c", code], check=True)
+    for name in ("notice.txt", "python-components.txt"):
+        if not os.path.isfile(os.path.join(dst, "licenses", name)):
+            raise SystemExit("the app's licences are missing: " + name)
 
 
 # ------------------------------------------------------------------------------------------------
@@ -243,10 +256,13 @@ Terminal=false
 """
 
 
-def build_linux(work, out, python_dir, appimagetool):
+def build_linux(work, out, python_dir, appimagetool, runtime=None):
     appdir = os.path.join(work, "CharacterStudio.AppDir")
     exe = payload(os.path.join(appdir, "usr"), python_dir)
     check_payload(exe, os.path.join(appdir, "usr"))
+    # The AppImage runtime's licences (its libfuse is LGPL: its source is published with each release).
+    shutil.copy2(os.path.join(HERE, "appimage-runtime-licences.txt"),
+                 os.path.join(appdir, "usr", "licenses", "appimage-runtime.txt"))
     with open(os.path.join(appdir, "AppRun"), "w", encoding="utf-8") as f:
         f.write(APPRUN)
     os.chmod(os.path.join(appdir, "AppRun"), 0o755)
@@ -259,7 +275,9 @@ def build_linux(work, out, python_dir, appimagetool):
         print("no appimagetool given: the app is in %s" % appdir)
         return appdir
     env = dict(os.environ, ARCH="x86_64", APPIMAGE_EXTRACT_AND_RUN="1")
-    subprocess.run([appimagetool, "--no-appstream", appdir, image], check=True, env=env)
+    # The runtime the licences describe (appimagetool would otherwise fetch whichever is newest).
+    pinned = ["--runtime-file", runtime] if runtime else []
+    subprocess.run([appimagetool, "--no-appstream", *pinned, appdir, image], check=True, env=env)
     os.chmod(image, os.stat(image).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     return image
 
@@ -273,6 +291,8 @@ def main(argv):
     parser.add_argument("--work", help="where to put the app together (default: OUT/work)")
     parser.add_argument("--iscc", help="Inno Setup's compiler (Windows)")
     parser.add_argument("--appimagetool", help="appimagetool (Linux)")
+    parser.add_argument("--appimage-runtime", help="the AppImage runtime to use (Linux; the one "
+                        "appimage-runtime-licences.txt describes)")
     ARGS = parser.parse_args(argv)
     if not re.fullmatch(r"[0-9][0-9A-Za-z.\-]{0,30}", ARGS.version):
         raise SystemExit("the version should look like 2026.11.21")
@@ -288,7 +308,7 @@ def main(argv):
     elif sys.platform == "darwin":
         made = build_mac(work, out, python_dir)
     else:
-        made = build_linux(work, out, python_dir, ARGS.appimagetool)
+        made = build_linux(work, out, python_dir, ARGS.appimagetool, ARGS.appimage_runtime)
     print("made", made)
     return 0
 

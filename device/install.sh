@@ -162,8 +162,10 @@ if [ ! -x "$APP/venv/bin/python" ]; then
 fi
 "$APP/venv/bin/pip" install -q --upgrade pip
 # sherpa-onnx: on-device speech recognition and the wake word; sentencepiece spells the wake words as
-# the wake-word model's word pieces. anthropic: only loaded if Claude is chosen.
-"$APP/venv/bin/pip" install -q sherpa-onnx sentencepiece anthropic || echo "warning: optional Python packages did not install" >&2
+# the wake-word model's word pieces. anthropic: only loaded if Claude is chosen. sherpa-onnx from 2.0 on
+# has no espeak-ng (GPL-3.0) built in: the voice's phonemes come from the espeak-ng program instead
+# (core/companion/phonemes.py), so nothing under the GPL is linked into the device's own software.
+"$APP/venv/bin/pip" install -q "sherpa-onnx>=2.0.0,<3" sentencepiece anthropic || echo "warning: optional Python packages did not install" >&2
 # The speech library brings its own copy of ALSA's sound library (LGPL-2.1). Point it at the operating
 # system's instead (the same library, newer): then every LGPL library on the device is the operating
 # system's own, with its source in the operating system's archive (docs/34-licences.md).

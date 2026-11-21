@@ -44,6 +44,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "core"))
 
 import make_character  # noqa: E402
+import licences  # noqa: E402
 import preview  # noqa: E402
 from companion import cards, package, persona  # noqa: E402
 
@@ -337,6 +338,15 @@ def with_persona(data, form):
     return with_persona_text(data, persona.build(form), form["name"].strip())
 
 
+def app_version():
+    """The app's version (written into the app when it is built; none when run from the source)."""
+    try:
+        with open(os.path.join(HERE, "..", "VERSION"), encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
 def with_persona_text(data, text, name):
     """The package with the given persona, under the given name."""
     old = package.open_package(io.BytesIO(data))
@@ -475,6 +485,16 @@ def make_app(studio):
         asyncio.get_running_loop().call_later(0.3, stop_now)
         return web.json_response({"ok": True})
 
+    async def licences_index(request):
+        return web.Response(text=licences.index(studio.config(), app_version()), content_type="text/html")
+
+    async def licence(request):
+        entry = licences.documents(studio.config()).get(request.match_info["name"])
+        if entry is None:
+            raise web.HTTPNotFound(text="no such document")
+        text = await asyncio.get_running_loop().run_in_executor(None, entry[1])
+        return web.Response(text=text, content_type="text/plain", charset="utf-8")
+
     async def last_address(request):
         return web.json_response({"address": studio.config().get("device_address", "companion.local")})
 
@@ -495,6 +515,8 @@ def make_app(studio):
     r.add_get("/api/jobs/{job}/package", download)
     r.add_post("/api/jobs/{job}/send", send)
     r.add_post("/api/quit", quit_studio)
+    r.add_get("/licences", licences_index)
+    r.add_get("/licences/{name}.txt", licence)
     return app
 
 

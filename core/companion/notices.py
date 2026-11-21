@@ -126,11 +126,11 @@ def _document(title, intro, lines, texts):
     return "\n".join(out) + "\n"
 
 
-def python_licences():
+def python_licences(title="Python packages on this device", where=""):
     packages = python_packages()
     lines, texts = _numbered((p["name"], p["version"], p["licence"], p["texts"]) for p in packages)
-    return _document("Python packages on this device", "%d packages, each with the licence it is used under and "
-                     "the licence files it carries (numbered below, each text once)." % len(packages), lines, texts)
+    return _document(title, "%s%d packages, each with the licence it is used under and the licence files it "
+                     "carries (numbered below, each text once)." % (where, len(packages)), lines, texts)
 
 
 def os_packages(status="/var/lib/dpkg/status"):
@@ -205,17 +205,19 @@ DOCUMENTS = {
 }
 
 
-def index_page(names, version=""):
-    """The page linking to each document, for the settings page's "Licences and notices"."""
+def index_page(names, version="", what="This device's software", back=("/", "Back to the settings page")):
+    """The page linking to each document, for the settings page's "Licences and notices" (and Character
+    Studio's)."""
     items = "".join('<li><a href="/licences/%s.txt">%s</a></li>' % (key, html.escape(names[key])) for key in names)
     return """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>Licences and notices</title>
 <style>body{font:16px/1.5 system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem;color:#222;background:#fff}
 @media (prefers-color-scheme: dark){body{color:#eee;background:#17171a}a{color:#9ab}}</style></head><body>
 <h1>Licences and notices</h1>
-<p>This device's software%s is made with open-source software and models from many people. Each part's
-licence, and the credits some of them ask for, are below. Some licences (the GNU GPL and LGPL among them)
-let you have the source code: see the first document.</p>
+<p>%s%s is made with open-source software and models from many people. Each part's licence, and the
+credits some of them ask for, are below. Some licences (the GNU GPL and LGPL among them) let you have the
+source code: see the first document.</p>
 <ul>%s</ul>
-<p><a href="/">Back to the settings page</a></p>
-</body></html>""" % (" (version %s)" % html.escape(version) if version else "", items)
+<p><a href="%s">%s</a></p>
+</body></html>""" % (html.escape(what), " (version %s)" % html.escape(version) if version else "", items,
+                     html.escape(back[0]), html.escape(back[1]))

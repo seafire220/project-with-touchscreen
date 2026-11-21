@@ -232,5 +232,34 @@ class ReadOnlySystemTest(unittest.IsolatedAsyncioTestCase):
                 await client.close()
 
 
+
+class SourceCodeTest(unittest.TestCase):
+    """device/fetch-sources.py: the image's package sources, as source-code sources with the image's keys."""
+
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location("fetch_sources_check", os.path.join(REPO, "device", "fetch-sources.py"))
+        self.tool = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.tool)
+
+    def test_the_images_sources_become_source_code_sources_with_its_own_keys(self):
+        deb822 = ("Types: deb\nURIs: http://archive.raspberrypi.com/debian/\nSuites: trixie\nComponents: main\n"
+                  "Signed-By: /usr/share/keyrings/raspberrypi-archive-keyring.pgp\n")
+        out = self.tool.source_entries(deb822, "raspi.sources", "/work/keys",
+                                       {"raspberrypi-archive-keyring.pgp": "raspberrypi-archive-keyring.gpg"})
+        self.assertIn("Types: deb-src\n", out)
+        self.assertIn("Signed-By: /work/keys/raspberrypi-archive-keyring.gpg", out)
+        one_line = "deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg] http://deb.debian.org/debian trixie main\n# deb x\n"
+        out = self.tool.source_entries(one_line, "debian.list", "/work/keys", {})
+        self.assertEqual(out, "deb-src [signed-by=/work/keys/debian-archive-keyring.gpg] http://deb.debian.org/debian trixie main\n")
+        self.assertEqual(self.tool.source_entries("anything", "notes.txt", "/k", {}), "")
+
+    def test_each_source_package_is_fetched_once_at_the_images_version(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "packages.tsv")
+            with open(path, "w") as f:
+                f.write("libc6\t2.41-12\tglibc\t2.41-12\tarm64\nlibc-bin\t2.41-12\tglibc\t2.41-12\tarm64\n"
+                        "zlib1g\t1:1.3.dfsg-4+b1\tzlib\t1:1.3.dfsg-4\tarm64\n")
+            self.assertEqual(self.tool.read_packages(path), [("glibc", "2.41-12"), ("zlib", "1:1.3.dfsg-4")])
+
 if __name__ == "__main__":
     unittest.main()

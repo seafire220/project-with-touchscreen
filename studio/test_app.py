@@ -208,6 +208,46 @@ class SetupTest(unittest.IsolatedAsyncioTestCase):
 
 
 
+class LicencesTest(unittest.IsolatedAsyncioTestCase):
+    """The page's "Licences and notices": the app's notice, the Python inside it, what it downloaded."""
+
+    async def test_every_document_is_there_and_says_what_it_should(self):
+        with tempfile.TemporaryDirectory() as d:
+            finder = os.path.join(d, "see-through")
+            os.makedirs(finder)
+            with open(os.path.join(finder, "LICENSE"), "w") as f:
+                f.write("Apache License\nVersion 2.0, January 2004\n")
+            studio = app.Studio(d)
+            studio.save_config(see_through=finder)
+            client = TestClient(TestServer(app.make_app(studio)))
+            await client.start_server()
+            studio.port = client.port
+            try:
+                page = await (await client.get("/")).text()
+                self.assertIn('href="/licences"', page, "the studio's page links to them")
+                r = await client.get("/licences")
+                self.assertEqual(r.status, 200)
+                index = await r.text()
+                texts = {}
+                for key in ("notice", "python", "packages", "part-finder", "third-party"):
+                    self.assertIn("/licences/%s.txt" % key, index)
+                    r = await client.get("/licences/%s.txt" % key)
+                    self.assertEqual(r.status, 200, key)
+                    texts[key] = await r.text()
+                self.assertIn("WITHOUT ANY WARRANTY", texts["notice"])
+                self.assertIn("Live2D Inc.", texts["notice"])
+                self.assertNotIn("{maker}", texts["notice"])
+                self.assertIn("PYTHON SOFTWARE FOUNDATION LICENSE", texts["python"].upper())
+                self.assertIn("OpenSSL", texts["python"])
+                self.assertIn("aiohttp", texts["packages"])
+                self.assertIn("Apache License", texts["part-finder"])
+                self.assertNotIn("/licences/appimage.txt", index, "only the Linux app carries an AppImage runtime")
+                r = await client.get("/licences/secrets.txt")
+                self.assertEqual(r.status, 404)
+            finally:
+                await client.close()
+
+
 class StoppingTest(unittest.IsolatedAsyncioTestCase):
     """Started from the Character Studio app, the studio stops with its Quit button, or by itself a while
     after its page was closed, but never while it is making a character or downloading the model."""

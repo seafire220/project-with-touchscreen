@@ -1,7 +1,7 @@
 #!/bin/bash
 # Check that a device image is set up to work out of the box.
 #
-#   sudo ./device/check-image.sh companion.img
+#   sudo ./device/check-image.sh companion.img [--packages DIR]
 #
 # Mounts the image read-only and checks: the software and speech model are
 # installed, the services are enabled, nothing asks for a login on the
@@ -9,9 +9,15 @@
 # and the boot settings for the buttons and display are present. An image with
 # power-cut protection (a read-only system and a data partition) is checked for
 # that too. Exit status 0 means every check passed.
+#
+# --packages DIR also copies out what fetch-sources.py needs to download the source code of the image's
+# operating-system packages: packages.tsv (each package, its version, its source package and version),
+# the image's package sources and its archive keys.
 set -uo pipefail
 
-IMG="${1:?usage: check-image.sh IMAGE}"
+IMG="${1:?usage: check-image.sh IMAGE [--packages DIR]}"
+PACKAGES_OUT=""
+if [ "${2:-}" = "--packages" ]; then PACKAGES_OUT="${3:?--packages needs a folder}"; fi
 [ "$(id -u)" -eq 0 ] || { echo "run this with sudo" >&2; exit 1; }
 WORK="$(mktemp -d)"
 ROOT="$WORK/root"
@@ -40,6 +46,18 @@ if [ "$PARTS" -ge 3 ]; then
     DLOOP="$(losetup -f --show -r -o "$DATA_START" --sizelimit "$DATA_SIZE" "$IMG")"
     mount -o ro "$DLOOP" "$WORK/data"
     DATA="$WORK/data/companion"
+fi
+if [ -n "$PACKAGES_OUT" ]; then
+    mkdir -p "$PACKAGES_OUT/sources" "$PACKAGES_OUT/keyrings"
+    dpkg-query --admindir="$ROOT/var/lib/dpkg" -W \
+        -f='${db:Status-Abbrev}\t${Package}\t${Version}\t${source:Package}\t${source:Version}\t${Architecture}\n' |
+        awk -F '\t' 'BEGIN {OFS = "\t"} $1 ~ /^.i/ {print $2, $3, $4, $5, $6}' > "$PACKAGES_OUT/packages.tsv"
+    cp -a "$ROOT"/etc/apt/sources.list.d/. "$PACKAGES_OUT/sources/" 2>/dev/null || true
+    [ -s "$ROOT/etc/apt/sources.list" ] && cp "$ROOT/etc/apt/sources.list" "$PACKAGES_OUT/sources/sources.list"
+    for dir in "$ROOT/usr/share/keyrings" "$ROOT/etc/apt/keyrings" "$ROOT/etc/apt/trusted.gpg.d"; do
+        [ -d "$dir" ] && find "$dir" -maxdepth 1 -type f -exec cp {} "$PACKAGES_OUT/keyrings/" \;
+    done
+    echo "the image's $(wc -l < "$PACKAGES_OUT/packages.tsv") packages are listed in $PACKAGES_OUT/packages.tsv"
 fi
 model() {   # a model file the device comes with: on the read-only system, or in the data folder
     test -s "$ROOT/opt/companion/models/$1" || test -s "$DATA/models/$1"

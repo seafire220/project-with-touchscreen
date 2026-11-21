@@ -8,7 +8,14 @@ name: Make the Character Studio apps
 #   Linux:   CharacterStudio-<version>-x86_64.AppImage
 #
 # Run it from Actions -> "Make the Character Studio apps" -> Run workflow, with a version. The apps are
-# on the run's page under Artifacts. It also runs, with a test version number, when the app's files change.
+# then on a GitHub release, "Character Studio <version>" (Releases, on the repository's front page):
+# a draft only you can see, until you publish it there (or choose "publish" here). A published release
+# becomes the repository's latest, so these links always give the newest apps:
+#   https://github.com/seafire220/repo/releases/latest/download/CharacterStudio-Setup.exe
+#   https://github.com/seafire220/repo/releases/latest/download/CharacterStudio.dmg
+#   https://github.com/seafire220/repo/releases/latest/download/CharacterStudio-x86_64.AppImage
+# It also runs, with a test version number and no release, when the app's files change; those builds are
+# on the run's page under Artifacts.
 
 on:
   workflow_dispatch:
@@ -16,6 +23,12 @@ on:
       version:
         description: "Version, for example 2026.11.21"
         required: true
+      release:
+        description: "The GitHub release: a draft to check first, published at once, or none (Artifacts only)"
+        required: true
+        default: draft
+        type: choice
+        options: [draft, publish, none]
   push:
     branches: [main]
     paths:
@@ -26,9 +39,17 @@ on:
       - "studio/packaging/**"
       - ".github/workflows/studio-apps.yml"
 
+permissions:
+  contents: read
+
 env:
   VERSION: ${{ inputs.version || format('0.0.{0}', github.run_number) }}
   PYTHON_VERSION: "3.12"
+  # The AppImage runtime at a fixed release, the one studio/packaging/appimage-runtime-licences.txt
+  # describes (its libfuse is LGPL-2.1: its source is published with each Linux app).
+  RUNTIME_TAG: "20251108"
+  RUNTIME_COMMIT: dd6cebedcbddde9c82f89b011e8e1d40b6e43868
+  RUNTIME_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
 
 jobs:
   windows:
@@ -146,16 +167,34 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Get the app's own Python and appimagetool
+      - name: Get the app's own Python, appimagetool and the AppImage runtime
         run: |
           python -m pip install --quiet uv
           python -m uv python install "$PYTHON_VERSION" --install-dir "$RUNNER_TEMP/pythons"
           curl -sSL -o "$RUNNER_TEMP/appimagetool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x "$RUNNER_TEMP/appimagetool"
+          curl -fsSL -o "$RUNNER_TEMP/runtime-x86_64" "https://github.com/AppImage/type2-runtime/releases/download/$RUNTIME_TAG/runtime-x86_64"
+          echo "$RUNTIME_SHA256  $RUNNER_TEMP/runtime-x86_64" | sha256sum -c -
       - name: Build the AppImage
         run: |
           PY="$(ls -d "$RUNNER_TEMP"/pythons/cpython-*-linux-x86_64-gnu | head -1)"
-          python studio/packaging/build_app.py --python "$PY" --version "$VERSION" --out "$RUNNER_TEMP/dist" --appimagetool "$RUNNER_TEMP/appimagetool"
+          python studio/packaging/build_app.py --python "$PY" --version "$VERSION" --out "$RUNNER_TEMP/dist" \
+              --appimagetool "$RUNNER_TEMP/appimagetool" --appimage-runtime "$RUNNER_TEMP/runtime-x86_64"
+          ls -l "$RUNNER_TEMP/dist"
+      - name: The AppImage runtime's source code (published with the app, for its LGPL libfuse)
+        run: |
+          src="$RUNNER_TEMP/appimage-runtime-source"
+          mkdir -p "$src"
+          git clone -q --depth 1 --branch "$RUNTIME_TAG" https://github.com/AppImage/type2-runtime "$src/type2-runtime"
+          test "$(git -C "$src/type2-runtime" rev-parse HEAD)" = "$RUNTIME_COMMIT"
+          rm -rf "$src/type2-runtime/.git"
+          # The libraries its build script uses, as it checks them.
+          curl -fsSL -o "$src/fuse-3.15.0.tar.xz" https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz
+          echo "70589cfd5e1cff7ccd6ac91c86c01be340b227285c5e200baa284e401eea2ca0  $src/fuse-3.15.0.tar.xz" | sha256sum -c -
+          curl -fsSL -o "$src/squashfuse-0.5.2.tar.gz" https://github.com/vasi/squashfuse/archive/0.5.2.tar.gz
+          echo "db0238c5981dabbd80ee09ae15387f390091668ca060a7bc38047912491443d3  $src/squashfuse-0.5.2.tar.gz" | sha256sum -c -
+          cp studio/packaging/appimage-runtime-licences.txt "$src/LICENCES.txt"
+          tar -czf "$RUNNER_TEMP/dist/CharacterStudio-appimage-runtime-source.tar.gz" -C "$RUNNER_TEMP" appimage-runtime-source
           ls -l "$RUNNER_TEMP/dist"
       - name: Start it as a double-click does, first time (downloads its tools) and again
         env:
@@ -168,6 +207,57 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: character-studio-linux-${{ env.VERSION }}
-          path: ${{ runner.temp }}/dist/*.AppImage
+          path: |
+            ${{ runner.temp }}/dist/*.AppImage
+            ${{ runner.temp }}/dist/*-source.tar.gz
           compression-level: 0
           retention-days: 30
+
+  release:
+    # The three apps, tested, on one GitHub release with names that stay the same from version to version.
+    needs: [windows, mac, linux]
+    if: github.event_name == 'workflow_dispatch' && inputs.release != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/apps
+          pattern: character-studio-*-${{ env.VERSION }}
+          merge-multiple: true
+      - name: Put them on a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.release }}
+        run: |
+          cd "$RUNNER_TEMP/apps"
+          mv "CharacterStudio-Setup-$VERSION.exe" CharacterStudio-Setup.exe
+          mv "CharacterStudio-$VERSION.dmg" CharacterStudio.dmg
+          mv "CharacterStudio-$VERSION-x86_64.AppImage" CharacterStudio-x86_64.AppImage
+          sha256sum CharacterStudio-Setup.exe CharacterStudio.dmg CharacterStudio-x86_64.AppImage \
+              CharacterStudio-appimage-runtime-source.tar.gz > SHA256SUMS.txt
+          cat > notes.md <<EOF
+          Character Studio $VERSION: make a character from a picture on your computer, then send it to the device.
+
+          | Computer | Download |
+          |---|---|
+          | Windows 10 or 11 (64-bit) | **CharacterStudio-Setup.exe** |
+          | Mac with Apple silicon (M1 or newer), macOS 12 or newer | **CharacterStudio.dmg** |
+          | Linux (64-bit) | **CharacterStudio-x86_64.AppImage** |
+
+          The first start downloads its AI tools once (about 1 GB; about 3 GB with an NVIDIA graphics card).
+          Until the apps are signed, Windows and macOS warn about an app from a new publisher once: the user
+          guide (docs/14-making-characters.md) says what to press.
+
+          CharacterStudio-appimage-runtime-source.tar.gz is the source code of the AppImage runtime inside the
+          Linux app, whose libfuse is under the GNU LGPL 2.1. SHA256SUMS.txt has the files' checksums.
+          EOF
+          flags="--draft"
+          if [ "$MODE" = publish ]; then flags="--latest"; fi
+          gh release create "studio-v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "Character Studio $VERSION" --notes-file notes.md $flags \
+              CharacterStudio-Setup.exe CharacterStudio.dmg CharacterStudio-x86_64.AppImage \
+              CharacterStudio-appimage-runtime-source.tar.gz SHA256SUMS.txt
+          echo "### Character Studio $VERSION: release studio-v$VERSION ($MODE)" >> "$GITHUB_STEP_SUMMARY"

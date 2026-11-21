@@ -1,0 +1,47 @@
+CHARACTER STUDIO
+
+Copyright (c) 2026 {maker}. All rights reserved, except the open-source parts listed in these notices,
+which are each under their own licence.
+
+WHAT IS IN THE APP
+
+- Character Studio's own code and its page.
+- Python 3.12 (CPython, as built by the python-build-standalone project), under the Python Software
+  Foundation License, with the libraries built into it: see "The Python inside Character Studio".
+- On Windows: the installer and uninstaller are made with Inno Setup, by Jordan Russell and Martijn Laan
+  (https://jrsoftware.org/). Microsoft's Visual C++ runtime files come with the Windows Python.
+- On Linux: the AppImage runtime (MIT licence), which has libfuse inside it under the GNU Lesser General
+  Public License 2.1. Its source code is published with every Linux release of Character Studio: see "The
+  AppImage runtime".
+
+WHAT IT DOWNLOADS THE FIRST TIME IT STARTS
+
+The first start downloads Character Studio's AI tools onto this computer, from their authors' own pages:
+Python packages from the Python Package Index (PyTorch from the PyTorch project's own server), and the
+See-through part-finding code and model from its authors' GitHub and Hugging Face pages. They are not
+part of the app. Each comes with its own licence, listed on this page as installed on this computer.
+On a computer with an NVIDIA graphics card, PyTorch's version for it is downloaded, with NVIDIA's CUDA
+libraries under NVIDIA's own licence terms.
+
+NO WARRANTY FROM THE OPEN-SOURCE AUTHORS
+
+The open-source software is provided under its licences "as is", WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See each licence for the details.
+This does not limit the guarantees the law gives you as a consumer.
+
+THE PICTURES YOU USE
+
+Make characters only from pictures you have the right to use: a character made from someone else's
+artwork is still their artwork.
+
+TRADEMARKS
+
+Live2D and Cubism are trademarks or registered trademarks of Live2D Inc. Python is a registered trademark
+of the Python Software Foundation. Windows is a trademark of Microsoft Corporation; macOS is a trademark
+of Apple Inc.; Linux is a registered trademark of Linus Torvalds; NVIDIA and CUDA are trademarks of NVIDIA
+Corporation; PyTorch is a trademark of The Linux Foundation. Other names are trademarks of their owners.
+Character Studio and its maker are not affiliated with, sponsored or endorsed by any of them; the names
+are used only to say what Character Studio works with.
+
+No Live2D software is included. Character Studio makes Inochi2D models, and copies of them in the Live2D
+model format with image2live2d, an independent open-source tool (Apache License 2.0).
