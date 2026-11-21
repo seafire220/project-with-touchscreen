@@ -51,6 +51,10 @@ DEFAULT_SETTINGS = {
     # Saying the character's name starts listening, as the button does; `phrase` "" means "hey" and
     # its name; `sensitivity` "low", "normal" or "high".
     "wake_word": {"on": False, "phrase": "", "sensitivity": "normal"},
+    # Touchscreen features (docs/35-touchscreen.md): on-screen quick controls, character petting/poking,
+    # optional spoken reactions with cooldown, GPU touch effects, and dock auto-hide seconds.
+    "touch": {"enabled": True, "character_touch": True, "spoken_reactions": True, "reaction_cooldown": 25.0,
+              "effects": True, "auto_hide": 8.0},
 }
 
 # The secret names the device accepts: one key per provider.
@@ -202,7 +206,9 @@ def _check_choices(changes):
             raise ValueError("%s.%s must be a number from %s to %s" % (group, name, low, high))
 
     for group, name in (("captions", "on"), ("captions", "heard"), ("microphone", "muted"), ("screen", "sleep"),
-                        ("family_safe", "on"), ("wake_word", "on")):
+                        ("family_safe", "on"), ("wake_word", "on"),
+                        ("touch", "enabled"), ("touch", "character_touch"), ("touch", "spoken_reactions"),
+                        ("touch", "effects")):
         switch(group, name)
     choice("captions", "size", ("normal", "large"))
     choice("screen", "how", ("off", "dim"))
@@ -210,6 +216,8 @@ def _check_choices(changes):
     number("screen", "sleep_from", 0, 23)
     number("screen", "sleep_to", 0, 23)
     number("screen", "brightness", 10, 100)
+    number("touch", "reaction_cooldown", 5, 300)
+    number("touch", "auto_hide", 3, 60)
     phrase = (changes.get("wake_word") or {}).get("phrase")
     if phrase is not None:
         if not isinstance(phrase, str) or len(phrase) > 40:

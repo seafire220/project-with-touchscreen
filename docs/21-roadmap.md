@@ -43,6 +43,12 @@ Done and tested in software (not yet on real hardware):
   card image's release carries its operating system's source code. The voice was replaced (its training
   data was research-only). Inochi2D is the format the product names. Builds put their files on GitHub
   releases (drafts until published).
+- 2026-11-21, touchscreen edition (`35-touchscreen.md`, D-069): full tactile interaction (headpats,
+  cheek rubs, pokes, fingertip eye-tracking, wake-on-touch, GPU ripples/hearts/sparkles/ambient glow,
+  and optional spoken reactions with cooldown) plus auto-hiding 2×-supersampled frosted-glass on-screen
+  controls (Quick Controls Dock with volume/brightness sliders, Character Switcher, Timers & Clock,
+  Moods & Console QR, and on-screen Wi-Fi setup with a full QWERTY/numeric/symbol touch keyboard).
+  Physical buttons remain supported as optional hardware.
 
 ## Next, in order
 

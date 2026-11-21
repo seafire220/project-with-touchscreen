@@ -417,9 +417,15 @@
       <option value="large">large</option></select></label>
     <label><input type="checkbox" id="dev-sleep"> Screen at night: <select id="dev-sleep-how"><option value="off">dark</option>
       <option value="dim">dim</option></select> from <input type="number" id="dev-sleep-from" min="0" max="23" step="1">
-      to <input type="number" id="dev-sleep-to" min="0" max="23" step="1"> o'clock while nobody is talking to it (the
-      button, its name or an alarm lights it again)</label>
+      to <input type="number" id="dev-sleep-to" min="0" max="23" step="1"> o'clock while nobody is talking to it (tapping
+      the screen, the button, its name or an alarm lights it again)</label>
     <label id="dev-brightness-row" hidden>Screen brightness <input type="range" id="dev-brightness" min="10" max="100" step="5"></label>
+    <label><input type="checkbox" id="dev-touch-enabled"> Touchscreen: on-screen glass controls (swipe up or tap the bottom bar) and touch interaction</label>
+    <label><input type="checkbox" id="dev-touch-char"> …tactile character reactions (headpats, cheek rubs, pokes and eye tracking)</label>
+    <label><input type="checkbox" id="dev-touch-fx"> …visual touch effects (ripples, hearts, sparkles and ambient glow)</label>
+    <label><input type="checkbox" id="dev-touch-spoken"> …spoken in-character reactions when petted or poked</label>
+    <label>…minimum gap between spoken touch reactions (seconds) <input type="number" id="dev-touch-cooldown" min="5" max="300" step="5"></label>
+    <label>…auto-hide quick dock after (seconds) <input type="number" id="dev-touch-autohide" min="3" max="60" step="1"></label>
     <label><input type="checkbox" id="dev-family"> Family-safe: every reply suitable for children, whatever the
       character's description says</label>
     <label id="dev-family-pw-row" hidden>To turn family-safe mode off, the settings-page password
@@ -441,8 +447,9 @@
     <h3>Microphone</h3>
     <p><span id="mic-status">On.</span> <button type="button" id="btn-mic">Turn the microphone off</button>
       <span id="mic-msg"></span></p>
-    <p class="muted">Holding the device's button for two seconds also turns it off or on. While it is off, a crossed-out
-      microphone shows on the screen and the recording program is stopped: nothing is heard, recorded or sent.</p>
+    <p class="muted">You can also mute from the touchscreen quick dock, or by holding the physical button for two
+      seconds. While it is off, a crossed-out microphone shows on the screen and the recording program is stopped:
+      nothing is heard, recorded or sent.</p>
     <h3>Wi-Fi</h3>
     <p id="wifi-status">Checking…</p>
     <p class="muted" id="usb-status" hidden></p>

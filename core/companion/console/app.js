@@ -139,6 +139,13 @@ function onEvent(e) {
   else if (e.kind === "button") text($("btn-listen"), e.did === "listen on" ? "Stop listening" : "Start listening");
   else if (e.kind === "microphone") showMicrophone(e);
   else if (e.kind === "wake word") addLog("Heard its name:", e.phrase || "");
+  else if (e.kind === "touch") {
+    addLog("Touch:", String(e.action === "wake" ? "woke the screen" : (e.action || "tap") + (e.zone && e.zone !== "background" ? " on " + e.zone : "")));
+  }
+  else if (e.kind === "touch_ui") {
+    if (e.action === "character") { refreshCharacters(); api("GET", "/api/status").then(setStatus).catch(() => {}); }
+    else if (e.action === "wifi_joined") addLog("Touch Wi-Fi:", "joined " + (e.ssid || ""));
+  }
 }
 
 // The microphone: on, off from here or the button, or off by the mute switch.
@@ -443,7 +450,7 @@ function showSteps(s) {
     ["Choose a language model and add its key", s.providers.llm && hasKey(s.providers.llm), "services"],
     ["Choose a voice and add its key", s.providers.tts && hasKey(s.providers.tts), "services"],
     ["Add a character", s.characters > 0, "characters"],
-    ["Press the button on the device (or Start listening) and say hello", s.characters > 0 && s.providers.llm && s.providers.tts, "home"],
+    ["Tap the screen or press the button (or Start listening) and say hello", s.characters > 0 && s.providers.llm && s.providers.tts, "home"],
   ];
   const list = $("start-steps");
   list.replaceChildren();
@@ -1160,6 +1167,13 @@ async function loadSettings() {
   $("dev-sleep-from").value = screen.sleep_from ?? 23;
   $("dev-sleep-to").value = screen.sleep_to ?? 7;
   $("dev-brightness").value = screen.brightness ?? 100;
+  const touch = s.touch || {};
+  $("dev-touch-enabled").checked = touch.enabled !== false;
+  $("dev-touch-char").checked = touch.character_touch !== false;
+  $("dev-touch-fx").checked = touch.effects !== false;
+  $("dev-touch-spoken").checked = touch.spoken_reactions !== false;
+  $("dev-touch-cooldown").value = touch.reaction_cooldown ?? 25;
+  $("dev-touch-autohide").value = touch.auto_hide ?? 8;
   $("dev-family").checked = !!(s.family_safe || {}).on;
   $("dev-family-pw-row").hidden = true;
   renderKeys(await api("GET", "/api/keys"));
@@ -1326,6 +1340,9 @@ $("btn-save-device").addEventListener("click", async () => {
       captions: { on: $("dev-captions").checked, heard: $("dev-captions-heard").checked, size: $("dev-captions-size").value },
       screen: { sleep: $("dev-sleep").checked, how: $("dev-sleep-how").value, sleep_from: Number($("dev-sleep-from").value),
                 sleep_to: Number($("dev-sleep-to").value), brightness: Number($("dev-brightness").value) },
+      touch: { enabled: $("dev-touch-enabled").checked, character_touch: $("dev-touch-char").checked,
+               effects: $("dev-touch-fx").checked, spoken_reactions: $("dev-touch-spoken").checked,
+               reaction_cooldown: Number($("dev-touch-cooldown").value), auto_hide: Number($("dev-touch-autohide").value) },
     });
     const family = $("dev-family").checked;
     if (family !== !!(state.settings.family_safe || {}).on) {

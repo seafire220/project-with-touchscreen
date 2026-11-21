@@ -35,39 +35,69 @@ character card's personality.
 ## Setting it up
 
 1. **Plug it in.** After about 40 seconds the screen shows *Set up Wi-Fi*:
-   the device's own network name, its password and a QR code.
-2. **Join the device's network** with your phone (scan the QR code, or
-   choose the network and type the password), then open
-   `http://10.42.0.1`.
-3. **Choose a password for the settings page.** Write it down; it protects
-   your keys and your character's memory.
-4. **Choose your home Wi-Fi** under **Device → Wi-Fi** and type its
-   password. The device joins it and shows *Hello!*, its new address and a
-   QR code.
-5. **Put your phone back on your home Wi-Fi** and open the address on the
-   screen, or `http://companion.local`.
+   the device's own network name, its password and a QR code — plus a
+   **Set up Wi-Fi on screen** button at the bottom of the touchscreen.
+2. **Join your home Wi-Fi**, either right on the screen (**tap Set up Wi-Fi
+   on screen**, pick your network, and type the password on the touch
+   keyboard) or from your phone (scan the QR code to join the setup network,
+   open `http://10.42.0.1`, choose a password, and pick your home Wi-Fi
+   under **Device → Wi-Fi**).
+3. Once on your home Wi-Fi, the screen shows *Hello!*, its address and a QR
+   code. Open that address (or `http://companion.local`) on a phone or
+   computer on the same Wi-Fi, and **choose a password for the settings
+   page**. Write it down; it protects your keys and your character's memory.
 
 No phone, or no Wi-Fi? See "Connecting by USB" below.
-6. **Follow "Getting started"** on the settings page's Home tab: add a
-   language-model key, choose a voice, add a character, then press the
-   button and say hello. Each step links to where it is done. The page also
-   gives the device your phone's time zone.
+4. **Follow "Getting started"** on the settings page's Home tab: add a
+   language-model key, choose a voice, add a character, then tap the screen
+   (or press the button) and say hello. Each step links to where it is done.
+   The page also gives the device your phone's time zone.
 
 The settings page only answers on your home network.
 
+## Using the touchscreen
+
+At rest, the screen stays clean so the character shines, with only a small
+translucent capsule at the bottom showing the clock and microphone dot.
+
+- **Pet, rub & poke the character**: stroke across its head for a headpat,
+  rub its cheek, tap to playfully poke it, or glide a finger and watch its
+  eyes follow you. Visual effects (ripples, floating hearts, sparkles and a
+  soft glow while listening or speaking) react immediately, and the character
+  can also reply aloud now and then (adjustable under **Device → Touchscreen**).
+- **Quick Controls Dock**: swipe up from the bottom edge — or tap the bottom
+  capsule — to slide open translucent glass controls for **Tap to Talk**,
+  **Mute**, smooth **Volume** and **Brightness** sliders, **Characters**,
+  **Captions**, **Sleep**, **Timers**, **Wi-Fi**, and **More & QR**. It fades
+  away automatically when you leave it alone (or tap outside / swipe down).
+- **One-tap interrupt**: while the character is listening or speaking, tap the
+  bottom bar once to stop speaking or send what you said.
+- **Character Switcher**: open **Characters** from the dock to browse
+  installed characters with thumbnails and switch with a tap.
+- **Timers & Clock**: swipe down from the top edge (or open **Timers** from
+  the dock) to see the clock, start a quick timer (`+1m` to `+30m`), or cancel
+  running timers.
+- **Moods & Settings QR**: open **More & QR** to trigger a mood or wave, flip
+  quick toggles, or scan the QR code straight to the web settings page.
+- **On-screen Wi-Fi**: open **Wi-Fi** from the dock (or from the setup screen)
+  to scan networks, enter hidden network names, and type passwords on the
+  built-in touch keyboard.
+- **Wake-on-touch**: when the screen sleeps at night, tap anywhere to wake it.
+
 ## Talking
 
-- **Press the listen button and speak.** In the usual mode it hears when
-  you stop speaking and answers. You can change this under **Device →
+- **Tap Talk on the touchscreen dock, say its wake word, or press the
+  optional physical listen button** and speak. In the usual mode it hears
+  when you stop speaking and answers. You can change this under **Device →
   Listening** to *press to start, press again to send*, and set how long a
   pause ends your turn.
-- **Press the button while it speaks** to stop it. With a sound card that
-  cancels the device's own voice (the ReSpeaker Lite does), you can also
-  turn on *Let me interrupt it by speaking*.
+- **Tap the bottom bar (or press the button) while it speaks** to stop it.
+  With a sound card that cancels the device's own voice (the ReSpeaker Lite
+  does), you can also turn on *Let me interrupt it by speaking*.
 - **On the settings page**, the Home tab has *Start listening*, *Stop
   speaking*, a box to type a message instead of speaking, and *What is
   happening*: what it heard, what it is doing, and any problem.
-- **Volume** is under **Device**.
+- **Volume** can be dragged right on the touchscreen dock, or set under **Device**.
 
 While you speak it looks at you, nods in your pauses and looks up when you
 start. While it thinks it looks away for a moment.
@@ -97,16 +127,18 @@ words. The Home tab's *What is happening* shows each time it heard its name.
 
 ### Captions
 
-Turn on **Device → Captions** and what the character says is written at the bottom of the screen as it
-says it, a few lines at a time. It helps in a noisy room, or for anyone hard of hearing. *…and what it
-heard* also shows what it heard you say, at the top. Captions come in two sizes.
+Turn on **Device → Captions** (or tap **Captions** in the touchscreen dock) and what the character says is
+written at the bottom of the screen as it says it, a few lines at a time. It helps in a noisy room, or for
+anyone hard of hearing. *…and what it heard* also shows what it heard you say, at the top. Captions come in
+two sizes.
 
 ### The microphone off
 
-**Hold the listen button for two seconds** (or **Device → Microphone**) to turn the microphone off. A
-crossed-out microphone shows in the corner of the screen, and the recording program is stopped: nothing
-is heard, recorded or sent. Hold it for two seconds again to turn it back on. While you hold the button,
-the screen says what letting go will do. It stays off after a restart.
+**Tap Mute in the touchscreen dock**, **hold the listen button for two seconds**, or use **Device → Microphone**
+to turn the microphone off. A crossed-out microphone shows in the corner of the screen, and the recording
+program is stopped: nothing is heard, recorded or sent. Tap Mute (or hold the button for two seconds) again
+to turn it back on. While you hold the button, the screen says what letting go will do. It stays off after a
+restart.
 
 A device can also have a **mute switch** (`29-hardware-setup.md`). While the switch is on, the
 microphone stays off whatever else asks.
@@ -354,9 +386,10 @@ Under **AI services**, in three parts:
 ## The screen at night
 
 Turn on **Device → Screen at night**: in the hours you choose (11 pm to 7 am to begin with), once
-nobody has talked to it for a minute and a half, the screen goes **dark** (or **dim**). Press the
-button, say its name, or an alarm, and it lights up; it sleeps again a little after. Where the screen's
-backlight can be set (the Raspberry Pi touch screen), there is also a **brightness** slider.
+nobody has talked to or touched it for a minute and a half, the screen goes **dark** (or **dim**).
+Tap the screen, press the button, say its name, or wait for an alarm, and it lights up; it sleeps
+again a little after. You can also tap **Sleep** in the touchscreen dock any time, and drag the
+**Brightness** slider right on the dock (or under **Device**) on screens with backlight control.
 
 ## Family-safe mode
 

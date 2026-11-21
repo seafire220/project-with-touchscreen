@@ -16,7 +16,25 @@ from .store import write_atomic
 
 # Slots, and where each sits on the screen.
 CAPTION, HEARD, MIC, HINT = "caption", "heard", "mic-off", "hint"
-ANCHORS = {CAPTION: "bottom", HEARD: "top", MIC: "top_right", HINT: "center"}
+TOUCH_PILL, TOUCH_DOCK, TOUCH_SHEET = "touch-pill", "touch-dock", "touch-sheet"
+ANCHORS = {
+    CAPTION: "bottom",
+    HEARD: "top",
+    MIC: "top_right",
+    HINT: "center",
+    TOUCH_PILL: "bottom",
+    TOUCH_DOCK: "bottom",
+    TOUCH_SHEET: "bottom",
+}
+LAYERS = {
+    TOUCH_PILL: 10,
+    CAPTION: 20,
+    HEARD: 20,
+    MIC: 25,
+    TOUCH_DOCK: 30,
+    TOUCH_SHEET: 40,
+    HINT: 50,
+}
 LINES_PER_PAGE = 3
 CHARS_PER_SECOND = 14.0       # how fast the device's voices speak, roughly, at speed 1
 CAPTION_LINGER = 3.0          # seconds a caption stays after the character stops talking
@@ -160,16 +178,28 @@ class Overlays:
         self._pages = None                 # the caption's later pages, waiting their turn
         self._pages_end = 0.0              # when the last of them shows (the event loop's time)
         self._hide = {}                    # slot: a pending hide
+        self.on_caption_change = None      # optional callback(visible: bool) so touch pill yields to captions
 
-    def show(self, slot, png, keep_hide=False):
+    def show(self, slot, png, keep_hide=False, *, anchor=None, layer=None, slide=None, scrim=None):
         """Show a picture in a slot. A pending hide of the slot is cancelled, unless `keep_hide`."""
         os.makedirs(self.folder, exist_ok=True)
         name = "%s-%d.png" % (slot, next(self._names))
         write_atomic(os.path.join(self.folder, name), png)
         if not keep_hide:
             self._cancel_hide(slot)
+        was_caption = CAPTION in self.shown
         self.shown[slot] = name
-        sent = self.stage.send({"overlay": {"slot": slot, "image": name, "anchor": ANCHORS.get(slot, "center")}})
+        payload = {"slot": slot, "image": name, "anchor": anchor or ANCHORS.get(slot, "center")}
+        resolved_layer = LAYERS.get(slot, 0) if layer is None else layer
+        if resolved_layer:
+            payload["layer"] = int(resolved_layer)
+        if slide and slide != "none":
+            payload["slide"] = slide
+        if scrim:
+            payload["scrim"] = round(float(scrim), 3)
+        sent = self.stage.send({"overlay": payload})
+        if slot == CAPTION and not was_caption and self.on_caption_change:
+            self.on_caption_change(True)
         # The stage reads a picture when it takes the command; the two latest are kept for it.
         kept = self._kept.setdefault(slot, [])
         kept.append(name)
@@ -193,6 +223,8 @@ class Overlays:
             self._stop_pages()
         if self.shown.pop(slot, None) is not None:
             self.stage.send({"overlay": {"slot": slot, "image": None}})
+            if slot == CAPTION and self.on_caption_change:
+                self.on_caption_change(False)
 
     def clear(self):
         for slot in list(self.shown):

@@ -19,14 +19,14 @@ differences are noted below.
 | Part | Notes | About |
 |---|---|---|
 | Raspberry Pi 5, 1 GB | Or a Pi 4 (1 or 2 GB) | A$78–83 |
-| Raspberry Pi Touch Display 2, 5" | The 7" one (A$106) uses the same software; it needs a different settings line (step 4) | A$79 |
+| Raspberry Pi Touch Display 2, 5" | Built-in capacitive touch works out of the box over DSI; the 7" one (A$106) uses the same software with a different settings line (step 4) | A$79 |
 | Seeed **ReSpeaker Lite** (the USB board, not the kit with an ESP32 on it) | Two microphones with echo cancellation, and a speaker amplifier | A$46 |
 | Speaker, 4 Ω, 5 W, about 50 mm | With a lead that fits the ReSpeaker Lite's speaker socket, or bare wires | A$9 |
 | USB cable for the ReSpeaker Lite | USB-C to USB-A, if one is not in its box | A$5 |
 | microSD card, 32 GB, A1 rated | A name brand | A$12 |
 | Power supply | **Pi 5: the official 27 W USB-C supply** (with a 3 A supply the Pi 5 limits what its USB ports may draw, and the speaker amplifier is powered over USB). Pi 4: the official 15 W supply | A$24 (Pi 5), A$17 (Pi 4) |
 | Cooling | Pi 5: the Active Cooler. Pi 4: stick-on heatsinks | A$9, A$5 |
-| Two momentary push buttons, with leads | Listen and power. Leads with female push-on ends fit the Pi's pins without soldering | A$6 |
+| Two momentary push buttons, with leads (optional on touchscreen builds) | Power and optional tactile Listen button. Leads with female push-on ends fit the Pi's pins without soldering | A$6 |
 | Four female-to-female jumper leads | If the buttons' leads do not end in push-on sockets | A$3 |
 
 About **A$270** with the Pi 5 and the 5" screen. Core Electronics stocks the

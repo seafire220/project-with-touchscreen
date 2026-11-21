@@ -9,6 +9,7 @@ mod behaviour;
 mod capture;
 mod control;
 mod director;
+mod fx;
 mod live2d;
 mod live2d_motion;
 mod mapping;
@@ -18,6 +19,7 @@ mod overrides;
 mod puppet_info;
 mod smooth;
 mod speech;
+mod touch;
 mod vrm;
 mod window;
 
@@ -549,6 +551,14 @@ struct StageApp {
 	last_real: Instant,
 	/// Pictures over the character, and the screen's brightness (overlay.rs).
 	overlays: Option<overlay::Overlays>,
+	/// Tactile touchscreen engine (petting, pokes, finger eye-tracking, UI routing).
+	touch: touch::TouchEngine,
+	/// Procedural GPU tactile feedback (ripples, hearts, sparkles, ambient edge glow).
+	fx: fx::FxState,
+	fx_renderer: Option<fx::FxRenderer>,
+	/// Latest audio levels for subtle bottom-edge listening/speaking glow.
+	last_heard: f32,
+	last_mouth: f32,
 	/// A Live2D-format model's own idle motions: how much shows (the owner's choice), how much of that
 	/// shows now (less while listening, talking or dozing), and the part of the body each parameter
 	/// belongs to (a gesture holding that part takes it back from the motion).
@@ -610,12 +620,49 @@ impl StageApp {
 		}
 	}
 
+	fn apply_touch_output(&mut self, out: touch::TouchOutput) {
+		if out.wake_screen {
+			if let Some(overlays) = &mut self.overlays {
+				if overlays.screen() != overlay::Screen::On {
+					overlays.set_screen(overlay::Screen::On);
+					self.events.emit(json!({"event": "screen", "screen": "on"}));
+				}
+			}
+		}
+		if out.poke_director {
+			let reactions = self.director.poke();
+			self.react(&reactions);
+		}
+		if out.blink {
+			self.behaviour.blink_now();
+		}
+		if !out.reactions.is_empty() {
+			self.react(&out.reactions);
+		}
+		for ev in out.events {
+			self.events.emit(ev);
+		}
+	}
+
+	fn handle_touch(&mut self, sample: touch::TouchSample) {
+		let sleeping = self.overlays.as_ref().is_some_and(|o| o.screen() != overlay::Screen::On);
+		let out = self.touch.on_sample(sample, sleeping, &mut self.fx);
+		self.apply_touch_output(out);
+	}
+
 	fn handle(&mut self, command: Command) {
 		match command {
-			Command::Mouth(level) => self.behaviour.set_mouth(level),
+			Command::Mouth(level) => {
+				self.last_mouth = level.clamp(0.0, 1.0);
+				self.behaviour.set_mouth(level);
+			}
 			Command::State(state) => {
 				if state != State::Speaking {
 					self.speech.stop();
+					self.last_mouth = 0.0;
+				}
+				if state != State::Listening {
+					self.last_heard = 0.0;
 				}
 				if state != self.behaviour.state() {
 					self.behaviour.set_state(state);
@@ -629,7 +676,10 @@ impl StageApp {
 				let reactions = self.director.poke();
 				self.react(&reactions);
 			}
-			Command::Heard(level) => self.director.hear(level),
+			Command::Heard(level) => {
+				self.last_heard = level.clamp(0.0, 1.0);
+				self.director.hear(level);
+			}
 			Command::Temperament(energy, expressiveness) => {
 				self.director.set_temperament(energy, expressiveness);
 				self.motion.set_expressiveness(expressiveness);
@@ -708,7 +758,9 @@ impl StageApp {
 				self.motion.set_face(index.is_none());
 			}
 			Command::TryAnimation(path) => self.try_animation(&path),
-			Command::Overlay { slot, image, anchor } => self.overlay(&slot, image.as_deref(), anchor),
+			Command::Overlay { slot, image, anchor, layer, slide, scrim } => {
+				self.overlay(&slot, image.as_deref(), anchor, layer, slide, scrim)
+			}
 			Command::Screen(screen) => {
 				if let Some(overlays) = &mut self.overlays {
 					if overlays.screen() != screen {
@@ -724,12 +776,18 @@ impl StageApp {
 					}
 				}
 			}
+			Command::TouchConfig(cfg) => {
+				self.touch.set_config(cfg);
+				self.fx.set_enabled(cfg.effects);
+			}
+			Command::TouchCapture(cap) => self.touch.set_capture(cap),
+			Command::TouchSim(sample) => self.handle_touch(sample),
 			Command::Quit => self.quit = true,
 		}
 	}
 
 	/// Show a picture from the overlay folder in a slot, or fade the slot out.
-	fn overlay(&mut self, slot: &str, image: Option<&str>, anchor: overlay::Anchor) {
+	fn overlay(&mut self, slot: &str, image: Option<&str>, anchor: overlay::Anchor, layer: i32, slide: overlay::Slide, scrim: f32) {
 		let (Some(overlays), Some((_, aux))) = (&mut self.overlays, &self.on_window) else {
 			self.events.emit(json!({"event": "error", "message": "pictures cannot be shown over this character"}));
 			return;
@@ -742,7 +800,7 @@ impl StageApp {
 			self.events.emit(json!({"event": "error", "message": "the stage has no overlay folder (--overlays)"}));
 			return;
 		};
-		let shown = overlay::load(folder, name).and_then(|picture| overlays.show(aux, slot, anchor, picture));
+		let shown = overlay::load(folder, name).and_then(|picture| overlays.show(aux, slot, anchor, layer, slide, scrim, picture));
 		if let Err(e) = shown {
 			self.events.emit(json!({"event": "error", "message": e}));
 		}
@@ -923,6 +981,13 @@ impl App for StageApp {
 						None
 					}
 				};
+				self.fx_renderer = match fx::FxRenderer::new(&aux) {
+					Ok(r) => Some(r),
+					Err(e) => {
+						self.warnings.push(format!("touch visual effects cannot be shown: {e}"));
+						None
+					}
+				};
 				self.on_window = Some((renderer, aux));
 				self.fit_camera();
 				let controls: Vec<_> = self
@@ -963,6 +1028,7 @@ impl App for StageApp {
 					// The window's size, for pictures made to fit it (a "size" event follows any change).
 					"width": self.width,
 					"height": self.height,
+					"touch": true,
 					"opengl": format!("{}{}.{}", if version.is_embedded { "ES " } else { "" }, version.major, version.minor),
 				}));
 				if let Some(warning) = self.map_warning.take() {
@@ -1032,6 +1098,10 @@ impl App for StageApp {
 		self.fit_camera();
 	}
 
+	fn touch(&mut self, sample: touch::TouchSample) {
+		self.handle_touch(sample);
+	}
+
 	fn draw(&mut self) -> bool {
 		if self.quit {
 			return false;
@@ -1051,6 +1121,8 @@ impl App for StageApp {
 		for command in pending {
 			self.handle(command);
 		}
+		let touch_tick = self.touch.tick(dt, &mut self.fx);
+		self.apply_touch_output(touch_tick);
 		if let (Some(overlays), Some((_, aux))) = (&mut self.overlays, &self.on_window) {
 			overlays.update(aux, dt);
 		}
@@ -1106,6 +1178,7 @@ impl App for StageApp {
 		if let Some((g, cause)) = self.motion.apply(dt, &mut pose, self.behaviour.state(), !self.opts.still) {
 			self.events.emit(json!({"event": "gesture", "name": g, "cause": cause}));
 		}
+		self.touch.apply_pose(&mut pose);
 		if let Puppet::Vrm(p) = &mut self.puppet {
 			if p.animator().is_some() {
 				let hold = self.motion.procedural_hold();
@@ -1128,6 +1201,13 @@ impl App for StageApp {
 			let default = |id: &str| info.params.iter().find(|p| p.name == id).map(|p| p.defaults[0]).unwrap_or(0.0);
 			live2d::apply_expression(&mut values, default, expression, w);
 		}
+
+		let edge_energy = match self.behaviour.state() {
+			State::Listening => self.last_heard,
+			State::Speaking => self.last_mouth,
+			_ => 0.0,
+		};
+		self.fx.update(dt, self.behaviour.state(), edge_energy, self.touch.ui_covering_bottom());
 
 		let Some((renderer, aux)) = &mut self.on_window else {
 			return !self.quit;
@@ -1168,8 +1248,14 @@ impl App for StageApp {
 			}
 			_ => unreachable!("the renderer is made for the puppet's format"),
 		}
+		if let Some(fx_r) = &self.fx_renderer {
+			fx_r.draw_under_ui(aux, &self.fx, self.width, self.height);
+		}
 		if let Some(overlays) = &self.overlays {
 			overlays.draw(aux, self.width, self.height);
+		}
+		if let Some(fx_r) = &self.fx_renderer {
+			fx_r.draw_over_ui(aux, &self.fx, self.width, self.height);
 		}
 		self.update_time += posed.duration_since(started).as_secs_f64();
 		self.draw_time += posed.elapsed().as_secs_f64();
@@ -1301,7 +1387,7 @@ fn run(mut opts: Options) -> Result<(), String> {
 	}
 	// 3D avatars need a depth buffer; the flat formats do not.
 	let depth = matches!(puppet, Puppet::Vrm(_));
-	let frame = AppFrame::init(builder, opts.gl, depth).map_err(|e| format!("cannot open a window: {e}"))?;
+	let frame = AppFrame::init(builder, opts.gl, depth, opts.fullscreen).map_err(|e| format!("cannot open a window: {e}"))?;
 	let mut behaviour = Behaviour::new(opts.seed);
 	behaviour.set_idle_motion(!opts.still);
 	let mut motion = Motion::new(Library::builtin(), |key| mapper.drives(key), opts.seed);
@@ -1345,6 +1431,12 @@ fn run(mut opts: Options) -> Result<(), String> {
 		(Puppet::Vrm(_), _, None) => Some(Watchdog::new(0)),
 		_ => None,
 	};
+	let framing = if matches!(puppet, Puppet::Vrm(_)) {
+		touch::Framing::from(opts.shot)
+	} else {
+		touch::Framing::Upper
+	};
+	let fx_seed = opts.seed;
 	let app = StageApp {
 		overrides: Overrides::new(&info.params),
 		behaviour,
@@ -1376,6 +1468,11 @@ fn run(mut opts: Options) -> Result<(), String> {
 		watchdog,
 		last_real: Instant::now(),
 		overlays: None,
+		touch: touch::TouchEngine::new(framing),
+		fx: fx::FxState::new(fx_seed),
+		fx_renderer: None,
+		last_heard: 0.0,
+		last_mouth: 0.0,
 		own_strength,
 		own_share: smooth::Spring::new(own_strength, 0.6),
 		own_channels,

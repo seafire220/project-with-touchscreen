@@ -104,6 +104,28 @@ impl Screen {
 	}
 }
 
+/// How a picture slides in and out while fading.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Slide {
+	#[default]
+	None,
+	/// Slides upward from slightly below its resting place (bottom docks & sheets).
+	Up,
+	/// Slides downward from slightly above (top banners).
+	Down,
+}
+
+impl Slide {
+	pub fn parse(name: &str) -> Option<Self> {
+		match name {
+			"none" => Some(Self::None),
+			"up" => Some(Self::Up),
+			"down" => Some(Self::Down),
+			_ => None,
+		}
+	}
+}
+
 /// How dark "dim" is: the character can still be made out in a dark room.
 pub const DIM_VEIL: f32 = 0.72;
 const FADE: f32 = 0.18; // seconds for a picture to fade in or out
@@ -150,6 +172,9 @@ struct Picture {
 
 struct Slot {
 	anchor: Anchor,
+	layer: i32,
+	slide: Slide,
+	scrim: f32,
 	picture: Option<Picture>,
 	alpha: f32,
 	visible: bool,
@@ -296,7 +321,16 @@ impl Overlays {
 	}
 
 	/// Show a picture in a slot (replacing the one there).
-	pub fn show(&mut self, gl: &glow::Context, slot: &str, anchor: Anchor, (w, h, rgba): (u32, u32, Vec<u8>)) -> Result<(), String> {
+	pub fn show(
+		&mut self,
+		gl: &glow::Context,
+		slot: &str,
+		anchor: Anchor,
+		layer: i32,
+		slide: Slide,
+		scrim: f32,
+		(w, h, rgba): (u32, u32, Vec<u8>),
+	) -> Result<(), String> {
 		let texture = unsafe {
 			let saved = gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
 			let texture = gl.create_texture()?;
@@ -310,11 +344,22 @@ impl Overlays {
 			gl.bind_texture(glow::TEXTURE_2D, saved);
 			texture
 		};
-		let entry = self.slots.entry(slot.to_string()).or_insert(Slot { anchor, picture: None, alpha: 0.0, visible: false });
+		let entry = self.slots.entry(slot.to_string()).or_insert(Slot {
+			anchor,
+			layer,
+			slide,
+			scrim: 0.0,
+			picture: None,
+			alpha: 0.0,
+			visible: false,
+		});
 		if let Some(old) = entry.picture.take() {
 			unsafe { gl.delete_texture(old.texture) };
 		}
 		entry.anchor = anchor;
+		entry.layer = layer;
+		entry.slide = slide;
+		entry.scrim = scrim.clamp(0.0, 0.85);
 		entry.picture = Some(Picture { texture, width: w, height: h });
 		entry.visible = true;
 		Ok(())
@@ -360,13 +405,14 @@ impl Overlays {
 		}
 	}
 
-	/// Draw the pictures over whatever is on the screen, then the veil (pictures stay under the veil:
-	/// the screen dims as a whole). Does nothing, and costs nothing, when nothing shows.
+	/// Draw the pictures over whatever is on the screen (ordered by `layer`), then the veil
+	/// (pictures stay under the veil: the screen dims as a whole). Does nothing when nothing shows.
 	pub fn draw(&self, gl: &glow::Context, width: u32, height: u32) {
-		let pictures: Vec<&Slot> = self.slots.values().filter(|s| s.alpha > 0.0 && s.picture.is_some()).collect();
+		let mut pictures: Vec<&Slot> = self.slots.values().filter(|s| s.alpha > 0.0 && s.picture.is_some()).collect();
 		if pictures.is_empty() && self.veil <= 0.0 {
 			return;
 		}
+		pictures.sort_by_key(|s| s.layer);
 		let (sw, sh) = (width.max(1) as f32, height.max(1) as f32);
 		unsafe {
 			let saved = Saved::take(gl);
@@ -384,15 +430,23 @@ impl Overlays {
 			gl.active_texture(glow::TEXTURE0);
 			gl.uniform_1_i32(self.u_tex.as_ref(), 0);
 			for slot in pictures {
+				let ease = ease_out(slot.alpha);
+				if slot.scrim > 0.0 {
+					gl.uniform_1_i32(self.u_textured.as_ref(), 0);
+					gl.uniform_4_f32(self.u_color.as_ref(), 0.03, 0.04, 0.07, slot.scrim * ease);
+					gl.uniform_4_f32(self.u_rect.as_ref(), 0.0, 0.0, sw, sh);
+					gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+				}
 				let picture = slot.picture.as_ref().unwrap();
 				// Drawn at its own size; smaller only if it would not fit.
 				let fit = (sw * 0.96 / picture.width as f32).min(sh * 0.96 / picture.height as f32).min(1.0);
 				let (w, h) = (picture.width as f32 * fit, picture.height as f32 * fit);
 				let (x, y) = slot.anchor.place(w, h, sw, sh);
+				let dy = slide_offset(slot.slide, ease, h);
 				gl.bind_texture(glow::TEXTURE_2D, Some(picture.texture));
 				gl.uniform_1_i32(self.u_textured.as_ref(), 1);
-				gl.uniform_4_f32(self.u_color.as_ref(), 1.0, 1.0, 1.0, slot.alpha);
-				gl.uniform_4_f32(self.u_rect.as_ref(), x, y, w, h);
+				gl.uniform_4_f32(self.u_color.as_ref(), 1.0, 1.0, 1.0, ease);
+				gl.uniform_4_f32(self.u_rect.as_ref(), x, y + dy, w, h);
 				gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
 			}
 			if self.veil > 0.0 {
@@ -414,19 +468,33 @@ fn step(value: f32, target: f32, by: f32) -> f32 {
 	}
 }
 
+fn ease_out(t: f32) -> f32 {
+	let u = 1.0 - t.clamp(0.0, 1.0);
+	1.0 - u * u * u
+}
+
+fn slide_offset(slide: Slide, ease: f32, h: f32) -> f32 {
+	let travel = (h * 0.16).min(72.0);
+	match slide {
+		Slide::None => 0.0,
+		Slide::Up => (1.0 - ease) * travel,
+		Slide::Down => -(1.0 - ease) * travel,
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
 
 	#[test]
 	fn only_plain_picture_names_are_taken() {
-		for good in ["caption-12.png", "mic_off-1.png", "hint.png"] {
+		for good in ["caption-12.png", "mic_off-1.png", "hint.png", "touch-dock-4.png"] {
 			assert!(valid_name(good), "{good}");
 		}
 		for bad in ["../secrets.png", "/etc/x.png", "a/b.png", ".hidden.png", "caption.jpg", "x.png\n", ""] {
 			assert!(!valid_name(bad), "{bad:?}");
 		}
-		assert!(valid_slot("caption") && valid_slot("mic-off") && !valid_slot("Caption") && !valid_slot(""));
+		assert!(valid_slot("caption") && valid_slot("mic-off") && valid_slot("touch-dock") && !valid_slot("Caption") && !valid_slot(""));
 	}
 
 	#[test]
@@ -442,13 +510,20 @@ mod tests {
 	}
 
 	#[test]
-	fn fades_move_toward_their_targets_and_stop_there() {
+	fn fades_and_slides_move_smoothly_to_their_targets() {
 		assert_eq!(step(0.0, 1.0, 0.3), 0.3);
 		assert_eq!(step(0.9, 1.0, 0.3), 1.0);
 		assert_eq!(step(0.2, 0.0, 0.3), 0.0);
 		assert_eq!(Screen::Dim.veil(), DIM_VEIL);
 		assert_eq!(Screen::parse("off"), Some(Screen::Off));
 		assert_eq!(Screen::parse("sleep"), None);
+		assert_eq!(Slide::parse("up"), Some(Slide::Up));
+		assert_eq!(Slide::parse("down"), Some(Slide::Down));
+		assert_eq!(Slide::parse("sideways"), None);
+		assert_eq!(slide_offset(Slide::Up, 1.0, 400.0), 0.0);
+		assert!(slide_offset(Slide::Up, 0.0, 400.0) > 0.0);
+		assert!(slide_offset(Slide::Down, 0.0, 400.0) < 0.0);
+		assert!(ease_out(0.5) > 0.5, "cubic ease-out starts fast and settles gently");
 	}
 
 	#[test]

@@ -1,12 +1,19 @@
-# Low-cost AI character device
+# AI character desk device (Touchscreen edition)
 
 An independently designed, lower-cost alternative to the SyBran CODE27
-Companion Hub: a desk device that shows a character you can talk to. The
-character is a 2D anime-style character (Inochi2D and other 2D rigged
-models, or one made from a single picture) or a 3D VRM avatar. It runs on
-commodity hardware (a Raspberry Pi with a small screen) and original
-software, uses the owner's own AI service keys or a free on-device voice,
-and is not tied to one AI or voice provider.
+Companion Hub: a touchscreen desk device that shows a character you can talk to
+and interact with directly. The character is a 2D anime-style character
+(Inochi2D and other 2D rigged models, or one made from a single picture) or a
+3D VRM avatar. It runs on commodity hardware (a Raspberry Pi with the 5" or 7"
+Touch Display 2) and original software, uses the owner's own AI service keys or
+a free on-device voice, and is not tied to one AI or voice provider.
+
+Touchscreen highlights ([docs/35-touchscreen.md](docs/35-touchscreen.md)):
+tactile character interaction (headpats, cheek rubs, pokes, fingertip eye
+tracking, GPU ripples/hearts/sparkles and ambient glow, plus optional spoken
+reactions), an auto-hiding frosted-glass Quick Controls Dock, on-screen
+character switcher, timers & clock, moods & settings QR, and standalone on-screen
+Wi-Fi setup with a full touch keyboard. Physical buttons remain optional.
 
 Two tiers: **Lite** plays pre-rendered 2D animation; **Standard** drives a
 rigged character. Standard is being built first.
@@ -121,6 +128,7 @@ software is used.
 32. [Software updates for sold devices](docs/32-updates.md)
 33. [What else would make it complete and polished](docs/33-finishing.md)
 34. [Licences: what we use, what each licence asks, what is left for a lawyer](docs/34-licences.md)
+35. [Touchscreen edition: tactile interaction and on-screen glass controls](docs/35-touchscreen.md)
 - [Decision log](docs/decision-log.md)
 
 ## Known gaps

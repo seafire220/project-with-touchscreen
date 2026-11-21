@@ -9,7 +9,7 @@ use std::ffi::CString;
 use std::num::NonZeroU32;
 
 use raw_window_handle::HasRawWindowHandle;
-use winit::event::{Event, WindowEvent};
+use winit::event::{ElementState, Event, MouseButton, TouchPhase, WindowEvent};
 use winit::event_loop::EventLoop;
 use winit::window::{Window, WindowBuilder};
 
@@ -20,6 +20,8 @@ use glutin::prelude::*;
 use glutin::surface::SwapInterval;
 
 use glutin_winit::{self, DisplayBuilder, GlWindow};
+
+use crate::touch::{Phase, TouchSample};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GlPreference {
@@ -34,6 +36,8 @@ pub trait App {
 	/// second handle to the same context for the stage's own calls.
 	fn resume_window(&mut self, gl: glow::Context, aux: glow::Context);
 	fn resize(&mut self, width: u32, height: u32);
+	/// A raw touch (or primary mouse press/drag on a desktop) in normalized window coordinates.
+	fn touch(&mut self, _sample: TouchSample) {}
 	/// Draw one frame. Return false to exit.
 	fn draw(&mut self) -> bool;
 }
@@ -45,10 +49,11 @@ pub struct AppFrame {
 	gl_display: glutin::display::Display,
 	not_current_gl_context: Option<NotCurrentContext>,
 	window_builder: WindowBuilder,
+	hide_cursor: bool,
 }
 
 impl AppFrame {
-	pub fn init(window_builder: WindowBuilder, preference: GlPreference, depth: bool) -> Result<Self, Box<dyn Error>> {
+	pub fn init(window_builder: WindowBuilder, preference: GlPreference, depth: bool, hide_cursor: bool) -> Result<Self, Box<dyn Error>> {
 		let event_loop = EventLoop::new()?;
 		let mut template = ConfigTemplateBuilder::new().with_transparency(false).with_stencil_size(8);
 		if depth {
@@ -102,11 +107,17 @@ impl AppFrame {
 			gl_display,
 			not_current_gl_context: Some(context),
 			window_builder,
+			hide_cursor,
 		})
 	}
 
 	pub fn run<A: App + 'static>(mut self, mut app: A) -> Result<(), Box<dyn Error>> {
 		let mut state = None;
+		let mut win_size = (720.0f64, 1280.0f64);
+		// Primary mouse pointer state so desktop testing works identically to touch.
+		let mut mouse_pos = (0.5f32, 0.5f32);
+		let mut mouse_down = false;
+		const MOUSE_TOUCH_ID: u64 = u64::MAX;
 
 		self.event_loop.run(move |event, window_target| match event {
 			Event::Resumed => {
@@ -114,6 +125,9 @@ impl AppFrame {
 					let window_builder = self.window_builder.clone();
 					glutin_winit::finalize_window(window_target, window_builder, &self.gl_config).unwrap()
 				});
+				if self.hide_cursor {
+					window.set_cursor_visible(false);
+				}
 
 				let attrs = window.build_surface_attributes(Default::default());
 				let gl_surface = unsafe {
@@ -137,6 +151,7 @@ impl AppFrame {
 				let size = window.inner_size();
 				app.resume_window(load(), load());
 				if size.width != 0 && size.height != 0 {
+					win_size = (size.width as f64, size.height as f64);
 					app.resize(size.width, size.height);
 				}
 
@@ -148,6 +163,7 @@ impl AppFrame {
 			Event::WindowEvent { event, .. } => match event {
 				WindowEvent::Resized(size) => {
 					if size.width != 0 && size.height != 0 {
+						win_size = (size.width as f64, size.height as f64);
 						if let Some((gl_context, gl_surface, _)) = &state {
 							gl_surface.resize(
 								gl_context,
@@ -158,6 +174,37 @@ impl AppFrame {
 						}
 					}
 				}
+				WindowEvent::Touch(touch) => {
+					let phase = match touch.phase {
+						TouchPhase::Started => Phase::Down,
+						TouchPhase::Moved => Phase::Move,
+						TouchPhase::Ended => Phase::Up,
+						TouchPhase::Cancelled => Phase::Cancel,
+					};
+					let x = (touch.location.x / win_size.0.max(1.0)).clamp(0.0, 1.0) as f32;
+					let y = (touch.location.y / win_size.1.max(1.0)).clamp(0.0, 1.0) as f32;
+					app.touch(TouchSample { id: touch.id, phase, x, y });
+				}
+				WindowEvent::CursorMoved { position, .. } => {
+					let x = (position.x / win_size.0.max(1.0)).clamp(0.0, 1.0) as f32;
+					let y = (position.y / win_size.1.max(1.0)).clamp(0.0, 1.0) as f32;
+					mouse_pos = (x, y);
+					if mouse_down {
+						app.touch(TouchSample { id: MOUSE_TOUCH_ID, phase: Phase::Move, x, y });
+					}
+				}
+				WindowEvent::MouseInput { state: btn_state, button: MouseButton::Left, .. } => match btn_state {
+					ElementState::Pressed => {
+						mouse_down = true;
+						app.touch(TouchSample { id: MOUSE_TOUCH_ID, phase: Phase::Down, x: mouse_pos.0, y: mouse_pos.1 });
+					}
+					ElementState::Released => {
+						if mouse_down {
+							mouse_down = false;
+							app.touch(TouchSample { id: MOUSE_TOUCH_ID, phase: Phase::Up, x: mouse_pos.0, y: mouse_pos.1 });
+						}
+					}
+				},
 				WindowEvent::CloseRequested => window_target.exit(),
 				_ => (),
 			},

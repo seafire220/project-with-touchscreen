@@ -63,22 +63,22 @@ def card_png(title, lines, size=SIZE, qr=None):
     draw = ImageDraw.Draw(image)
     margin = 56
     width = size[0] - 2 * margin
-    y = int(size[1] * 0.18)
+    y = int(size[1] * 0.12)
     title_font, body_font, big_font = _font(64), _font(34), _font(42)
     for line in _wrap(draw, title, title_font, width):
         draw.text((margin, y), line, font=title_font, fill=ACCENT)
         y += 80
-    y += 30
+    y += 28
     for text in lines:
         big = text.startswith(">")
         font = big_font if big else body_font
         for line in _wrap(draw, text.lstrip("> "), font, width):
             draw.text((margin, y), line, font=font, fill=TEXT if not big else (255, 255, 255))
-            y += 56 if big else 46
-        y += 24
+            y += 54 if big else 44
+        y += 20
     code = qr_code(qr) if qr else None
     if code is not None:
-        side = min(size[0] - 2 * margin, max(160, size[1] - y - 60), 360)
+        side = min(size[0] - 2 * margin, max(160, size[1] - y - 120), 340)
         code = code.resize((side, side), Image.NEAREST)
         image.alpha_composite(code, ((size[0] - side) // 2, y + 10))
     out = io.BytesIO()
@@ -113,13 +113,13 @@ def setup_card(address=None):
     """The welcome card. Without an address yet (just started), it says so instead."""
     if not address or not address[:1].isdigit():
         return card_png("Hello!", [
-            "I'm starting up. In a moment this screen shows how to set me up from your phone.",
+            "I'm starting up. In a moment this screen shows how to set me up from your phone or on screen.",
         ])
     url = "http://%s" % address
     return card_png("Hello!", [
         "To set me up, scan this code or open this address on a phone or computer on the same Wi-Fi:",
         "> %s" % url,
-        "There you add your AI service keys and a character.",
+        "There you add your AI service keys and a character. Tap below to change Wi-Fi on screen.",
     ], qr=url)
 
 
@@ -132,12 +132,12 @@ def wifi_qr(ssid, password):
 
 def hotspot_card(ssid, password):
     return card_png("Set up Wi-Fi", [
-        "Scan this code with your phone to join my setup network, or join it by hand:",
+        "Tap below to choose your home Wi-Fi right on this screen, or scan this code with your phone:",
         "> %s" % ssid,
         "Password:",
         "> %s" % password,
         "Then open http://10.42.0.1 and choose your home Wi-Fi.",
-        "Or connect a computer to the USB-C port with a cable and open http://10.12.194.1",
+        "Or connect a computer by USB-C cable and open http://10.12.194.1",
     ], qr=wifi_qr(ssid, password))
 
 

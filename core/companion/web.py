@@ -971,6 +971,56 @@ class Console:
         self.device.interrupt()
         return web.json_response({"ok": True})
 
+    async def touch(self, request):
+        """Open a touchscreen view, send a character touch, or forward a simulated touch sample to the stage."""
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise web.HTTPBadRequest(text="touch payload must be an object")
+        if "view" in body:
+            view = str(body["view"]).strip().lower()
+            if view not in ("pill", "dock", "characters", "timers", "status", "wifi"):
+                raise web.HTTPBadRequest(text="unknown touchscreen view")
+            self.device.touch_ready = True
+            if view == "pill":
+                self.device.touch_ui.dismiss()
+            else:
+                self.device.touch_ui.open_view(view)
+            return web.json_response({"ok": True, "view": self.device.touch_ui.view})
+        if "sim" in body:
+            sim = body["sim"]
+            if not isinstance(sim, dict):
+                raise web.HTTPBadRequest(text="sim must be an object")
+            phase = str(sim.get("phase", "")).strip().lower()
+            if phase not in ("start", "move", "end", "cancel"):
+                raise web.HTTPBadRequest(text="sim.phase must be start, move, end or cancel")
+            try:
+                x = float(sim.get("x", 0.5))
+                y = float(sim.get("y", 0.5))
+            except (TypeError, ValueError):
+                raise web.HTTPBadRequest(text="sim x and y must be numbers")
+            if not (0.0 <= x <= 1.0 and 0.0 <= y <= 1.0):
+                raise web.HTTPBadRequest(text="sim x and y must be between 0 and 1")
+            self.device.stage.send({"touch_sim": {"phase": phase, "x": x, "y": y}})
+            return web.json_response({"ok": True})
+        if "kind" in body:
+            kind = str(body["kind"]).strip().lower()
+            zone = str(body.get("zone") or "head").strip().lower()
+            if kind not in ("pet", "poke", "tap", "double_tap", "long_press", "wake"):
+                raise web.HTTPBadRequest(text="unknown touch kind")
+            if zone not in ("head", "face", "body", "background"):
+                raise web.HTTPBadRequest(text="unknown touch zone")
+            if kind == "wake":
+                self.device.activity()
+                self.device.emit("touch", {"action": "wake"})
+            else:
+                if kind == "pet" and hasattr(self.device.stage, "gesture"):
+                    self.device.stage.gesture("headpat" if zone == "head" else "cheek_rub")
+                elif kind in ("poke", "double_tap") and hasattr(self.device.stage, "gesture"):
+                    self.device.stage.gesture("poke_giggle" if kind == "double_tap" else "poke_surprised")
+                self.device.handle_touch({"kind": kind, "zone": zone})
+            return web.json_response({"ok": True})
+        raise web.HTTPBadRequest(text="specify view, kind or sim")
+
     async def microphone(self, request):
         """Turn the microphone off or on (a mute switch, while on, wins)."""
         body = await request.json()
@@ -1138,6 +1188,7 @@ def make_app(device):
     r.add_post("/api/say", console.say)
     r.add_post("/api/button", console.press)
     r.add_post("/api/interrupt", console.interrupt)
+    r.add_post("/api/touch", console.touch)
     r.add_post("/api/timezone", console.set_timezone)
     r.add_post("/api/reset", console.reset)
     r.add_get("/api/health", console.health)

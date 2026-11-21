@@ -25,6 +25,7 @@ from .overlays import CAPTION, HEARD, HINT, Overlays
 from .providers import ProviderError
 from .stage_link import StageLink
 from .store import Store, redact, write_atomic
+from .touch_ui import TouchUI
 
 log = logging.getLogger("companion")
 
@@ -45,6 +46,43 @@ ANSWER_WINDOW = 30.0
 PRESENCE_SECONDS = 0.8
 MEMORY_TEMPERATURE = 0.3      # the background memory work: summing up, memories, the diary
 MEMORY_MAX_TOKENS = 700
+
+# Optional spoken in-character reactions to petting or poking the character on the touchscreen
+# (docs/35-touchscreen.md). Cooldown and idle guards prevent spam or interrupting speech.
+TOUCH_PROMPTS = {
+    ("pet", "head"): (
+        "(The person just gently patted your head on the screen. React naturally in character in one brief, "
+        "warm sentence, with a matching feeling tag.)"
+    ),
+    ("tap", "head"): (
+        "(The person gently patted your head on the screen. React briefly and naturally in character in one "
+        "short sentence, with a matching feeling tag.)"
+    ),
+    ("pet", "face"): (
+        "(The person gently stroked your cheek on the screen. React naturally in character in one brief, "
+        "warm or playful sentence, with a matching feeling tag.)"
+    ),
+    ("poke", "face"): (
+        "(The person playfully poked your cheek on the screen. React briefly in character in one short, "
+        "playful sentence, with a matching feeling tag.)"
+    ),
+    ("poke", "body"): (
+        "(The person gently tapped you on the screen to get your attention. React briefly in character in one "
+        "short sentence, with a matching feeling tag.)"
+    ),
+    ("double_tap", "head"): (
+        "(The person playfully double-tapped your head on the screen. React briefly and cheerfully in character "
+        "in one short sentence, with a matching feeling tag.)"
+    ),
+    ("double_tap", "face"): (
+        "(The person playfully double-tapped your cheek on the screen. React briefly in character in one short "
+        "sentence, with a matching feeling tag.)"
+    ),
+    ("double_tap", "body"): (
+        "(The person double-tapped you on the screen. React briefly in character in one short sentence, with "
+        "a matching feeling tag.)"
+    ),
+}
 
 # The button, held: from MUTE_HOLD seconds the microphone goes off (or on) when it is let go; from
 # RESET_WARN the screen warns that holding on forgets the Wi-Fi and the settings-page password, which
@@ -136,6 +174,9 @@ class Device:
         self.wake_error = ""
         self._wake_session = False          # listening because of the wake word (follow-ups, then stop)
         self._strip_wake = False            # the next utterance starts with the wake words
+        self.touch_ready = False            # True once a touch-capable stage announces ready
+        self.last_touch_speech = 0.0        # smart cooldown for optional spoken touch reactions
+        self.touch_ui = TouchUI(self)
 
     # ----- events for the console
     def emit(self, kind, data=None):
@@ -168,6 +209,14 @@ class Device:
             entry.update({k: event[k] for k in ("cause", "played", "why") if event.get(k)})
             self.gesture_log = (self.gesture_log + [entry])[-60:]
             self.publish("animation", {"gesture": entry})
+        elif kind == "touch_wake":
+            self.activity()
+            self.emit("touch", {"action": "wake"})
+        elif kind == "ui_touch":
+            self.touch_ready = True
+            self.touch_ui.handle_ui_event(event)
+        elif kind == "touch":
+            self.handle_touch(event)
         if kind == "quality":
             self._quality_stepped(event)
         # Stopping soon after it started, unasked, is a failure (a crash or running out of memory).
@@ -176,6 +225,8 @@ class Device:
             self._stage_failed(event.get("message") or "the screen program stopped")
         if kind in ("ready", "size") and event.get("width") and event.get("height"):
             self.overlays.screen = (int(event["width"]), int(event["height"]))
+            if kind == "size" and self.touch_ready:
+                self.touch_ui.on_screen_resized()
         if kind == "ready":
             self.stage_ready_at = time.time()
             # A stage that started again has nothing over the character and a lit screen.
@@ -193,6 +244,52 @@ class Device:
             self.use_custom_motions()
             self.use_character_motion()
             self.tell_the_time()
+            if event.get("touch"):
+                self.touch_ready = True
+                self.touch_ui.on_stage_ready()
+
+    # ----- touchscreen character reactions (docs/35-touchscreen.md)
+    def handle_touch(self, event):
+        """A touch gesture on the character canvas (headpat, cheek rub, poke, tap)."""
+        self.activity()
+        t_kind = str(event.get("kind") or "tap")
+        zone = str(event.get("zone") or "background")
+        self.emit("touch", {"action": t_kind, "zone": zone})
+        opts = self.store.settings().get("touch", {})
+        if not opts.get("enabled", True) or not opts.get("character_touch", True) or not opts.get("spoken_reactions", True):
+            return
+        if (t_kind, zone) not in TOUCH_PROMPTS:
+            return
+        now = time.time()
+        cooldown = float(opts.get("reaction_cooldown", 25.0))
+        if now - self.last_touch_speech < cooldown or now - self.last_talk < 4.0:
+            return
+        if self.state != "idle" or self.listening or (self.conversation is not None and self.conversation.busy):
+            return
+        if not self.active_id():
+            return
+        try:
+            asyncio.ensure_future(self.react_to_touch(t_kind, zone))
+        except RuntimeError:
+            pass
+
+    async def react_to_touch(self, t_kind, zone, now=None):
+        """Speak a brief, natural in-character reaction to a headpat, cheek rub or poke."""
+        prompt = TOUCH_PROMPTS.get((t_kind, zone))
+        if not prompt:
+            return None
+        now = now or time.time()
+        if self.state != "idle" or self.listening or (self.conversation is not None and self.conversation.busy):
+            return None
+        if not self.active_id():
+            return None
+        try:
+            self.conversation = self.conversation or self.make_conversation()
+        except ProviderError:
+            # No LLM configured yet: physical reactions and sparkles still play, never beep an error.
+            return None
+        self.last_touch_speech = now
+        return await self.conversation.start("", prompt=prompt)
 
     def tell_the_time(self):
         """Tell the stage the local time of day (the character is sleepy at night)."""
@@ -426,12 +523,14 @@ class Device:
         self.write_stage_settings()
         write_atomic(self.card, screen.card_puppet(png))
         self._point_stage_at(self.card)
+        self.touch_ui.set_setup_mode(True)
         self.restart_stage()
 
     def show_character(self):
         cid = self.active_id()
         if cid:
             self._link_puppet(cid)
+            self.touch_ui.set_setup_mode(False)
             self.restart_stage()
         return cid
 
@@ -676,6 +775,8 @@ class Device:
         if state != self.state:
             self.state = state
             self.emit("state", {"state": state})
+            if self.touch_ready:
+                self.touch_ui.on_state_changed()
 
     # ----- talking
     async def say(self, text):
@@ -1010,10 +1111,12 @@ class Device:
                 self.stage.state("idle")
         self.overlays.microphone(muted)
         self.emit("microphone", {"muted": muted, "switch": self.mic_switch})
+        if self.touch_ready:
+            self.touch_ui.on_state_changed()
 
     # ----- the screen at night (docs/28-user-guide.md)
     def activity(self):
-        """Someone is there (the button, speech, the wake word, an alarm): a sleeping screen wakes."""
+        """Someone is there (the button, touch, speech, the wake word, an alarm): a sleeping screen wakes."""
         self.last_activity = time.time()
         if self.screen_mode != "on":
             self.set_screen("on")
@@ -1065,6 +1168,12 @@ class Device:
             self.overlays.hide(HEARD)
         elif not captions.get("heard"):
             self.overlays.hide(HEARD)
+        if old.get("touch") != new.get("touch") and self.touch_ready:
+            self.touch_ui.sync_stage_config()
+            if self.touch_ui.enabled():
+                self.touch_ui.render()
+            else:
+                self.touch_ui.hide_all()
 
     # ----- timers and alarms
     def action(self, action):
@@ -1084,6 +1193,8 @@ class Device:
                 self.timers.pop(key)[1].cancel()
                 self.emit("timer", {"label": key, "did": "cancelled"})
         self._save_timers()
+        if self.touch_ready:
+            self.touch_ui.on_state_changed()
 
     def _schedule(self, label, due, kind):
         if label in self.timers:
@@ -1096,7 +1207,10 @@ class Device:
     async def _ring(self, label, kind):
         self.timers.pop(label, None)
         self._save_timers()
+        self.activity()
         self.emit("timer", {"label": label, "did": "rang"})
+        if self.touch_ready:
+            self.touch_ui.on_state_changed()
         words = "Your %s timer is done." % label if kind == "timer" else "It's time: %s." % label
         try:
             self.conversation = self.conversation or self.make_conversation()
@@ -1143,6 +1257,7 @@ class Device:
             "storage_recovered": os.path.exists(os.path.join(self.data_dir, "storage-recovered")),
             "wake_word": {"words": [w.title() for w in self.wake_words()],
                           "ready": self._wake is not None, "error": self.wake_error},
+            "touch": {"ready": self.touch_ready, "enabled": self.touch_ui.enabled(), "view": self.touch_ui.view},
             # timedatectl needs systemd running (true on the device, not in every test machine)
             "can_set_timezone": shutil.which("timedatectl") is not None and os.path.isdir("/run/systemd/system"),
         }
@@ -1157,6 +1272,7 @@ class Device:
         if not cid:
             write_atomic(self.card, screen.card_puppet(screen.setup_card()))
             self._point_stage_at(self.card)
+            self.touch_ui.set_setup_mode(True)
         self.restore_timers()
         if self.microphone is not None:
             asyncio.ensure_future(self.listen_loop())

@@ -69,7 +69,8 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 
 use crate::behaviour::State;
-use crate::overlay::{self, Anchor, Screen};
+use crate::overlay::{self, Anchor, Screen, Slide};
+use crate::touch::{Phase as TouchPhase, Rect, TouchCapture, TouchConfig, TouchSample};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
@@ -114,11 +115,17 @@ pub enum Command {
 	/// Play a VRM Animation clip once from this file (a VRM avatar trying one before it is kept).
 	TryAnimation(std::path::PathBuf),
 	/// Show a picture from the overlay folder in a slot, or (None) fade the slot out.
-	Overlay { slot: String, image: Option<String>, anchor: Anchor },
+	Overlay { slot: String, image: Option<String>, anchor: Anchor, layer: i32, slide: Slide, scrim: f32 },
 	/// Light the screen, dim it, or make it dark.
 	Screen(Screen),
 	/// How much of a Live2D-format model's own idle motions shows, 0 to 1.
 	ModelMotions(f32),
+	/// Configure touchscreen features (enabled, character petting/poking, GPU touch effects).
+	TouchConfig(TouchConfig),
+	/// Active touch UI hit regions (modal sheet/dock panel, floating pill, edge swipes).
+	TouchCapture(TouchCapture),
+	/// Simulated raw touch input (for scripted tests and virtual-device testing).
+	TouchSim(TouchSample),
 	Quit,
 }
 
@@ -268,7 +275,19 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 						"\"anchor\" is top, bottom, center, top_left, top_right, bottom_left or bottom_right",
 					)?,
 				};
-				out.push(Command::Overlay { slot: slot.to_string(), image, anchor });
+				let layer = match val.get("layer") {
+					None => 0,
+					Some(v) => v.as_i64().filter(|l| (-100..=100).contains(l)).ok_or("\"layer\" must be an integer -100..100")? as i32,
+				};
+				let slide = match val.get("slide") {
+					None => Slide::None,
+					Some(v) => v.as_str().and_then(Slide::parse).ok_or("\"slide\" is none, up or down")?,
+				};
+				let scrim = match val.get("scrim") {
+					None => 0.0,
+					Some(v) => v.as_f64().filter(|s| (0.0..=0.85).contains(s)).ok_or("\"scrim\" must be 0 to 0.85")? as f32,
+				};
+				out.push(Command::Overlay { slot: slot.to_string(), image, anchor, layer, slide, scrim });
 			}
 			"screen" => {
 				out.push(Command::Screen(val.as_str().and_then(Screen::parse).ok_or("\"screen\" is on, dim or off")?))
@@ -276,6 +295,47 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 			"model_motions" => {
 				let v = val.as_f64().filter(|v| (0.0..=1.0).contains(v)).ok_or("\"model_motions\" is a number from 0 to 1")?;
 				out.push(Command::ModelMotions(v as f32))
+			}
+			"touch_config" => {
+				let obj = val.as_object().ok_or("\"touch_config\" must be an object")?;
+				let mut cfg = TouchConfig::default();
+				if let Some(v) = obj.get("enabled") {
+					cfg.enabled = v.as_bool().ok_or("\"touch_config.enabled\" must be true or false")?;
+				}
+				if let Some(v) = obj.get("character_touch") {
+					cfg.character_touch = v.as_bool().ok_or("\"touch_config.character_touch\" must be true or false")?;
+				}
+				if let Some(v) = obj.get("effects") {
+					cfg.effects = v.as_bool().ok_or("\"touch_config.effects\" must be true or false")?;
+				}
+				out.push(Command::TouchConfig(cfg));
+			}
+			"touch_capture" => {
+				let obj = val.as_object().ok_or("\"touch_capture\" must be an object")?;
+				let mut cap = TouchCapture::default();
+				if let Some(v) = obj.get("modal") {
+					cap.modal = v.as_bool().ok_or("\"touch_capture.modal\" must be true or false")?;
+				}
+				if let Some(v) = obj.get("edge_swipe") {
+					cap.edge_swipe = v.as_bool().ok_or("\"touch_capture.edge_swipe\" must be true or false")?;
+				}
+				cap.panel = parse_opt_rect(obj.get("panel"), "panel")?;
+				cap.pill = parse_opt_rect(obj.get("pill"), "pill")?;
+				out.push(Command::TouchCapture(cap));
+			}
+			"touch_sim" => {
+				let obj = val.as_object().ok_or("\"touch_sim\" must be an object")?;
+				let phase = match obj.get("phase").and_then(Value::as_str) {
+					Some("down") => TouchPhase::Down,
+					Some("move") => TouchPhase::Move,
+					Some("up") => TouchPhase::Up,
+					Some("cancel") => TouchPhase::Cancel,
+					_ => return Err("\"touch_sim.phase\" must be down, move, up or cancel".into()),
+				};
+				let x = obj.get("x").and_then(Value::as_f64).ok_or("\"touch_sim.x\" must be a number")? as f32;
+				let y = obj.get("y").and_then(Value::as_f64).ok_or("\"touch_sim.y\" must be a number")? as f32;
+				let id = obj.get("id").and_then(Value::as_u64).unwrap_or(1);
+				out.push(Command::TouchSim(TouchSample { id, phase, x: x.clamp(0.0, 1.0), y: y.clamp(0.0, 1.0) }));
 			}
 			"quit" => {
 				if val.as_bool() == Some(true) {
@@ -286,6 +346,22 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 		}
 	}
 	Ok((at, out))
+}
+
+fn parse_opt_rect(val: Option<&Value>, name: &str) -> Result<Option<Rect>, String> {
+	let Some(v) = val else { return Ok(None) };
+	if v.is_null() {
+		return Ok(None);
+	}
+	let arr = v.as_array().filter(|a| a.len() == 4).ok_or(format!("\"{name}\" must be [x0, y0, x1, y1] or null"))?;
+	let mut r = [0.0f32; 4];
+	for (i, item) in arr.iter().enumerate() {
+		r[i] = item.as_f64().ok_or(format!("\"{name}\" must contain numbers"))? as f32;
+	}
+	if r[2] < r[0] || r[3] < r[1] {
+		return Err(format!("\"{name}\" must have x1 >= x0 and y1 >= y0"));
+	}
+	Ok(Some(r))
 }
 
 /// Timed commands, for reproducible tests.
@@ -444,11 +520,38 @@ mod tests {
 	fn parses_overlay_and_screen_commands() {
 		assert_eq!(
 			parse_line(r#"{"overlay": {"slot": "caption", "image": "caption-3.png", "anchor": "bottom"}}"#).unwrap().1,
-			vec![Command::Overlay { slot: "caption".into(), image: Some("caption-3.png".into()), anchor: Anchor::Bottom }]
+			vec![Command::Overlay {
+				slot: "caption".into(),
+				image: Some("caption-3.png".into()),
+				anchor: Anchor::Bottom,
+				layer: 0,
+				slide: Slide::None,
+				scrim: 0.0,
+			}]
+		);
+		assert_eq!(
+			parse_line(r#"{"overlay": {"slot": "touch-dock", "image": "dock-1.png", "anchor": "bottom", "layer": 30, "slide": "up", "scrim": 0.45}}"#)
+				.unwrap()
+				.1,
+			vec![Command::Overlay {
+				slot: "touch-dock".into(),
+				image: Some("dock-1.png".into()),
+				anchor: Anchor::Bottom,
+				layer: 30,
+				slide: Slide::Up,
+				scrim: 0.45,
+			}]
 		);
 		assert_eq!(
 			parse_line(r#"{"overlay": {"slot": "mic-off", "image": null}}"#).unwrap().1,
-			vec![Command::Overlay { slot: "mic-off".into(), image: None, anchor: Anchor::Bottom }]
+			vec![Command::Overlay {
+				slot: "mic-off".into(),
+				image: None,
+				anchor: Anchor::Bottom,
+				layer: 0,
+				slide: Slide::None,
+				scrim: 0.0,
+			}]
 		);
 		assert_eq!(parse_line(r#"{"screen": "off"}"#).unwrap().1, vec![Command::Screen(Screen::Off)]);
 		assert_eq!(parse_line(r#"{"model_motions": 0.5}"#).unwrap().1, vec![Command::ModelMotions(0.5)]);
@@ -458,7 +561,39 @@ mod tests {
 			r#"{"overlay": {"slot": "caption", "image": "../../etc/passwd"}}"#,
 			r#"{"overlay": {"slot": "caption", "image": "/run/x.png"}}"#,
 			r#"{"overlay": {"slot": "caption", "image": "a.png", "anchor": "middle"}}"#,
+			r#"{"overlay": {"slot": "caption", "image": "a.png", "slide": "left"}}"#,
+			r#"{"overlay": {"slot": "caption", "image": "a.png", "scrim": 0.99}}"#,
 			r#"{"screen": "sleep"}"#,
+		] {
+			assert!(parse_line(bad).is_err(), "{bad}");
+		}
+	}
+
+	#[test]
+	fn parses_touch_commands() {
+		assert_eq!(
+			parse_line(r#"{"touch_config": {"enabled": true, "character_touch": false, "effects": true}}"#).unwrap().1,
+			vec![Command::TouchConfig(TouchConfig { enabled: true, character_touch: false, effects: true })]
+		);
+		assert_eq!(
+			parse_line(r#"{"touch_capture": {"modal": true, "panel": [0.05, 0.5, 0.95, 0.98], "pill": null, "edge_swipe": false}}"#)
+				.unwrap()
+				.1,
+			vec![Command::TouchCapture(TouchCapture {
+				modal: true,
+				panel: Some([0.05, 0.5, 0.95, 0.98]),
+				pill: None,
+				edge_swipe: false,
+			})]
+		);
+		assert_eq!(
+			parse_line(r#"{"touch_sim": {"phase": "down", "x": 0.5, "y": 0.2, "id": 7}}"#).unwrap().1,
+			vec![Command::TouchSim(TouchSample { id: 7, phase: TouchPhase::Down, x: 0.5, y: 0.2 })]
+		);
+		for bad in [
+			r#"{"touch_config": {"enabled": "yes"}}"#,
+			r#"{"touch_capture": {"panel": [0.9, 0.5, 0.1, 0.8]}}"#,
+			r#"{"touch_sim": {"phase": "hover", "x": 0.5, "y": 0.5}}"#,
 		] {
 			assert!(parse_line(bad).is_err(), "{bad}");
 		}

@@ -962,3 +962,23 @@ rejected. Settled entries are not reopened without new evidence.
   always give the newest apps. Image releases are never "latest".
 - Updates for sold devices stay in `seafire220/update-repo`, whose latest release devices read; nothing
   else is released there.
+
+## D-069 — Touchscreen edition: native Rust tactile engine + GPU effects with Core frosted-glass overlays
+
+- Date: 2026-11-21. Status: built and tested (`35-touchscreen.md`).
+- Decision: split touchscreen responsibilities along the latency boundary between `stage` and `core`:
+  - `stage` (Rust + OpenGL ES 3.0) handles raw `wl_touch`/mouse input, wake-on-touch, UI hitbox/edge-swipe
+    routing, anatomical zone hit-testing calibrated to framing, headpat/cheek-rub/poke/eye-tracking physics,
+    reaction clips (`headpat`, `cheek_rub`, `poke_surprised`, `poke_giggle`, `touch_wake`), cubic slide-in
+    overlay transitions with modal scrims, and procedural SDF visual effects (ripples, hearts, sparkles,
+    fingertip aura, ambient listening/speaking edge glow) at 60 fps.
+  - `core` (Python + Pillow) renders 2×-supersampled frosted-glass UI sheets (floating pill, auto-hiding
+    Quick Controls Dock, Character Switcher, Timers & Clock, Moods & Console QR, Wi-Fi Picker, and full
+    QWERTY/numeric/symbol touch keyboard) using custom anti-aliased vector icons (no emoji font requirement),
+    and coordinates optional spoken in-character touch reactions with smart cooldown.
+- Why: keeps memory well under the 1 GB Pi limit (no embedded browser or GUI toolkit added), gives zero-lag
+  tactile responsiveness and GPU particle polish, reuses the existing RAM-disk overlay pipeline, and keeps
+  physical buttons 100% compatible as optional hardware.
+- Rejected: adding a kiosk browser or Qt/GTK toolkit for touch menus (too much RAM and startup overhead on
+  1 GB boards); putting petting/effects logic in Python (visible input lag).
+
