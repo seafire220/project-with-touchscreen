@@ -10,6 +10,7 @@ mod capture;
 mod control;
 mod director;
 mod live2d;
+mod live2d_motion;
 mod mapping;
 mod motion;
 mod overlay;
@@ -83,10 +84,12 @@ Usage: stage CHARACTER [options]
                         how much a VRM avatar's drawing may cost: lite leaves out
                         outlines and keeps textures small; auto (the default)
                         steps down by itself if frames come too slowly
+  --model-motions F     how much of a Live2D-format model's own idle motions shows,
+                        0 (off) to 1 (as its artist made them; the default)
   --settings FILE       JSON file with any of: vrm_animation, clip_folders (builtin
-                        names the built-in clips), quality, shot (written by the
-                        core for the character on the screen; the options above
-                        win; a missing file is fine)
+                        names the built-in clips), quality, shot, model_motions
+                        (written by the core for the character on the screen; the
+                        options above win; a missing file is fine)
 
 Testing:
   --script FILE         timed commands, one JSON object per line with \"at\"
@@ -120,6 +123,8 @@ struct Options {
 	vrm_animation: Option<VrmStyle>,
 	clip_folders: Vec<PathBuf>,
 	quality: Option<Quality>,
+	/// How much of a Live2D-format model's own idle motions shows (0 to 1).
+	model_motions: Option<f32>,
 	settings: Option<PathBuf>,
 	draw_scale: Option<f32>,
 	script: Option<PathBuf>,
@@ -151,6 +156,7 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 		vrm_animation: None,
 		clip_folders: Vec::new(),
 		quality: None,
+		model_motions: None,
 		settings: None,
 		draw_scale: None,
 		script: None,
@@ -220,6 +226,13 @@ fn parse_options(args: &[String]) -> Result<Options, String> {
 				o.quality = Some(Quality::parse(&v).ok_or(format!("--quality must be auto, normal or lite, not '{v}'"))?);
 			}
 			"--settings" => o.settings = Some(value("--settings")?.into()),
+			"--model-motions" => {
+				let v: f32 = value("--model-motions")?.parse().map_err(|_| "--model-motions is not a number")?;
+				if !(0.0..=1.0).contains(&v) {
+					return Err("--model-motions must be between 0 and 1".into());
+				}
+				o.model_motions = Some(v);
+			}
 			"--draw-scale" => {
 				let v: f32 = value("--draw-scale")?.parse().map_err(|_| "--draw-scale is not a number")?;
 				if !(0.25..=1.0).contains(&v) {
@@ -349,6 +362,14 @@ fn read_settings(o: &mut Options) -> Option<String> {
 			}
 		}
 	}
+	if o.model_motions.is_none() {
+		if let Some(x) = v.get("model_motions") {
+			match x.as_f64().filter(|f| (0.0..=1.0).contains(f)) {
+				Some(f) => o.model_motions = Some(f as f32),
+				None => problems.push(format!("model_motions {x}")),
+			}
+		}
+	}
 	if !o.shot_given {
 		if let Some(s) = text_of("shot") {
 			match Shot::parse(s) {
@@ -420,6 +441,34 @@ impl Watchdog {
 		}
 		None
 	}
+}
+
+/// How much of a part of the body a gesture holding it takes back from a model's own idle motion.
+const OWN_MOTION_GIVE_WAY: f32 = 0.8;
+
+/// Controls whose parameters a model's own motions leave to the device: blinks, the mouth opening and
+/// the mouth shapes of speech.
+fn own_motion_left_alone(c: mapping::Control) -> bool {
+	use mapping::Control::*;
+	matches!(c, BlinkLeft | BlinkRight | MouthOpen | VowelA | VowelI | VowelU | VowelE | VowelO)
+}
+
+/// The part of the body (a motion system channel) a control moves.
+fn control_channel(c: mapping::Control) -> Option<usize> {
+	use mapping::Control::*;
+	let name = match c {
+		HeadYaw | HeadPitch | HeadRoll => "head",
+		BodyYaw | BodyPitch | BodyRoll | Shoulders => "torso",
+		GazeX | GazeY => "eyes",
+		BrowLeft | BrowRight | BrowFormLeft | BrowFormRight => "brows",
+		Smile | EyeSmileLeft | EyeSmileRight | Cheek => "expression",
+		ArmLeft | ArmLeftB => "arm_left",
+		ArmRight | ArmRightB => "arm_right",
+		MouthOpen | VowelA | VowelI | VowelU | VowelE | VowelO => "mouth",
+		BlinkLeft | BlinkRight => "eyelids",
+		Breath => return None,
+	};
+	motion::CHANNELS.iter().position(|n| *n == name)
 }
 
 /// The gestures an avatar plays from its own clips, for the motion system.
@@ -500,6 +549,12 @@ struct StageApp {
 	last_real: Instant,
 	/// Pictures over the character, and the screen's brightness (overlay.rs).
 	overlays: Option<overlay::Overlays>,
+	/// A Live2D-format model's own idle motions: how much shows (the owner's choice), how much of that
+	/// shows now (less while listening, talking or dozing), and the part of the body each parameter
+	/// belongs to (a gesture holding that part takes it back from the motion).
+	own_strength: f32,
+	own_share: smooth::Spring,
+	own_channels: std::collections::HashMap<String, usize>,
 }
 
 impl StageApp {
@@ -662,6 +717,13 @@ impl StageApp {
 					}
 				}
 			}
+			Command::ModelMotions(strength) => {
+				if let Puppet::Live2d(p) = &self.puppet {
+					if p.idle.is_some() && !self.opts.still {
+						self.own_strength = strength;
+					}
+				}
+			}
 			Command::Quit => self.quit = true,
 		}
 	}
@@ -687,6 +749,35 @@ impl StageApp {
 	}
 
 	/// What the character is doing, once a second, for the core (and the settings page).
+	/// A Live2D-format model's own idle motion, added under the device's movement: all of it at rest,
+	/// less while the character listens, thinks or talks, and little while it dozes; a gesture holding
+	/// part of the body takes most of that part back while it plays.
+	fn own_motion(&mut self, dt: f32, resting: bool, values: &mut Vec<(String, Vec2)>) {
+		let Puppet::Live2d(puppet) = &mut self.puppet else { return };
+		if puppet.idle.is_none() || (self.own_strength <= 0.0 && self.own_share.value <= 0.001) {
+			return;
+		}
+		let state = match self.behaviour.state() {
+			State::Idle => 1.0,
+			State::Thinking => 0.8,
+			State::Speaking => 0.7,
+			State::Listening => 0.6,
+		};
+		// Changes of strength (the owner's, or the character's state) ease in rather than jump.
+		let target = self.own_strength * if resting { 0.3 } else { state };
+		let share = self.own_share.update(target, dt).clamp(0.0, 1.0);
+		let changes = puppet.own_motion(dt);
+		let hold = self.motion.procedural_hold();
+		let params = &self.info.params;
+		let channels = &self.own_channels;
+		live2d_motion::add_changes(
+			values,
+			&changes,
+			|id| params.iter().find(|p| p.name == id).map(|p| (p.min[0], p.max[0], p.defaults[0])),
+			|id| share * channels.get(id).map_or(1.0, |&c| 1.0 - OWN_MOTION_GIVE_WAY * hold[c]),
+		);
+	}
+
 	fn heartbeat(&mut self, now: Instant) {
 		self.frames_since_beat += 1;
 		let since = now.duration_since(self.last_beat).as_secs_f32();
@@ -730,6 +821,10 @@ impl StageApp {
 			"draw_ms": per_frame(self.draw_time),
 			"screen": screen,
 			"overlays": showing,
+			"own_motion": match &self.puppet {
+				Puppet::Live2d(p) if self.own_strength > 0.0 => p.idle.as_ref().and_then(|i| i.current()).map(str::to_string),
+				_ => None,
+			},
 		}));
 		self.frames_since_beat = 0;
 		self.last_beat = now;
@@ -877,7 +972,13 @@ impl App for StageApp {
 					self.events.emit(json!({"event": "warning", "message": warning}));
 				}
 				if let Puppet::Live2d(puppet) = &self.puppet {
-					self.events.emit(json!({"event": "features", "live2d": puppet.features().to_json()}));
+					let mut features = puppet.features().to_json();
+					features["motions"] = json!({
+						"groups": puppet.motion_groups.iter().map(|(g, n)| (g.clone(), json!(n))).collect::<serde_json::Map<String, serde_json::Value>>(),
+						"idle": puppet.idle.as_ref().map(|i| i.names()).unwrap_or_default(),
+						"strength": self.own_strength,
+					});
+					self.events.emit(json!({"event": "features", "live2d": features}));
 					for warning in &puppet.warnings {
 						self.events.emit(json!({"event": "warning", "message": warning}));
 					}
@@ -1019,6 +1120,7 @@ impl App for StageApp {
 		}
 		self.speech.apply(dt, self.behaviour.state() == State::Speaking, &mut pose);
 		let mut values = self.mapper.resolve(&pose);
+		self.own_motion(dt, direction.resting, &mut values);
 		self.overrides.apply(dt, &mut values);
 		for (expression, (weight, target)) in self.expressions.iter().zip(self.expression_weights.iter_mut()) {
 			let w = weight.update(*target, dt);
@@ -1095,7 +1197,7 @@ fn run(mut opts: Options) -> Result<(), String> {
 	let events = Events::default();
 	let mut warnings: Vec<String> = read_settings(&mut opts).into_iter().collect();
 	let bytes = std::fs::read(&opts.puppet).map_err(|e| format!("cannot read {}: {e}", opts.puppet.display()))?;
-	let (puppet, info) = if vrm::looks_like_vrm(&bytes) {
+	let (mut puppet, info) = if vrm::looks_like_vrm(&bytes) {
 		if bytes.len() as u64 > vrm::MAX_FILE_BYTES {
 			return Err(format!("{} is too large ({} bytes)", opts.puppet.display(), bytes.len()));
 		}
@@ -1214,6 +1316,27 @@ fn run(mut opts: Options) -> Result<(), String> {
 		Puppet::Inox(_) => Vec::new(),
 	};
 	let expression_weights = expressions.iter().map(|_| (smooth::Spring::new(0.0, 0.3), 0.0)).collect();
+	// A Live2D-format model's own idle motions: the device's blinks, mouth and mouth shapes stay its
+	// own, whatever parameters the owner chose for them.
+	let mut own_strength = 0.0;
+	let mut own_channels = std::collections::HashMap::new();
+	if let Puppet::Live2d(p) = &mut puppet {
+		if let Some(idle) = &mut p.idle {
+			own_strength = if opts.still { 0.0 } else { opts.model_motions.unwrap_or(1.0) };
+			let seed = match opts.fixed_dt {
+				Some(_) => opts.seed,
+				None => std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(opts.seed),
+			};
+			idle.reseed(seed);
+			idle.leave(mapper.targets().iter().filter(|(c, _)| own_motion_left_alone(*c)).map(|(_, t)| t.param.clone()));
+			for param in &info.params {
+				let by_control = mapper.targets().iter().find(|(_, t)| t.param == param.name).and_then(|(c, _)| control_channel(*c));
+				if let Some(channel) = by_control.or_else(|| live2d_motion::channel_by_name(&param.name)) {
+					own_channels.insert(param.name.clone(), channel);
+				}
+			}
+		}
+	}
 	// A VRM avatar's drawing is watched in real time (not when time is stepped for tests), unless the
 	// owner asked for it as it is.
 	let watchdog = match (&puppet, opts.quality, opts.fixed_dt) {
@@ -1253,6 +1376,9 @@ fn run(mut opts: Options) -> Result<(), String> {
 		watchdog,
 		last_real: Instant::now(),
 		overlays: None,
+		own_strength,
+		own_share: smooth::Spring::new(own_strength, 0.6),
+		own_channels,
 	};
 	frame.run(app).map_err(|e| format!("stage stopped: {e}"))
 }

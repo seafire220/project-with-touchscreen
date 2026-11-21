@@ -24,6 +24,7 @@ use ayagami::pose::{Key, Pose};
 use glam::Vec2;
 use glow::HasContext;
 
+use crate::live2d_motion::{parse_motion, IdleMotions, PoseGroups};
 use crate::puppet_info::{ParamInfo, PuppetInfo};
 
 /// Files larger than this are refused before reading.
@@ -31,6 +32,8 @@ const MAX_FILE_BYTES: u64 = 256 << 20;
 /// Textures wider or taller than this are refused; ones larger than the
 /// graphics chip allows are scaled down to fit when they are uploaded.
 const MAX_TEXTURE_SIDE: u32 = 16384;
+/// At most this many idle motions are read (each is small; this only bounds a strange model).
+const MAX_IDLE_MOTIONS: usize = 64;
 
 /// Does this file look like a Live2D-format model description?
 pub fn looks_like_model3(bytes: &[u8]) -> bool {
@@ -191,9 +194,13 @@ pub struct Live2dPuppet {
 	pub warnings: Vec<String>,
 	/// The model's own expressions.
 	pub expressions: Vec<Expression>,
-	/// Its pose file's groups of parts shown one at a time (two sets of arms, say): the opacity each
-	/// part keeps, the first of each group shown and the rest hidden, as Live2D's own player does.
-	pub pose_parts: Vec<(String, f32)>,
+	/// Its pose file's groups of parts shown one at a time (two sets of arms, say): the first of each
+	/// group shows until one of the model's motions chooses another, as in Live2D's own player.
+	pub pose: Option<PoseGroups>,
+	/// The model's own idle motions, if it has any (`live2d_motion.rs`).
+	pub idle: Option<IdleMotions>,
+	/// Every group of motions the model has, and how many are in it (for the log and the settings page).
+	pub motion_groups: Vec<(String, usize)>,
 }
 
 /// Which drawing features a model uses, for the log and for tests.
@@ -289,16 +296,20 @@ impl Live2dPuppet {
 		}
 
 		// Its pose file, if it names one: parts that take turns (a model drawn with two sets of arms).
-		let mut pose_parts = Vec::new();
+		let mut pose = None;
 		if let Some(file) = index.get("FileReferences").and_then(|r| r.get("Pose")).and_then(|p| p.as_str()) {
-			match resolve(&base, file).and_then(|p| read_limited(&p)).and_then(|b| parse_pose(&b)) {
-				Ok(parts) => pose_parts = parts,
+			match resolve(&base, file).and_then(|p| read_limited(&p)).and_then(|b| PoseGroups::parse(&b)) {
+				Ok(groups) => pose = Some(groups),
 				Err(e) => warnings.push(e),
 			}
 		}
+		// Its own motions: the idle ones play under the device's movement.
+		let (idle, motion_groups) = load_idle_motions(&index, &base, &mut warnings);
 
 		let mut puppet = Self::describe(model, driver, physics, textures, path)?;
-		puppet.pose_parts = pose_parts;
+		puppet.pose = pose;
+		puppet.idle = idle;
+		puppet.motion_groups = motion_groups;
 		puppet.warnings.extend(warnings);
 		puppet.info.expressions = expressions.iter().map(|e| e.name.clone()).collect();
 		puppet.expressions = expressions;
@@ -419,7 +430,9 @@ impl Live2dPuppet {
 			info,
 			warnings: Vec::new(),
 			expressions: Vec::new(),
-			pose_parts: Vec::new(),
+			pose: None,
+			idle: None,
+			motion_groups: Vec::new(),
 		})
 	}
 
@@ -460,8 +473,11 @@ impl Live2dPuppet {
 		for (name, value) in values {
 			pose.set(&Key::param(name), value.x);
 		}
-		for (part, opacity) in &self.pose_parts {
-			pose.set(&Key::part(part), *opacity);
+		if let Some(groups) = &mut self.pose {
+			groups.update(dt);
+			for (part, opacity) in groups.opacities() {
+				pose.set(&Key::part(&part), opacity);
+			}
 		}
 		if let Some(physics) = &mut self.physics {
 			if !self.settled {
@@ -472,6 +488,15 @@ impl Live2dPuppet {
 		}
 		self.driver.set_pose(&pose);
 		self.driver.drive(&self.model);
+	}
+
+	/// Move the model's own idle motions on by `dt` seconds, and say how far each parameter they move
+	/// is from its default now. Their choices of parts (which set of arms) go to the pose.
+	pub fn own_motion(&mut self, dt: f32) -> Vec<(String, f32)> {
+		let Some(idle) = &mut self.idle else { return Vec::new() };
+		idle.step(dt);
+		let params = &self.info.params;
+		idle.changes(|id| params.iter().find(|p| p.name == id).map(|p| p.defaults[0]), self.pose.as_mut())
 	}
 
 	fn pictures(&mut self) -> Result<Vec<Picture>, String> {
@@ -1214,27 +1239,50 @@ fn fit_texture(picture: Picture, max_side: u32) -> Picture {
 	Picture { width: w, height: h, pixels: smaller.into_raw() }
 }
 
-/// A pose file's (`.pose3.json`) groups as the opacity each part keeps: in each group the first part (and
-/// the parts linked to it) shown, the others (and theirs) hidden. A model's motions could switch them;
-/// the device does not play those, so the model's first choice stands.
-fn parse_pose(bytes: &[u8]) -> Result<Vec<(String, f32)>, String> {
-	let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| format!("the pose file cannot be read: {e}"))?;
-	let groups = value.get("Groups").and_then(|g| g.as_array()).ok_or("the pose file has no groups")?;
-	let mut out = Vec::new();
-	for group in groups {
-		for (i, entry) in group.as_array().into_iter().flatten().enumerate() {
-			let opacity = if i == 0 { 1.0 } else { 0.0 };
-			if let Some(id) = entry.get("Id").and_then(|v| v.as_str()) {
-				out.push((id.to_string(), opacity));
+/// The model's idle motions (its motion group called "Idle", or any whose name starts with "idle", as
+/// Live2D's own player and most models name them), and how many motions each of its groups has.
+/// Parameters named by the model's EyeBlink and LipSync groups (or the standard eye and mouth ones)
+/// are left to the device, which blinks and speaks itself.
+fn load_idle_motions(index: &serde_json::Value, base: &Path, warnings: &mut Vec<String>) -> (Option<IdleMotions>, Vec<(String, usize)>) {
+	let mut counts = Vec::new();
+	let mut motions = Vec::new();
+	let groups = index.get("FileReferences").and_then(|r| r.get("Motions")).and_then(|m| m.as_object());
+	for (group, list) in groups.into_iter().flatten() {
+		let list = list.as_array().map(Vec::as_slice).unwrap_or(&[]);
+		counts.push((group.clone(), list.len()));
+		if !group.to_ascii_lowercase().starts_with("idle") {
+			continue;
+		}
+		for item in list {
+			let Some(file) = item.get("File").and_then(|f| f.as_str()) else { continue };
+			if motions.len() >= MAX_IDLE_MOTIONS {
+				warnings.push(format!("only the first {MAX_IDLE_MOTIONS} idle motions are played"));
+				break;
 			}
-			for linked in entry.get("Link").and_then(|l| l.as_array()).into_iter().flatten() {
-				if let Some(id) = linked.as_str() {
-					out.push((id.to_string(), opacity));
-				}
+			let name = file.rsplit('/').next().unwrap_or(file).trim_end_matches(".motion3.json").to_string();
+			let fade = |key: &str| item.get(key).and_then(|x| x.as_f64()).map(|x| x as f32);
+			match resolve(base, file)
+				.and_then(|p| read_limited(&p))
+				.and_then(|b| parse_motion(&name, &b, fade("FadeInTime"), fade("FadeOutTime")))
+			{
+				Ok(m) => motions.push(m),
+				Err(e) => warnings.push(format!("{e}; playing without it")),
 			}
 		}
 	}
-	Ok(out)
+	let mut skip: Vec<String> = Vec::new();
+	for g in index.get("Groups").and_then(|g| g.as_array()).into_iter().flatten() {
+		if matches!(g.get("Name").and_then(|n| n.as_str()), Some("EyeBlink" | "LipSync")) {
+			skip.extend(g.get("Ids").and_then(|i| i.as_array()).into_iter().flatten().filter_map(|i| i.as_str().map(str::to_string)));
+		}
+	}
+	for standard in ["ParamEyeLOpen", "ParamEyeROpen", "ParamMouthOpenY"] {
+		if !skip.iter().any(|s| s == standard) {
+			skip.push(standard.to_string());
+		}
+	}
+	let idle = (!motions.is_empty()).then(|| IdleMotions::new(motions, skip, 1));
+	(idle, counts)
 }
 
 fn bytes_of<T: Copy>(values: &[T]) -> &[u8] {
@@ -1247,12 +1295,14 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn a_pose_file_shows_one_part_of_each_group() {
+	fn a_pose_file_shows_the_first_part_of_each_group() {
 		let pose = br#"{"Type": "Live2D Pose", "FadeInTime": 0.5, "Groups": [
 			[{"Id": "PartArmA", "Link": ["PartHandA"]}, {"Id": "PartArmB", "Link": ["PartHandB"]}],
 			[{"Id": "PartHatOn", "Link": []}, {"Id": "PartHatOff"}]]}"#;
+		let mut groups = PoseGroups::parse(pose).unwrap();
+		groups.update(0.016);
 		assert_eq!(
-			parse_pose(pose).unwrap(),
+			groups.opacities(),
 			vec![
 				("PartArmA".to_string(), 1.0),
 				("PartHandA".to_string(), 1.0),
@@ -1262,7 +1312,36 @@ mod tests {
 				("PartHatOff".to_string(), 0.0)
 			]
 		);
-		assert!(parse_pose(b"{}").is_err());
+	}
+
+	#[test]
+	fn idle_motions_are_read_from_the_model_description() {
+		let dir = std::env::temp_dir().join(format!("stage-idle-{}", std::process::id()));
+		std::fs::create_dir_all(dir.join("motions")).unwrap();
+		let motion = br#"{"Version": 3, "Meta": {"Duration": 2, "Loop": true}, "Curves": [
+			{"Target": "Parameter", "Id": "ParamAngleX", "Segments": [0, 0, 0, 2, 10]}]}"#;
+		std::fs::write(dir.join("motions/idle_a.motion3.json"), motion).unwrap();
+		std::fs::write(dir.join("motions/tap.motion3.json"), motion).unwrap();
+		std::fs::write(dir.join("motions/broken.motion3.json"), b"{").unwrap();
+		let index: serde_json::Value = serde_json::from_str(
+			r#"{"FileReferences": {"Motions": {
+				"Idle": [{"File": "motions/idle_a.motion3.json", "FadeInTime": 0.5}, {"File": "motions/broken.motion3.json"}],
+				"TapBody": [{"File": "motions/tap.motion3.json"}],
+				"Idle2": [{"File": "../outside.motion3.json"}]}},
+			"Groups": [{"Target": "Parameter", "Name": "EyeBlink", "Ids": ["EyeOpenCustom"]}]}"#,
+		)
+		.unwrap();
+		let mut warnings = Vec::new();
+		let (idle, groups) = load_idle_motions(&index, &dir, &mut warnings);
+		let idle = idle.expect("one idle motion read");
+		assert_eq!(idle.names(), vec!["idle_a".to_string()]);
+		assert_eq!(warnings.len(), 2, "the broken file and the one outside the folder: {warnings:?}");
+		let mut groups = groups;
+		groups.sort();
+		assert_eq!(groups, vec![("Idle".to_string(), 2), ("Idle2".to_string(), 1), ("TapBody".to_string(), 1)]);
+		let (none, _) = load_idle_motions(&serde_json::json!({"FileReferences": {}}), &dir, &mut warnings);
+		assert!(none.is_none());
+		std::fs::remove_dir_all(&dir).ok();
 	}
 
 	#[test]

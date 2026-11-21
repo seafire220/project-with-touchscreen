@@ -29,6 +29,7 @@
 //! {"overlay": {"slot": "caption", "image": "caption-3.png", "anchor": "bottom"}}
 //! {"overlay": {"slot": "caption", "image": null}}
 //! {"screen": "dim"}
+//! {"model_motions": 0.5}
 //! {"quit": true}
 //! ```
 //!
@@ -52,6 +53,9 @@
 //! `overlay` shows a picture from the overlay folder over the character, in a named slot (a caption,
 //! the microphone-off sign), or with `"image": null` fades the slot out; `screen` dims the screen or
 //! makes it dark (`"on"`, `"dim"`, `"off"`). See overlay.rs.
+//!
+//! `model_motions` is how much of a Live2D-format model's own idle motions shows, 0 (off) to 1 (as its
+//! artist made them). See live2d_motion.rs.
 //!
 //! A script line also carries `"at": seconds`.
 
@@ -113,6 +117,8 @@ pub enum Command {
 	Overlay { slot: String, image: Option<String>, anchor: Anchor },
 	/// Light the screen, dim it, or make it dark.
 	Screen(Screen),
+	/// How much of a Live2D-format model's own idle motions shows, 0 to 1.
+	ModelMotions(f32),
 	Quit,
 }
 
@@ -266,6 +272,10 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 			}
 			"screen" => {
 				out.push(Command::Screen(val.as_str().and_then(Screen::parse).ok_or("\"screen\" is on, dim or off")?))
+			}
+			"model_motions" => {
+				let v = val.as_f64().filter(|v| (0.0..=1.0).contains(v)).ok_or("\"model_motions\" is a number from 0 to 1")?;
+				out.push(Command::ModelMotions(v as f32))
 			}
 			"quit" => {
 				if val.as_bool() == Some(true) {
@@ -441,6 +451,8 @@ mod tests {
 			vec![Command::Overlay { slot: "mic-off".into(), image: None, anchor: Anchor::Bottom }]
 		);
 		assert_eq!(parse_line(r#"{"screen": "off"}"#).unwrap().1, vec![Command::Screen(Screen::Off)]);
+		assert_eq!(parse_line(r#"{"model_motions": 0.5}"#).unwrap().1, vec![Command::ModelMotions(0.5)]);
+		assert!(parse_line(r#"{"model_motions": 2}"#).is_err());
 		for bad in [
 			r#"{"overlay": {"image": "a.png"}}"#,
 			r#"{"overlay": {"slot": "caption", "image": "../../etc/passwd"}}"#,
