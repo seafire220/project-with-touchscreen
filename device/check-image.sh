@@ -55,7 +55,15 @@ if [ -n "$PACKAGES_OUT" ]; then
     cp -a "$ROOT"/etc/apt/sources.list.d/. "$PACKAGES_OUT/sources/" 2>/dev/null || true
     [ -s "$ROOT/etc/apt/sources.list" ] && cp "$ROOT/etc/apt/sources.list" "$PACKAGES_OUT/sources/sources.list"
     for dir in "$ROOT/usr/share/keyrings" "$ROOT/etc/apt/keyrings" "$ROOT/etc/apt/trusted.gpg.d"; do
-        [ -d "$dir" ] && find "$dir" -maxdepth 1 -type f -exec cp {} "$PACKAGES_OUT/keyrings/" \;
+        [ -d "$dir" ] || continue
+        for key in "$dir"/*; do
+            src="$key"
+            if [ -L "$key" ]; then      # a link inside the image: follow it inside the image, not on this computer
+                target="$(readlink "$key")"
+                case "$target" in /*) src="$ROOT$target" ;; *) src="$dir/$target" ;; esac
+            fi
+            [ -f "$src" ] && cp "$src" "$PACKAGES_OUT/keyrings/$(basename "$key")"
+        done
     done
     echo "the image's $(wc -l < "$PACKAGES_OUT/packages.tsv") packages are listed in $PACKAGES_OUT/packages.tsv"
 fi

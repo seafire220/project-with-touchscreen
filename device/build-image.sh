@@ -123,7 +123,7 @@ say "Copying the software into the image"
 SRC="$ROOT/tmp/companion-src"
 mkdir -p "$SRC"
 # Only what the installer reads (not the whole folder: an image being built may sit in it).
-(cd "$REPO" && tar --exclude='__pycache__' --exclude='*.pyc' -cf - core device stage/motions THIRD_PARTY.md) | tar -xf - -C "$SRC"
+(cd "$REPO" && tar --exclude='__pycache__' --exclude='*.pyc' -cf - core device stage/motions stage/THIRD_PARTY_LICENSES.txt THIRD_PARTY.md) | tar -xf - -C "$SRC"
 install -m 0755 "$STAGE_BINARY" "$SRC/stage-binary"
 if [ -n "$EXTRA_CA" ]; then
     install -m 0644 "$EXTRA_CA" "$ROOT/usr/local/share/ca-certificates/build-extra-ca.crt"

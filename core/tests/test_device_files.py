@@ -1,6 +1,7 @@
 """The device's own files: the USB connection to a computer, and how updates install system files."""
 import importlib.util
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -231,6 +232,19 @@ class ReadOnlySystemTest(unittest.IsolatedAsyncioTestCase):
             finally:
                 await client.close()
 
+
+
+class ImageBuilderTest(unittest.TestCase):
+    def test_the_image_builder_copies_in_everything_the_installer_reads(self):
+        with open(os.path.join(REPO, "device", "install.sh"), encoding="utf-8") as f:
+            install = f.read()
+        with open(os.path.join(REPO, "device", "build-image.sh"), encoding="utf-8") as f:
+            copied = re.search(r"-cf - ([^)]*)\)", f.read()).group(1).split()
+        for path in sorted(set(re.findall(r"\$REPO/([A-Za-z0-9_./-]+)", install))):
+            if path == "stage" or path.startswith("stage/target/"):
+                continue                      # the stage program is handed over on its own
+            self.assertTrue(any(path == c or path.startswith(c + "/") for c in copied),
+                            "install.sh reads %s, which build-image.sh does not copy into the image" % path)
 
 
 class SourceCodeTest(unittest.TestCase):
