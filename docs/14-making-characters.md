@@ -62,7 +62,11 @@ from the page, a character made with the real part-finding model, and sending it
 settings-page API. On **Windows, macOS and Linux** on GitHub's computers, every time the studio changes
 (`.github/workflows/studio.yml`): the same first-run setup as a buyer's computer, the studio's tests with
 that environment (a drawn test figure made into a character, rigged and packaged), and the studio started
-and answering. See the latest run under **Actions → Character Studio on Windows, macOS and Linux**.
+and answering. See the latest run under **Actions → Character Studio on Windows, macOS and Linux**. The
+first run (2026-11-21) passed on all three: each installed PyTorch 2.15 and the studio in two to four
+minutes, passed 99 tests, and started. (Two tests need things only a developer's computer has, the device's
+screen program and a photo of a face, and wait for those.) GitHub's Macs have no graphics in their virtual
+machines, so the Mac's graphics were not tried there; on a real Apple-silicon Mac PyTorch uses them.
 
 **Older computers.** An Intel Mac gets no new PyTorch (its last is 2.2, for Python 3.12 or older), so the
 studio may not install there: use Apple silicon, Windows or Linux. A Mac on macOS 13 or older gets an older
