@@ -618,6 +618,14 @@ def self_test(timeout=2400.0):
     status = get_json(found["studio"] + "api/status")
     print("self-test: the studio answers at %s: %s" % (found["studio"], json.dumps(status["finder"])), flush=True)
     assert "PyTorch" not in status["finder"]["missing"], "self-test: PyTorch is missing"
+    # The licences the app must carry, found where the installed app keeps them.
+    for doc, expect in (("python", "OpenSSL"), ("notice", "WITHOUT ANY WARRANTY")):
+        with LOCAL.open(found["studio"] + "licences/%s.txt" % doc, timeout=30) as r:
+            assert expect in r.read().decode("utf-8"), "self-test: the app's %s licences are missing" % doc
+    if os.environ.get("APPIMAGE"):
+        with LOCAL.open(found["studio"] + "licences", timeout=10) as r:
+            assert "/licences/appimage.txt" in r.read().decode("utf-8"), "self-test: the runtime's licences are missing"
+    print("self-test: the licences and notices are there", flush=True)
     again = already_running(data)
     assert again == found["studio"], "self-test: a second start would not find the first (%s)" % again
     request = urllib.request.Request(found["studio"] + "api/quit", data=b"", method="POST", headers={"X-Studio": "1"})
