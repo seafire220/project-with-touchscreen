@@ -29,9 +29,9 @@ Python included: nothing else to install, no terminal.
 
 | Computer | Download | Install and open |
 |---|---|---|
-| **Windows 10 or 11** (64-bit) | `CharacterStudio-Setup-<version>.exe` | Double-click it, then **Install**. Character Studio is then in the Start menu (and on the desktop). Remove it in **Settings → Apps** |
-| **Mac** with Apple silicon (M1 or newer), macOS 12 or newer | `CharacterStudio-<version>.dmg` | Open it and drag **Character Studio** to **Applications**, then open it from there |
-| **Linux** (64-bit) | `CharacterStudio-<version>-x86_64.AppImage` | Allow it to run (right-click → **Properties** → **Permissions** → *Allow executing as a program*), then double-click it |
+| **Windows 10 or 11** (64-bit) | `CharacterStudio-Setup-<version>.exe` (17 MB) | Double-click it, then **Install**. Character Studio is then in the Start menu (and on the desktop). Remove it in **Settings → Apps** |
+| **Mac** with Apple silicon (M1 or newer), macOS 12 or newer | `CharacterStudio-<version>.dmg` (49 MB) | Open it and drag **Character Studio** to **Applications**, then open it from there |
+| **Linux** (64-bit) | `CharacterStudio-<version>-x86_64.AppImage` (34 MB) | Allow it to run (right-click → **Properties** → **Permissions** → *Allow executing as a program*), then double-click it |
 
 **The first start sets it up**: a page in the browser shows it downloading its AI tools, once (about 1 GB;
 about 3 GB with an NVIDIA graphics card), step by step with a progress bar, in a few minutes. Then the
@@ -106,7 +106,11 @@ Neither is built in yet: tell me when you have them.
 (Windows) start the studio from a copy of this repository, with a Python 3.10 or newer already installed,
 writing what they do in a window. They use the same launcher (`studio/launch.py`) and the same folder.
 
-**Checked** (2026-11-21): on Linux here, the AppImage built and started from two different places with the
+**Checked** (2026-11-21). On GitHub's computers, the first build passed everything: Windows (Server 2025:
+installed, started from the Start-menu icon's own program, uninstalled), macOS 26 on Apple silicon (dragged
+from the disk image, started, moved, started again without downloading) and Linux (the AppImage started
+twice), each with its first start downloading PyTorch 2.15 and the studio's other parts for real. On Linux
+here, the AppImage built and started from two different places with the
 studio's tools already downloaded (it pointed its environment at its own Python again and downloaded
 nothing), and a first start in an empty folder up to the download this sandbox refuses (the page showed
 each step, then *Try again*). On **Windows, macOS and Linux** on GitHub's computers: the apps are built,
