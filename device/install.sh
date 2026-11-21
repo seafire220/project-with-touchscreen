@@ -30,11 +30,16 @@ VERSION=""
 # licence, Useful Sensors), packaged for sherpa-onnx. About 120 MB.
 MODEL_URL="https://huggingface.co/csukuangfj/sherpa-onnx-moonshine-tiny-en-int8/resolve/main"
 MODEL_FILES="preprocess.onnx encode.int8.onnx uncached_decode.int8.onnx cached_decode.int8.onnx tokens.txt LICENSE"
-# On-device voice: Piper "LibriTTS-R" medium (904 speakers), trained on LibriTTS-R
-# (CC BY 4.0, Koizumi et al., Google), packaged for sherpa-onnx. About 80 MB.
-# Phonemes come from espeak-ng (an operating-system package, run as a program).
-VOICE_URL="https://huggingface.co/csukuangfj/vits-piper-en_US-libritts_r-medium/resolve/main"
-VOICE_FILES="en_US-libritts_r-medium.onnx en_US-libritts_r-medium.onnx.json tokens.txt MODEL_CARD"
+# On-device voice: Piper "VCTK" medium (109 speakers with British, Irish, American, Australian and
+# other accents), trained on the CSTR VCTK Corpus (CC BY 4.0, University of Edinburgh) from a base voice
+# trained on NVIDIA's Hi-Fi TTS (CC BY 4.0): no research-only data anywhere in it (docs/34-licences.md).
+# Piper's own files at a fixed commit, checked by their SHA-256, then prepared for sherpa-onnx
+# (core/companion/piper_voice.py). About 80 MB. Phonemes come from espeak-ng (an operating-system
+# package, run as a separate program).
+VOICE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/e9c8a39444359388adaa94255becb37a5a2b8e51/en/en_GB/vctk/medium"
+VOICE_MODEL="en_GB-vctk-medium.onnx"
+VOICE_SHA256="fc3d92d266b1a6c03af2a38215e0eee430ca7fb360f641d7c3dcb17c7670c0f3"
+VOICE_FILES="$VOICE_MODEL $VOICE_MODEL.json MODEL_CARD"
 # Matching memories by meaning: Model2Vec potion-base-8M (MIT, Minish Lab; distilled from BAAI's
 # bge-base-en-v1.5, MIT). A table of word-piece vectors read with numpy; about 30 MB.
 MEANING_URL="https://huggingface.co/minishlab/potion-base-8M/resolve/main"
@@ -156,6 +161,15 @@ fi
 # sherpa-onnx: on-device speech recognition and the wake word; sentencepiece spells the wake words as
 # the wake-word model's word pieces. anthropic: only loaded if Claude is chosen.
 "$APP/venv/bin/pip" install -q sherpa-onnx sentencepiece anthropic || echo "warning: optional Python packages did not install" >&2
+# The speech library brings its own copy of ALSA's sound library (LGPL-2.1). Point it at the operating
+# system's instead (the same library, newer): then every LGPL library on the device is the operating
+# system's own, with its source in the operating system's archive (docs/34-licences.md).
+SYS_ASOUND="$(ldconfig -p | awk '/libasound\.so\.2 / {print $NF; exit}')"
+if [ -n "$SYS_ASOUND" ]; then
+    for lib in "$APP"/venv/lib/python3*/site-packages/*.libs/libasound-*.so*; do
+        if [ -f "$lib" ] && [ ! -L "$lib" ]; then ln -sf "$SYS_ASOUND" "$lib"; fi
+    done
+fi
 
 if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/stt" ]; then
     say "Downloading the on-device speech model"
@@ -181,9 +195,16 @@ if [ "$GET_MODEL" = 1 ] && [ ! -d "$DATA/models/tts" ]; then
     for f in $VOICE_FILES; do
         curl -fsSL "$VOICE_URL/$f" -o "$tmp/$f" || { ok=0; break; }
     done
-    if [ "$ok" = 1 ]; then
+    if [ "$ok" = 1 ] && ! echo "$VOICE_SHA256  $tmp/$VOICE_MODEL" | sha256sum -c --quiet; then
+        echo "warning: the voice downloaded is not the one checked (SHA-256 differs)" >&2
+        ok=0
+    fi
+    if [ "$ok" = 1 ] && PYTHONPATH="$REPO/core" python3 -m companion.piper_voice "$tmp/$VOICE_MODEL" \
+            "$tmp/$VOICE_MODEL.json" "$tmp/tts" >/dev/null; then
+        mv "$tmp/MODEL_CARD" "$tmp/tts/MODEL_CARD"
         install -d -o companion -g companion "$DATA/models"
-        mv "$tmp" "$DATA/models/tts"
+        mv "$tmp/tts" "$DATA/models/tts"
+        rm -rf "$tmp"
         chown -R companion:companion "$DATA/models"
     else
         echo "warning: could not download the on-device voice; choose a voice service in the settings page" >&2

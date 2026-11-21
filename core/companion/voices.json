@@ -1,128 +1,368 @@
 {
- "about": "Clear voices from the on-device voice (Piper LibriTTS-R medium, 904 speakers), chosen by a survey: each speaker read two hard sentences, which the device's own speech recognition had to hear without a mistake; twelve higher and twelve lower voices, spread across pitch. Any speaker number from 0 to 903 also works.",
- "model": "en_US-libritts_r-medium",
- "credit": "Voice trained on LibriTTS-R (CC BY 4.0; Koizumi et al., 2023) by the Piper project.",
- "default": 93,
+ "about": "Clear voices from the on-device voice (en_GB-vctk-medium), chosen by a survey: each speaker read two harder sentences, which the device's own speech recognition had to hear without a mistake. 72 of 109 passed.",
+ "model": "en_GB-vctk-medium",
+ "credit": "Voice by the Piper project, trained on the CSTR VCTK Corpus (version 0.92; Yamagishi, Veaux and MacDonald, University of Edinburgh, 2019; CC BY 4.0), from a base voice trained on the Hi-Fi Multi-Speaker English TTS Dataset (Bakhturina, Lavrukhin, Ginsburg and Zhang, NVIDIA, 2021; CC BY 4.0).",
+ "default": 34,
  "voices": [
   {
-   "id": 185,
-   "label": "Higher voice A",
-   "pitch_hz": 175.7
-  },
-  {
    "id": 63,
-   "label": "Higher voice B",
-   "pitch_hz": 181.0
+   "label": "Woman 63 (France (mic2 files unavailable))",
+   "pitch_hz": 179.3
   },
   {
-   "id": 886,
-   "label": "Higher voice C",
-   "pitch_hz": 186.3
+   "id": 68,
+   "label": "American woman (California)",
+   "pitch_hz": 173.6
   },
   {
-   "id": 764,
-   "label": "Higher voice D",
-   "pitch_hz": 189.4
+   "id": 34,
+   "label": "American woman (Alabama)",
+   "pitch_hz": 182.2
   },
   {
-   "id": 373,
-   "label": "Higher voice E",
-   "pitch_hz": 192.3
+   "id": 45,
+   "label": "American woman (Indiana)",
+   "pitch_hz": 185.3
   },
   {
-   "id": 247,
-   "label": "Higher voice F",
-   "pitch_hz": 196.2
+   "id": 101,
+   "label": "American woman (New York)",
+   "pitch_hz": 186.9
   },
   {
-   "id": 310,
-   "label": "Higher voice G",
+   "id": 22,
+   "label": "American woman (New Jersey)",
+   "pitch_hz": 188.5
+  },
+  {
+   "id": 33,
+   "label": "American woman",
+   "pitch_hz": 188.5
+  },
+  {
+   "id": 52,
+   "label": "American woman (New York)",
+   "pitch_hz": 188.5
+  },
+  {
+   "id": 43,
+   "label": "American woman (Napa)",
+   "pitch_hz": 195.1
+  },
+  {
+   "id": 37,
+   "label": "American woman (Pennsylvania)",
+   "pitch_hz": 206.1
+  },
+  {
+   "id": 21,
+   "label": "American woman",
+   "pitch_hz": 208.0
+  },
+  {
+   "id": 108,
+   "label": "American woman",
+   "pitch_hz": 212.0
+  },
+  {
+   "id": 27,
+   "label": "American woman (Tennessee)",
+   "pitch_hz": 245.0
+  },
+  {
+   "id": 29,
+   "label": "American man (Chicago)",
+   "pitch_hz": 94.6
+  },
+  {
+   "id": 75,
+   "label": "American man (Florida)",
+   "pitch_hz": 97.6
+  },
+  {
+   "id": 24,
+   "label": "American man (New Jersey)",
+   "pitch_hz": 98.9
+  },
+  {
+   "id": 38,
+   "label": "American man (Iowa)",
+   "pitch_hz": 101.6
+  },
+  {
+   "id": 71,
+   "label": "Australian man (Sydney)",
+   "pitch_hz": 79.9
+  },
+  {
+   "id": 25,
+   "label": "Australian man",
+   "pitch_hz": 119.8
+  },
+  {
+   "id": 73,
+   "label": "British woman ((new speaker, more data would be released for training a speaker-dependent model))",
+   "pitch_hz": 216.2
+  },
+  {
+   "id": 83,
+   "label": "Canadian woman (Alberta)",
+   "pitch_hz": 160.9
+  },
+  {
+   "id": 53,
+   "label": "Canadian woman (Hamilton)",
+   "pitch_hz": 212.0
+  },
+  {
+   "id": 49,
+   "label": "Canadian woman (Ontario)",
+   "pitch_hz": 250.6
+  },
+  {
+   "id": 47,
+   "label": "Canadian man (Alberta)",
+   "pitch_hz": 95.5
+  },
+  {
+   "id": 15,
+   "label": "English woman (Southern England)",
+   "pitch_hz": 177.8
+  },
+  {
+   "id": 54,
+   "label": "English woman (Yorkshire)",
+   "pitch_hz": 186.9
+  },
+  {
+   "id": 77,
+   "label": "English woman (Newcastle)",
+   "pitch_hz": 188.5
+  },
+  {
+   "id": 74,
+   "label": "English woman (Stockton-on-tees)",
+   "pitch_hz": 195.1
+  },
+  {
+   "id": 14,
+   "label": "English woman (NE England)",
    "pitch_hz": 199.6
   },
   {
-   "id": 93,
-   "label": "Higher voice H",
-   "pitch_hz": 204.3
+   "id": 3,
+   "label": "English woman (SE England)",
+   "pitch_hz": 204.2
   },
   {
-   "id": 832,
-   "label": "Higher voice I",
-   "pitch_hz": 208.3
+   "id": 48,
+   "label": "English woman (Manchester)",
+   "pitch_hz": 210.0
   },
   {
-   "id": 581,
-   "label": "Higher voice J",
-   "pitch_hz": 215.2
+   "id": 66,
+   "label": "English woman (Southern England)",
+   "pitch_hz": 210.0
   },
   {
-   "id": 408,
-   "label": "Higher voice K",
-   "pitch_hz": 225.2
+   "id": 18,
+   "label": "English woman (Southern England)",
+   "pitch_hz": 212.0
   },
   {
-   "id": 315,
-   "label": "Higher voice L",
-   "pitch_hz": 244.0
+   "id": 11,
+   "label": "English woman (Oxford)",
+   "pitch_hz": 227.3
   },
   {
-   "id": 631,
-   "label": "Lower voice A",
-   "pitch_hz": 95.8
+   "id": 86,
+   "label": "English woman (Southern England)",
+   "pitch_hz": 234.6
   },
   {
-   "id": 669,
-   "label": "Lower voice B",
-   "pitch_hz": 102.3
+   "id": 1,
+   "label": "English woman (Manchester)",
+   "pitch_hz": 237.1
   },
   {
-   "id": 496,
-   "label": "Lower voice C",
-   "pitch_hz": 104.9
+   "id": 23,
+   "label": "English man (York)",
+   "pitch_hz": 97.6
   },
   {
-   "id": 156,
-   "label": "Lower voice D",
-   "pitch_hz": 109.9
+   "id": 12,
+   "label": "English man (Yorkshire)",
+   "pitch_hz": 103.0
   },
   {
-   "id": 326,
-   "label": "Lower voice E",
-   "pitch_hz": 113.7
+   "id": 64,
+   "label": "English man (Cheshire)",
+   "pitch_hz": 111.9
   },
   {
-   "id": 784,
-   "label": "Lower voice F",
+   "id": 57,
+   "label": "English man (Southern England)",
    "pitch_hz": 117.3
   },
   {
-   "id": 843,
-   "label": "Lower voice G",
-   "pitch_hz": 119.7
+   "id": 4,
+   "label": "English man (Nottingham)",
+   "pitch_hz": 117.9
   },
   {
-   "id": 602,
-   "label": "Lower voice H",
-   "pitch_hz": 121.8
+   "id": 81,
+   "label": "English man (London)",
+   "pitch_hz": 120.5
   },
   {
-   "id": 257,
-   "label": "Lower voice I",
-   "pitch_hz": 124.8
+   "id": 9,
+   "label": "English man (Newcastle)",
+   "pitch_hz": 141.3
   },
   {
-   "id": 725,
-   "label": "Lower voice J",
-   "pitch_hz": 129.4
+   "id": 19,
+   "label": "English man (Suffolk)",
+   "pitch_hz": 152.1
   },
   {
-   "id": 608,
-   "label": "Lower voice K",
-   "pitch_hz": 134.3
+   "id": 87,
+   "label": "Indian woman",
+   "pitch_hz": 245.0
   },
   {
-   "id": 364,
-   "label": "Lower voice L",
-   "pitch_hz": 138.9
+   "id": 46,
+   "label": "Irish woman (County Down)",
+   "pitch_hz": 179.3
+  },
+  {
+   "id": 56,
+   "label": "Irish woman (Dublin)",
+   "pitch_hz": 188.5
+  },
+  {
+   "id": 30,
+   "label": "Irish woman (Dublin)",
+   "pitch_hz": 206.1
+  },
+  {
+   "id": 8,
+   "label": "Irish woman (Cork)",
+   "pitch_hz": 210.0
+  },
+  {
+   "id": 97,
+   "label": "Irish man (Dublin)",
+   "pitch_hz": 89.6
+  },
+  {
+   "id": 106,
+   "label": "Irish man (Donegal)",
+   "pitch_hz": 101.1
+  },
+  {
+   "id": 67,
+   "label": "Irish man (Tipperary)",
+   "pitch_hz": 120.5
+  },
+  {
+   "id": 42,
+   "label": "New Zealand woman",
+   "pitch_hz": 212.0
+  },
+  {
+   "id": 78,
+   "label": "Northern Irish woman (Belfast)",
+   "pitch_hz": 186.9
+  },
+  {
+   "id": 44,
+   "label": "Northern Irish woman (Derry)",
+   "pitch_hz": 220.5
+  },
+  {
+   "id": 6,
+   "label": "Northern Irish woman (Belfast)",
+   "pitch_hz": 250.6
+  },
+  {
+   "id": 28,
+   "label": "Northern Irish man (Belfast)",
+   "pitch_hz": 104.5
+  },
+  {
+   "id": 61,
+   "label": "Northern Irish man (Belfast)",
+   "pitch_hz": 106.0
+  },
+  {
+   "id": 80,
+   "label": "Scottish woman (Edinburgh)",
+   "pitch_hz": 163.3
+  },
+  {
+   "id": 103,
+   "label": "Scottish woman (Aberdeen)",
+   "pitch_hz": 176.4
+  },
+  {
+   "id": 94,
+   "label": "Scottish woman (West Dumfries)",
+   "pitch_hz": 183.8
+  },
+  {
+   "id": 2,
+   "label": "Scottish woman (West Lothian)",
+   "pitch_hz": 200.5
+  },
+  {
+   "id": 102,
+   "label": "Scottish man (Fife)",
+   "pitch_hz": 82.0
+  },
+  {
+   "id": 13,
+   "label": "Scottish man (Edinburgh)",
+   "pitch_hz": 92.8
+  },
+  {
+   "id": 20,
+   "label": "Scottish man (Fife)",
+   "pitch_hz": 95.9
+  },
+  {
+   "id": 93,
+   "label": "Scottish man (Selkirk)",
+   "pitch_hz": 102.6
+  },
+  {
+   "id": 16,
+   "label": "Scottish man (Fife)",
+   "pitch_hz": 116.7
+  },
+  {
+   "id": 79,
+   "label": "Scottish man (Edinburgh)",
+   "pitch_hz": 120.5
+  },
+  {
+   "id": 51,
+   "label": "South African woman (Johannesburg)",
+   "pitch_hz": 204.2
+  },
+  {
+   "id": 31,
+   "label": "South African woman (Pretoria)",
+   "pitch_hz": 218.3
+  },
+  {
+   "id": 32,
+   "label": "South African man (Johannesburg)",
+   "pitch_hz": 90.4
+  },
+  {
+   "id": 88,
+   "label": "Welsh woman (Cardiff)",
+   "pitch_hz": 232.1
   }
  ]
 }

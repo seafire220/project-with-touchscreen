@@ -566,15 +566,24 @@ class LocalTTS:
         models = sorted(glob.glob(os.path.join(model_dir, "*.onnx")))
         if not models or not os.path.exists(os.path.join(model_dir, "tokens.txt")):
             raise ProviderError("no on-device voice is installed at %s" % model_dir)
+        from .piper_voice import cluster_symbols
         self.espeak_voice = "en-us"
+        description = {}
         try:
             with open(models[0] + ".json", encoding="utf-8") as f:
-                self.espeak_voice = json.load(f).get("espeak", {}).get("voice") or "en-us"
+                description = json.load(f)
         except (OSError, ValueError):
             pass
+        self.espeak_voice = (description.get("espeak") or {}).get("voice") or "en-us"
+        # Voices from Piper 1.5 on speak vowel pairs as one symbol (piper_voice.py), and say how much
+        # variation they were trained to sound best with.
+        self.clusters = cluster_symbols(description)
+        settings = description.get("inference") or {}
         vits = sherpa_onnx.OfflineTtsVitsModelConfig(
             model=models[0], tokens=os.path.join(model_dir, "tokens.txt"),
-            data_dir=os.path.join(model_dir, "espeak-ng-data") if os.path.isdir(os.path.join(model_dir, "espeak-ng-data")) else "")
+            data_dir=os.path.join(model_dir, "espeak-ng-data") if os.path.isdir(os.path.join(model_dir, "espeak-ng-data")) else "",
+            noise_scale=float(settings.get("noise_scale", 0.667)), noise_scale_w=float(settings.get("noise_w", 0.8)),
+            length_scale=float(settings.get("length_scale", 1.0)))
         self.tts = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(
             model=sherpa_onnx.OfflineTtsModelConfig(vits=vits, num_threads=threads), max_num_sentences=1))
         self.rate = self.tts.sample_rate
@@ -613,6 +622,8 @@ class LocalTTS:
             raise ProviderError("the on-device voice could not read the text (%s)" % error)
         if not phonemes:
             return b""
+        from .piper_voice import merge_clusters
+        phonemes = merge_clusters(phonemes, self.clusters)
         config = self._sherpa.GenerationConfig()
         config.phoneme_codepoints = [[ord(c) for c in phonemes]]
         config.sid = self.sid

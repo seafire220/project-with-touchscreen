@@ -67,7 +67,7 @@ check "update requests start the updater" enabled multi-user.target companion-up
 check "an update the power cut short is finished or undone at start" enabled multi-user.target companion-update-boot.service
 check "Python environment with on-device speech recognition" sh -c "ls '$ROOT'/opt/companion/venv/lib/python3*/site-packages | grep -q sherpa_onnx"
 check "speech model shipped" model stt/encode.int8.onnx
-check "on-device voice shipped" model tts/en_US-libritts_r-medium.onnx
+check "on-device voice shipped (VCTK, prepared for sherpa-onnx)" sh -c "{ test -s '$ROOT/opt/companion/models/tts/en_GB-vctk-medium.onnx' && grep -q \"\$(printf '\\356\\200\\200')\" '$ROOT/opt/companion/models/tts/tokens.txt'; } || { test -s '$DATA/models/tts/en_GB-vctk-medium.onnx' && grep -q \"\$(printf '\\356\\200\\200')\" '$DATA/models/tts/tokens.txt'; }"
 check "model for matching memories by meaning shipped" model meaning/model.safetensors
 check "wake-word model shipped" model wake/bpe.model
 check "the wake word can spell names (sentencepiece)" sh -c "ls '$ROOT'/opt/companion/venv/lib/python3*/site-packages | grep -q sentencepiece"
