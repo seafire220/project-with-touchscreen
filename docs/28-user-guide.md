@@ -29,8 +29,8 @@ character card's personality.
 - Optional: a key for a voice service (the device has a free voice of its
   own), and a web-search key (only for models that cannot search by
   themselves; Claude can).
-- To make characters from pictures: a Linux or Mac computer for Character
-  Studio (Windows *not yet*).
+- To make characters from pictures: a Windows, Mac or Linux computer for
+  Character Studio (see "Making one from a picture: Character Studio").
 
 ## Setting it up
 
@@ -135,9 +135,9 @@ Character Studio is an app for your computer (Windows, Mac or Linux), not the de
 picture into a moving character. Download it for your computer and install it like any other app
 (details, and what to do about the first-time security questions, are in `14-making-characters.md`):
 
-- **Windows**: run `CharacterStudio-Setup-<version>.exe`; it is then in the Start menu.
-- **Mac**: open `CharacterStudio-<version>.dmg` and drag Character Studio to Applications.
-- **Linux**: make the `.AppImage` file executable and double-click it.
+- **Windows**: run `CharacterStudio-Setup.exe`; it is then in the Start menu.
+- **Mac**: open `CharacterStudio.dmg` and drag Character Studio to Applications.
+- **Linux**: make `CharacterStudio-x86_64.AppImage` executable and double-click it.
 
 The first time it opens, a page in your browser shows it downloading its tools (about 1 GB, a few
 minutes); then the studio opens. After that:
@@ -320,7 +320,10 @@ Under **AI services**, in three parts:
      then. A 3-billion model can chat, but keeps poor memories. Larger models
      on a computer with a graphics card do better.
    - The first reply after a while is slower, as the model loads.
-2. **Voice**: the free on-device voice, or a voice service.
+2. **Voice**: the free on-device voice, with 72 voices to choose from in
+   English accents from around the world (English, Scottish, Irish, Welsh,
+   American, Canadian, Australian, New Zealand, South African and Indian), or
+   a voice service.
 3. **Speech recognition** (hearing you): free and on the device by default,
    or a cloud service.
 
