@@ -416,14 +416,17 @@
     <label>Caption size <select id="dev-captions-size"><option value="normal">normal</option>
       <option value="large">large</option></select></label>
     <label><input type="checkbox" id="dev-sleep"> Screen at night: <select id="dev-sleep-how"><option value="off">dark</option>
-      <option value="dim">dim</option></select> from <input type="number" id="dev-sleep-from" min="0" max="23" step="1">
+      <option value="dim">dim</option><option value="nightstand">nightstand clock</option></select> from <input type="number" id="dev-sleep-from" min="0" max="23" step="1">
       to <input type="number" id="dev-sleep-to" min="0" max="23" step="1"> o'clock while nobody is talking to it (tapping
       the screen, the button, its name or an alarm lights it again)</label>
     <label id="dev-brightness-row" hidden>Screen brightness <input type="range" id="dev-brightness" min="10" max="100" step="5"></label>
+    <label>Touch coordinate rotation <select id="dev-rotation"><option value="0">0° (default)</option><option value="90">90°</option>
+      <option value="180">180°</option><option value="270">270°</option></select></label>
     <label><input type="checkbox" id="dev-touch-enabled"> Touchscreen: on-screen glass controls (swipe up or tap the bottom bar) and touch interaction</label>
-    <label><input type="checkbox" id="dev-touch-char"> …tactile character reactions (headpats, cheek rubs, pokes and eye tracking)</label>
+    <label><input type="checkbox" id="dev-touch-char"> …tactile character reactions (headpats, cheek rubs, pokes, pinch framing and eye tracking)</label>
     <label><input type="checkbox" id="dev-touch-fx"> …visual touch effects (ripples, hearts, sparkles and ambient glow)</label>
-    <label><input type="checkbox" id="dev-touch-spoken"> …spoken in-character reactions when petted or poked</label>
+    <label><input type="checkbox" id="dev-touch-sounds"> …subtle tactile UI sound effects (soft clicks, chimes, headpats and treats)</label>
+    <label><input type="checkbox" id="dev-touch-spoken"> …spoken in-character reactions when petted, poked or given a treat</label>
     <label>…minimum gap between spoken touch reactions (seconds) <input type="number" id="dev-touch-cooldown" min="5" max="300" step="5"></label>
     <label>…auto-hide quick dock after (seconds) <input type="number" id="dev-touch-autohide" min="3" max="60" step="1"></label>
     <label><input type="checkbox" id="dev-family"> Family-safe: every reply suitable for children, whatever the
@@ -459,6 +462,10 @@
       <button type="submit">Join</button> <button type="button" id="btn-wifi-scan">Look again</button>
       <span id="wifi-msg"></span>
     </form>
+    <h3>Bluetooth audio</h3>
+    <p id="bt-status">Checking…</p>
+    <p id="bt-actions"><button type="button" id="btn-bt-scan">Scan for speakers</button> <span id="bt-msg"></span></p>
+    <ul id="bt-list" class="plain"></ul>
     <h3>Time zone</h3>
     <p>Alarms use the device's time zone: <strong id="tz-device">…</strong>.
        <button type="button" id="btn-tz">Use this phone's time zone (<span id="tz-phone"></span>)</button> <span id="tz-msg"></span></p>

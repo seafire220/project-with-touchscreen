@@ -254,6 +254,16 @@ impl FxState {
 		}
 	}
 
+	/// Celebratory burst of golden sparkles, floating rose hearts and a soft ring (treats & high-five).
+	pub fn spawn_celebrate(&mut self, x: f32, y: f32) {
+		if !self.enabled {
+			return;
+		}
+		self.spawn_ripple(x, y, [1.0, 0.84, 0.45, 0.85]);
+		self.spawn_hearts(x, y, 4);
+		self.spawn_sparkles(x, y, 8, true);
+	}
+
 	/// Track an active fingertip for a subtle soft aura while touching/petting.
 	pub fn set_finger(&mut self, pos: Option<(f32, f32)>, warm: bool) {
 		if !self.enabled {

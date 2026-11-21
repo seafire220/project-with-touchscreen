@@ -60,16 +60,25 @@ The settings page only answers on your home network.
 At rest, the screen stays clean so the character shines, with only a small
 translucent capsule at the bottom showing the clock and microphone dot.
 
-- **Pet, rub & poke the character**: stroke across its head for a headpat,
+- **Pet, rub, poke & multi-touch**: stroke across its head for a headpat,
   rub its cheek, tap to playfully poke it, or glide a finger and watch its
-  eyes follow you. Visual effects (ripples, floating hearts, sparkles and a
-  soft glow while listening or speaking) react immediately, and the character
-  can also reply aloud now and then (adjustable under **Device → Touchscreen**).
+  eyes follow you. On 3D VRM avatars, **pinch in or out with two fingers**
+  to zoom between close-up, upper-body, and whole-body framing live. **Swipe
+  horizontally with two fingers** to switch directly to another installed
+  character. Visual effects (ripples, floating hearts, sparkles, celebration
+  bursts, and a soft glow while listening or speaking) and subtle tactile UI
+  sounds react immediately; the character also tracks your bond over time and
+  can reply aloud now and then (adjustable under **Device → Touchscreen**).
 - **Quick Controls Dock**: swipe up from the bottom edge — or tap the bottom
   capsule — to slide open translucent glass controls for **Tap to Talk**,
-  **Mute**, smooth **Volume** and **Brightness** sliders, **Characters**,
-  **Captions**, **Sleep**, **Timers**, **Wi-Fi**, and **More & QR**. It fades
-  away automatically when you leave it alone (or tap outside / swipe down).
+  **Mute**, smooth **Volume** and **Brightness** sliders, a quick **Chat**
+  shortcut, **Characters**, **Captions**, **Sleep**, **Timers**, **Wi-Fi**,
+  and **More & Care**. It fades away automatically when you leave it alone
+  (or tap outside / swipe down).
+- **Chat & Quick Prompts**: swipe right from the left edge (or tap **Chat**
+  in the dock header) to read your latest conversation bubbles, tap a quick
+  prompt (*How's my day?*, *Fun fact*, *25m focus*, *Cheer me up*), or tap
+  **Type a message…** to chat silently with the built-in touch keyboard.
 - **One-tap interrupt**: while the character is listening or speaking, tap the
   bottom bar once to stop speaking or send what you said.
 - **Character Switcher**: open **Characters** from the dock to browse
@@ -77,12 +86,21 @@ translucent capsule at the bottom showing the clock and microphone dot.
 - **Timers & Clock**: swipe down from the top edge (or open **Timers** from
   the dock) to see the clock, start a quick timer (`+1m` to `+30m`), or cancel
   running timers.
-- **Moods & Settings QR**: open **More & QR** to trigger a mood or wave, flip
-  quick toggles, or scan the QR code straight to the web settings page.
-- **On-screen Wi-Fi**: open **Wi-Fi** from the dock (or from the setup screen)
-  to scan networks, enter hidden network names, and type passwords on the
-  built-in touch keyboard.
-- **Wake-on-touch**: when the screen sleeps at night, tap anywhere to wake it.
+- **Moods, Care & Tools**: open **More & Care** to check your bond tier,
+  trigger a mood or wave, offer interactive treats (*Warm Tea*, *Snack*,
+  *Gold Star*, *High-5*), flip quick toggles (*Touch speech*, *Touch sounds*,
+  *Wake word*, *Show heard*), pair **Bluetooth** speakers, run the 3-step
+  **Setup Wizard** (with speaker chime check, touch rotation compensation,
+  and an interactive touch calibration target), enter **Nightstand** mode, or
+  scan the QR code straight to the web settings page.
+- **Ambient Nightstand Mode**: choose **nightstand clock** under **Device →
+  Screen at night** (or tap **Nightstand** in **More & Care**) to dim the
+  screen to a warm, low-glare bedside clock over your softly drowsy
+  character. Tap anywhere to wake cleanly.
+- **On-screen Wi-Fi & Bluetooth**: open **Wi-Fi** from the dock (or from the
+  setup screen) to scan networks, enter hidden network names, and type
+  passwords on the built-in touch keyboard; open **Bluetooth** under **More &
+  Care** (or **Device → Bluetooth audio**) to pair wireless speakers.
 
 ## Talking
 

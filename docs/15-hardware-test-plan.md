@@ -60,12 +60,29 @@ they change a decision.
 | 32 | A Live2D model's own idle motions | Add a model that has idle motions (most bought ones do); watch it five minutes, then talk to it; switch *Its own idle motions* between as made, gentler and off | Its artist's motions play and change smoothly; looking at you, nods and gestures still show on top; the frame rate in the heartbeat stays as with them off |
 | 33 | 3D head turns | With a VRM avatar, ask it to look back over its shoulder; leave it alone ten minutes | The head reaches a profile with the shoulders following, and comes back smoothly; now and then it looks over its shoulder by itself |
 
+## Touchscreen edition bring-up (Touch Display 2)
+
+Run these checks on units fitted with the Raspberry Pi Touch Display 2 (5" or 7", 720×1280 portrait):
+
+| # | Test | How | Pass |
+|---|---|---|---|
+| 34 | Touch alignment & rotation | Open **Moods & Care → Setup Wizard → Step 2**; tap all 4 corners and the calibration target box; if coordinates are rotated relative to the display, pick `90°`/`180°`/`270°` and re-tap | Sparkles and cyan target dot land directly under the fingertip at all corners and center; setting survives a reboot |
+| 35 | Tactile character interaction | Stroke back and forth across head (headpat), rub cheek, double-tap body, and glide finger around screen | Immediate 60 fps headpat/cheek-rub/poke motion, floating hearts/sparkles, smooth eye tracking; heartbeat `fps` stays ≥ 30 |
+| 36 | Multi-touch gestures | On a 3D VRM avatar, pinch in and out with two fingers; with 2+ characters installed, swipe horizontally with two fingers | Pinch switches `bust ↔ upper ↔ full` live with no stage restart; two-finger swipe switches to the next/previous character |
+| 37 | Dock & slider drag smoothness | Swipe up from bottom edge; drag Volume and Brightness sliders end-to-end repeatedly | Drag feels responsive (< 50 ms frame cadence via cached static base layer); backlight scales smoothly down to 10% without flickering off |
+| 38 | Tactile UI sounds | Tap dock buttons, give a treat (**Moods & Care → Warm Tea**), and tap **Setup Wizard → Test chime**; then talk while listening/speaking | Soft harmonic chimes play on idle UI actions; never overlap or interrupt speech or recording; mute cleanly when **Touch sounds** is toggled off |
+| 39 | Quick Prompts & touch keyboard | Swipe right from the left edge; tap a quick prompt, then tap **Type a message…** and send a sentence; also test **Wi-Fi** password entry | Recent chat bubbles display cleanly; quick prompts and typed messages speak aloud; keyboard hits every key accurately including Shift/Caps-Lock and `123`/`#+=` |
+| 40 | Ambient Nightstand Mode | Set **Screen at night → nightstand clock** (or tap **Moods & Care → Nightstand**); check `journalctl -u companion-stage -f` and backlight; wait 5 minutes, then tap screen | Backlight dims to ~18%, warm low-glare clock sits above the dimly lit drowsy character, stage throttles to ~12 fps (cooler SoC), and a single tap wakes cleanly without triggering UI underneath |
+| 41 | Bluetooth audio pairing | Put a Bluetooth speaker in pairing mode; open **Moods & Care → Bluetooth** (or Device tab), tap **Scan**, then tap the speaker to pair & connect; test voice output | Pairs, trusts, and connects cleanly; PipeWire routes speech and chimes to the Bluetooth speaker; Disconnect restores the built-in/USB speaker |
+
 ## Things to measure and feed back
 
 - The sound card's ALSA name, and whether the ReSpeaker Lite's echo
   cancellation works over USB (this decides whether speaking can interrupt
   the character as well as the button).
-- The display overlay line that actually works for your Touch Display 2.
+- The display overlay line that actually works for your Touch Display 2, and
+  whether touch rotation compensation (`screen.rotation`) is needed (`0°` vs `90°`/`270°`).
+- The lowest non-black backlight percentage on Touch Display 2 (verify Nightstand's 18% level is comfortably visible in a dark room).
 - The output latency (`OUTPUT_LATENCY` in `core/companion/audio.py`):
   film the screen and speaker together and compare mouth and sound.
 

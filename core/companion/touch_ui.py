@@ -12,6 +12,7 @@ guaranteeing 1:1 visual-to-touch alignment at any display resolution.
 import asyncio
 import datetime
 import io
+import json
 import logging
 import math
 import os
@@ -87,6 +88,20 @@ QUICK_MOODS = (
     ("wave", "Wave"),
 )
 
+QUICK_TREATS = (
+    ("tea", "Warm Tea"),
+    ("snack", "Snack"),
+    ("star", "Gold Star"),
+    ("high_five", "High-5"),
+)
+
+QUICK_PROMPTS = (
+    ("How's my day?", "How's my day looking? Remind me of anything I should keep in mind."),
+    ("Fun fact", "Tell me a short, surprising fun fact."),
+    ("25m focus", "Set a 25 minute focus timer for me."),
+    ("Cheer me up", "Say something short and encouraging to brighten my mood."),
+)
+
 
 def place_overlay(w, h, sw, sh, anchor="bottom"):
     """Exact screen top-left pixel matching stage/src/overlay.rs::Anchor::place."""
@@ -124,6 +139,33 @@ def _fit_text(draw, text, font, max_w):
         else:
             hi = mid - 1
     return (text[:lo].rstrip() + ell) if lo > 0 else ell
+
+
+def _wrap_lines(draw, text, font, max_w, max_lines=2):
+    """Wrap text into at most max_lines lines within max_w pixels, ellipsizing the final line if needed."""
+    words = " ".join(str(text or "").split()).split(" ")
+    if not words or words == [""]:
+        return [""]
+    lines = []
+    cur = ""
+    for i, word in enumerate(words):
+        cand = (cur + " " + word).strip() if cur else word
+        if draw.textlength(cand, font=font) <= max_w:
+            cur = cand
+            continue
+        if len(lines) + 1 >= max_lines:
+            rest = (cur + " " + " ".join(words[i:])).strip() if cur else " ".join(words[i:])
+            lines.append(_fit_text(draw, rest, font, max_w))
+            return lines
+        if cur:
+            lines.append(cur)
+            cur = word
+        else:
+            lines.append(_fit_text(draw, word, font, max_w))
+            cur = ""
+    if cur:
+        lines.append(_fit_text(draw, cur, font, max_w))
+    return lines[:max_lines] or [""]
 
 
 def _fmt_remaining(seconds):
@@ -299,6 +341,48 @@ def _icon_shift(draw, cx, cy, r, color, filled=False, locked=False):
         draw.line((cx - r * 0.34, cy + r * 0.72, cx + r * 0.34, cy + r * 0.72), fill=color, width=w)
 
 
+def _icon_chat(draw, cx, cy, r, color):
+    w = max(2, round(r * 0.14))
+    draw.rounded_rectangle((cx - r * 0.74, cy - r * 0.56, cx + r * 0.74, cy + r * 0.38),
+                           radius=r * 0.28, outline=color, width=w)
+    draw.polygon([(cx - r * 0.36, cy + r * 0.34), (cx - r * 0.52, cy + r * 0.70), (cx - r * 0.06, cy + r * 0.36)],
+                 fill=color)
+    for ox in (-r * 0.32, 0.0, r * 0.32):
+        d = r * 0.09
+        draw.ellipse((cx + ox - d, cy - r * 0.09 - d, cx + ox + d, cy - r * 0.09 + d), fill=color)
+
+
+def _icon_bluetooth(draw, cx, cy, r, color):
+    w = max(2, round(r * 0.14))
+    pts = [
+        (cx - r * 0.36, cy - r * 0.34),
+        (cx + r * 0.42, cy + r * 0.32),
+        (cx, cy + r * 0.74),
+        (cx, cy - r * 0.74),
+        (cx + r * 0.42, cy - r * 0.32),
+        (cx - r * 0.36, cy + r * 0.34),
+    ]
+    draw.line(pts, fill=color, width=w, joint="curve")
+
+
+def _icon_heart(draw, cx, cy, r, color):
+    # Classic two-lobe heart drawn with clean vector primitives.
+    lr = r * 0.36
+    draw.ellipse((cx - r * 0.62, cy - r * 0.52, cx - r * 0.62 + lr * 2, cy - r * 0.52 + lr * 2), fill=color)
+    draw.ellipse((cx + r * 0.62 - lr * 2, cy - r * 0.52, cx + r * 0.62, cy - r * 0.52 + lr * 2), fill=color)
+    draw.polygon([(cx - r * 0.60, cy - r * 0.08), (cx + r * 0.60, cy - r * 0.08), (cx, cy + r * 0.66)], fill=color)
+
+
+def _icon_sparkle(draw, cx, cy, r, color):
+    d = r * 0.72
+    m = r * 0.20
+    pts = [
+        (cx, cy - d), (cx + m, cy - m), (cx + d, cy), (cx + m, cy + m),
+        (cx, cy + d), (cx - m, cy + m), (cx - d, cy), (cx - m, cy - m),
+    ]
+    draw.polygon(pts, fill=color)
+
+
 # ----- 2x supersampled glass canvas helper
 
 class _Canvas:
@@ -341,6 +425,11 @@ class _Canvas:
     def icon(self, fn, cx, cy, r, *args, **kwargs):
         fn(self.g, cx * self.s, cy * self.s, r * self.s, *args, **kwargs)
 
+    def line(self, pts, color=GLASS_BORDER, width=1.5):
+        s = self.s
+        scaled = [(x * s, y * s) for x, y in pts]
+        self.g.line(scaled, fill=color, width=max(1, round(width * s)), joint="curve")
+
     def paste_rounded(self, img, box, radius=14, sharp=False):
         s = self.s
         x0, y0, x1, y1 = (v * s for v in box)
@@ -351,17 +440,45 @@ class _Canvas:
         self.hi.paste(fitted, (int(round(x0)), int(round(y0))), mask)
 
     def text(self, pos, value, size, color=TEXT_PRIMARY, bold=True, anchor="la", max_w=None):
-        self._texts.append((pos, str(value), max(10, round(size)), color, bold, anchor, max_w))
+        self._texts.append(("line", pos, str(value), max(10, round(size)), color, bold, anchor, max_w, 1, 0))
 
-    def finish(self):
+    def text_tail(self, pos, value, size, color=TEXT_PRIMARY, bold=False, anchor="lm", max_w=200):
+        self._texts.append(("tail", pos, str(value), max(10, round(size)), color, bold, anchor, max_w, 1, 0))
+
+    def text_wrapped(self, pos, value, size, color=TEXT_PRIMARY, bold=False, anchor="la", max_w=200, max_lines=2, line_gap=4):
+        self._texts.append(("wrap", pos, str(value), max(10, round(size)), color, bold, anchor, max_w, max_lines, line_gap))
+
+    def finish_image(self):
         img = self.hi.resize((self.w, self.h), Image.LANCZOS)
         draw = ImageDraw.Draw(img)
-        for (x, y), value, size, color, bold, anchor, max_w in self._texts:
+        for kind, (x, y), value, size, color, bold, anchor, max_w, max_lines, line_gap in self._texts:
             font = ov._font(size, bold=bold)
-            shown = _fit_text(draw, value, font, max_w) if max_w is not None else value
-            draw.text((x, y), shown, font=font, fill=color, anchor=anchor)
+            if kind == "wrap":
+                lines = _wrap_lines(draw, value, font, max_w, max_lines=max_lines)
+                step = size + line_gap
+                start_y = y - ((len(lines) - 1) * step) / 2.0 if anchor.endswith("m") else y
+                for idx, line in enumerate(lines):
+                    draw.text((x, start_y + idx * step), line, font=font, fill=color, anchor=anchor)
+            elif kind == "tail" and max_w is not None:
+                shown = value
+                if draw.textlength(shown, font=font) > max_w:
+                    lo, hi = 0, len(shown)
+                    while lo < hi:
+                        mid = (lo + hi) // 2
+                        if draw.textlength("…" + shown[mid:], font=font) <= max_w:
+                            hi = mid
+                        else:
+                            lo = mid + 1
+                    shown = "…" + shown[lo:]
+                draw.text((x, y), shown, font=font, fill=color, anchor=anchor)
+            else:
+                shown = _fit_text(draw, value, font, max_w) if max_w is not None else value
+                draw.text((x, y), shown, font=font, fill=color, anchor=anchor)
+        return img
+
+    def finish(self, compress_level=2):
         buf = io.BytesIO()
-        img.save(buf, "PNG")
+        self.finish_image().save(buf, "PNG", compress_level=compress_level)
         return buf.getvalue()
 
     def screen_rect(self):
@@ -386,18 +503,52 @@ class _Canvas:
         return out
 
 
+class _ReadyCanvas:
+    """Lightweight pre-composited 1x RGBA canvas returned by the static-base dock cache."""
+
+    def __init__(self, img, screen, anchor="bottom", hits=()):
+        self.img = img
+        self.w, self.h = img.size
+        self.screen = screen
+        self.anchor = anchor
+        self.hits = list(hits)
+
+    def finish(self, compress_level=1):
+        buf = io.BytesIO()
+        self.img.save(buf, "PNG", compress_level=compress_level)
+        return buf.getvalue()
+
+    def screen_rect(self):
+        sw, sh = self.screen
+        ox, oy, dw, dh = place_overlay(self.w, self.h, sw, sh, self.anchor)
+        return [round(ox / sw, 4), round(oy / sh, 4), round((ox + dw) / sw, 4), round((oy + dh) / sh, 4)]
+
+    def screen_hits(self):
+        sw, sh = self.screen
+        ox, oy, dw, dh = place_overlay(self.w, self.h, sw, sh, self.anchor)
+        sx, sy = dw / max(1, self.w), dh / max(1, self.h)
+        return [
+            ((ox + x0 * sx) / sw, (oy + y0 * sy) / sh, (ox + x1 * sx) / sw, (oy + y1 * sy) / sh, action, payload)
+            for x0, y0, x1, y1, action, payload in self.hits
+        ]
+
+
 # ----- Main TouchUI controller
 
 class TouchUI:
-    """Manages on-screen glass controls, character switcher, timers, status/QR, Wi-Fi setup & keyboard."""
+    """Manages on-screen glass controls, nightstand clock, prompts/chat, character switcher,
+    timers, moods & treats, Bluetooth pairing, quick setup wizard, Wi-Fi setup & touch keyboard."""
 
     def __init__(self, device):
         self.device = device
-        self.view = "pill"              # "pill", "dock", "characters", "timers", "status", "wifi", "keyboard"
+        self.view = "pill"              # "pill", "nightstand", "dock", "prompts", "characters", "timers", "status", "wifi", "bluetooth", "setup", "keyboard"
         self.hits = []                  # [(nx0, ny0, nx1, ny1, action, payload)] for active view
         self.panel_rect = None          # normalized [x0, y0, x1, y1] of open dock/sheet
         self.pill_rect = None           # normalized [x0, y0, x1, y1] of floating pill
         self._dragging = None           # "volume" | "brightness" | None
+        self._last_slider_render = 0.0
+        self._dock_cache = None         # static dock base layer cache for fast Pi 4 slider drags
+        self._dock_cache_hits = 0
         self._auto_hide_handle = None
         self._tick_task = None
         self._caption_visible = False
@@ -413,7 +564,7 @@ class TouchUI:
         self.wifi_address = ""
         self.wifi_error = ""
         self.wifi_page = 0
-        self.kb_target = "wifi_password"   # "wifi_password" or "wifi_ssid"
+        self.kb_target = "wifi_password"   # "wifi_password", "wifi_ssid", or "chat_message"
         self.kb_ssid = ""
         self.kb_text = ""
         self.kb_layout = "abc"             # "abc", "num", "sym"
@@ -424,6 +575,17 @@ class TouchUI:
         self.kb_busy = False
         self._last_shift_tap = 0.0
 
+        # Bluetooth audio pairing state
+        self.bt_devices = []
+        self.bt_scanning = False
+        self.bt_busy_mac = ""
+        self.bt_error = ""
+        self.bt_page = 0
+
+        # On-screen Quick Setup Wizard & Touch Calibration state
+        self.setup_step = 0             # 0: Wi-Fi, 1: Audio/Rotation/Touch test, 2: AI Keys & QR
+        self.cal_last = None            # (x, y) last tapped test coordinates
+
         # Listen for caption show/hide so the floating pill yields cleanly to captions.
         self.device.overlays.on_caption_change = self._on_caption_change
 
@@ -433,13 +595,16 @@ class TouchUI:
         return bool(self.device.store.settings().get("touch", {}).get("enabled", True))
 
     def sync_stage_config(self):
-        """Push touchscreen settings and current hit-capture regions to the stage."""
-        cfg = self.device.store.settings().get("touch", {})
+        """Push touchscreen settings, rotation compensation, and current hit-capture regions to stage."""
+        settings = self.device.store.settings()
+        cfg = settings.get("touch", {})
+        rot = int(settings.get("screen", {}).get("rotation", 0))
         self.device.stage.send({
             "touch_config": {
                 "enabled": bool(cfg.get("enabled", True)),
                 "character_touch": bool(cfg.get("character_touch", True)),
                 "effects": bool(cfg.get("effects", True)),
+                "rotation": rot if rot in (0, 90, 180, 270) else 0,
             }
         })
         self._push_capture()
@@ -459,6 +624,7 @@ class TouchUI:
             self.hide_all()
 
     def on_screen_resized(self):
+        self._dock_cache = None
         if self.device.touch_ready and self.enabled():
             self.render()
 
@@ -468,15 +634,41 @@ class TouchUI:
             self.render()
 
     def on_state_changed(self):
-        """Refresh the pill or dock whenever listening/speaking/muted/timer state changes."""
+        """Refresh active view whenever listening/speaking/muted/timer state changes."""
         if not self.enabled():
             return
-        if self.view in ("pill", "dock", "timers", "status"):
+        if self.view in ("pill", "dock", "timers", "status", "prompts", "nightstand"):
             self.render()
+
+    def enter_nightstand(self):
+        """Show the ultra-dim Ambient Nightstand Clock over the softly dimmed character."""
+        if not self.enabled():
+            return
+        self._cancel_auto_hide()
+        self._dragging = None
+        self.view = "nightstand"
+        self.hits = []
+        self.panel_rect = None
+        self.pill_rect = None
+        self.device.overlays.hide(ov.TOUCH_PILL)
+        self.device.overlays.hide(ov.TOUCH_DOCK)
+        self.device.overlays.hide(ov.TOUCH_SHEET)
+        self.render()
+        self._ensure_tick()
+
+    def exit_nightstand(self):
+        """Wake smoothly from Ambient Nightstand Mode back to the character-first pill."""
+        self.device.overlays.hide(ov.TOUCH_NIGHTSTAND)
+        if self.view == "nightstand":
+            self.view = "pill"
+            if self.enabled():
+                self.render()
+            self._ensure_tick()
 
     def hide_all(self):
         self._cancel_auto_hide()
         self._stop_tick()
+        self._dock_cache = None
         self.view = "pill"
         self.hits = []
         self.panel_rect = None
@@ -484,10 +676,11 @@ class TouchUI:
         self.device.overlays.hide(ov.TOUCH_PILL)
         self.device.overlays.hide(ov.TOUCH_DOCK)
         self.device.overlays.hide(ov.TOUCH_SHEET)
+        self.device.overlays.hide(ov.TOUCH_NIGHTSTAND)
         self._push_capture()
 
     def _push_capture(self):
-        if not self.enabled():
+        if not self.enabled() or self.view == "nightstand":
             self.device.stage.send({"touch_capture": {"modal": False, "panel": None, "pill": None, "edge_swipe": False}})
             return
         modal = self.view != "pill"
@@ -519,8 +712,8 @@ class TouchUI:
             self._auto_hide_handle = None
 
     def _ensure_tick(self):
-        """Refresh clock/countdowns every second while timers view (or pill with active timer) is shown."""
-        need = self.view == "timers" or (self.view == "pill" and bool(self.device.timers))
+        """Refresh timers every 1 s, or the Nightstand clock once every 30 s (~0% CPU)."""
+        need = self.view in ("timers", "nightstand") or (self.view == "pill" and bool(self.device.timers))
         if not need:
             self._stop_tick()
             return
@@ -534,10 +727,11 @@ class TouchUI:
         async def tick():
             try:
                 while True:
-                    await asyncio.sleep(1.0)
+                    interval = 30.0 if self.view == "nightstand" else 1.0
+                    await asyncio.sleep(interval)
                     if not self.enabled():
                         return
-                    if self.view == "timers" or (self.view == "pill" and bool(self.device.timers)):
+                    if self.view in ("timers", "nightstand") or (self.view == "pill" and bool(self.device.timers)):
                         self.render()
                     else:
                         return
@@ -553,29 +747,39 @@ class TouchUI:
 
     # ----- view navigation
 
-    def open_view(self, view):
+    def open_view(self, view, quiet=False):
         if not self.enabled():
             return
+        prev = self.view
         self._dragging = None
         self.view = view
         self.device.activity()
+        self.device.overlays.hide(ov.TOUCH_NIGHTSTAND)
         if view == "dock":
             self.device.overlays.hide(ov.TOUCH_PILL)
             self.device.overlays.hide(ov.TOUCH_SHEET)
             self._arm_auto_hide()
         elif view == "pill":
+            self._dock_cache = None
             self._cancel_auto_hide()
             self.device.overlays.hide(ov.TOUCH_DOCK)
             self.device.overlays.hide(ov.TOUCH_SHEET)
         else:
+            self._dock_cache = None
             self._cancel_auto_hide()
             self.device.overlays.hide(ov.TOUCH_PILL)
             self.device.overlays.hide(ov.TOUCH_DOCK)
+        if not quiet and prev != view:
+            self.device.play_ui_sound("close" if view == "pill" else "open")
         if view == "wifi":
             self.wifi_page = 0
             self.wifi_error = ""
             self._start_wifi_scan()
-        elif view == "status":
+        elif view == "bluetooth":
+            self.bt_page = 0
+            self.bt_error = ""
+            self._start_bt_scan(quick=True)
+        elif view in ("status", "setup"):
             self._refresh_wifi_address()
         elif view == "characters":
             self.char_page = 0
@@ -608,7 +812,7 @@ class TouchUI:
             self.dismiss()
             return
 
-        # Bottom edge swipe-up opens the Quick Controls Dock; top edge swipe-down opens Timers.
+        # Edge swipes: bottom-up -> Dock (or Wi-Fi on setup), top-down -> Timers, left-right -> Quick Prompts & Chat.
         if target == "edge" and phase == "swipe":
             if direction == "up":
                 if self._setup_card_showing and not self.device.active_id():
@@ -617,6 +821,8 @@ class TouchUI:
                     self.open_view("dock")
             elif direction == "down":
                 self.open_view("timers")
+            elif direction == "right":
+                self.open_view("prompts")
             return
 
         # Floating pill interactions.
@@ -626,35 +832,45 @@ class TouchUI:
             elif phase == "tap":
                 self._tap_pill()
             elif phase == "long_press":
+                self.device.play_ui_sound("listen_start" if not self.device.listening else "listen_stop")
                 self.device.button()
                 self.render()
             return
 
-        # Panel / sheet interactions (including smooth slider dragging & swipe pagination/dismiss).
+        # Panel / sheet interactions (including fast cached slider dragging & swipe pagination/dismiss).
         if target == "panel":
             if phase == "down":
                 hit = self._find_hit(x, y)
                 if hit and hit[4] in ("slider_volume", "slider_brightness"):
                     self._dragging = hit[4]
-                    self._apply_slider(hit, x)
+                    self._apply_slider(hit, x, force_render=True)
             elif phase == "move":
                 if self._dragging:
                     hit = self._find_action(self._dragging)
                     if hit:
-                        self._apply_slider(hit, x)
+                        self._apply_slider(hit, x, force_render=False)
             elif phase == "up":
-                self._dragging = None
+                if self._dragging:
+                    hit = self._find_action(self._dragging)
+                    if hit:
+                        self._apply_slider(hit, x, force_render=True)
+                    self._dragging = None
             elif phase == "tap":
                 hit = self._find_hit(x, y)
                 if hit:
-                    self._run_action(hit[4], hit[5], hit, x)
+                    self._run_action(hit[4], hit[5], hit, x, y)
             elif phase == "swipe":
-                if direction == "down" and self.view in ("dock", "characters", "timers", "status", "wifi"):
+                if direction == "down" and self.view in ("dock", "prompts", "characters", "timers", "status", "wifi", "bluetooth", "setup"):
                     self.dismiss()
                 elif direction in ("left", "right") and self.view == "characters":
+                    self.device.play_ui_sound("tap")
                     self._step_char_page(1 if direction == "left" else -1)
                 elif direction in ("left", "right") and self.view == "wifi":
+                    self.device.play_ui_sound("tap")
                     self._step_wifi_page(1 if direction == "left" else -1)
+                elif direction in ("left", "right") and self.view == "bluetooth":
+                    self.device.play_ui_sound("tap")
+                    self._step_bt_page(1 if direction == "left" else -1)
 
     def _tap_pill(self):
         if self._setup_card_showing and not self.device.active_id():
@@ -663,6 +879,7 @@ class TouchUI:
         busy = self.device.conversation is not None and self.device.conversation.busy
         if busy or self.device.listening or self.device.recording is not None:
             # One tap on the active pill interrupts speech or stops/sends listening immediately.
+            self.device.play_ui_sound("listen_stop")
             self.device.button()
             self.render()
             return
@@ -680,16 +897,17 @@ class TouchUI:
                 return item
         return None
 
-    def _apply_slider(self, hit, x):
+    def _apply_slider(self, hit, x, force_render=True):
         x0, _, x1, _, action, _ = hit
         frac = max(0.0, min(1.0, (x - x0) / max(1e-4, x1 - x0)))
+        changed = False
         if action == "slider_volume":
             vol = round(frac * 20) / 20.0
             if abs(vol - float(self.device.store.settings().get("volume", 0.8))) >= 0.04 or frac in (0.0, 1.0):
                 self.device.store.update_settings({"volume": vol})
                 self.device.speaker.volume = vol
                 self.device.emit("touch_ui", {"action": "volume", "value": vol})
-                self.render()
+                changed = True
         elif action == "slider_brightness":
             pct = max(10, min(100, int(round((10 + frac * 90) / 5.0) * 5)))
             cur = int(self.device.store.settings().get("screen", {}).get("brightness", 100))
@@ -697,22 +915,28 @@ class TouchUI:
                 self.device.store.update_settings({"screen": {"brightness": pct}})
                 self.device.backlight.set(pct / 100.0)
                 self.device.emit("touch_ui", {"action": "brightness", "value": pct})
-                self.render()
+                changed = True
+        now = time.monotonic()
+        if changed and (force_render or now - self._last_slider_render >= 0.045):
+            self._last_slider_render = now
+            self.render()
 
-    def _run_action(self, action, payload, hit, x):
+    def _run_action(self, action, payload, hit, x, y=0.5):
         if action in ("slider_volume", "slider_brightness"):
-            self._apply_slider(hit, x)
+            self._apply_slider(hit, x, force_render=True)
             return
         if action == "close":
             self.dismiss()
         elif action == "talk":
+            was_active = self.device.listening or (self.device.conversation and self.device.conversation.busy)
+            self.device.play_ui_sound("listen_stop" if was_active else "listen_start")
             self.device.button()
-            # Keep dock open briefly when starting push-to-talk, else let the character shine!
             if self.device.listening or (self.device.conversation and self.device.conversation.busy):
-                self.dismiss()
+                self.open_view("pill", quiet=True)
             else:
                 self.render()
         elif action == "mute":
+            self.device.play_ui_sound("tap")
             if self.device.mic_switch:
                 self.device.overlays.hint("The mute switch is on: slide it to turn the microphone on", seconds=3.5)
             else:
@@ -720,6 +944,7 @@ class TouchUI:
                 self.device.overlays.hint("Microphone off" if self.device.muted else "Microphone on", seconds=1.8)
             self.render()
         elif action == "captions":
+            self.device.play_ui_sound("tap")
             cur = bool(self.device.store.settings().get("captions", {}).get("on"))
             old = self.device.store.settings()
             new = self.device.store.update_settings({"captions": {"on": not cur}})
@@ -727,10 +952,18 @@ class TouchUI:
             self.device.emit("touch_ui", {"action": "captions", "on": not cur})
             self.render()
         elif action == "sleep":
-            self.dismiss()
+            self.device.play_ui_sound("close")
             how = self.device.store.settings().get("screen", {}).get("how", "off")
-            self.device.set_screen(how)
+            if how == "nightstand":
+                self.device.set_screen("nightstand")
+            else:
+                self.open_view("pill", quiet=True)
+                self.device.set_screen(how)
             self.device.emit("touch_ui", {"action": "sleep", "screen": how})
+        elif action == "enter_nightstand":
+            self.device.play_ui_sound("close")
+            self.device.set_screen("nightstand")
+            self.device.emit("touch_ui", {"action": "sleep", "screen": "nightstand"})
         elif action == "open_characters":
             self.open_view("characters")
         elif action == "open_timers":
@@ -739,12 +972,37 @@ class TouchUI:
             self.open_view("wifi")
         elif action == "open_status":
             self.open_view("status")
+        elif action == "open_prompts":
+            self.open_view("prompts")
+        elif action == "open_bluetooth":
+            self.open_view("bluetooth")
+        elif action == "open_setup":
+            self.setup_step = 0
+            self.cal_last = None
+            self.open_view("setup")
+        elif action == "send_prompt":
+            self.device.play_ui_sound("open")
+            self.open_view("pill", quiet=True)
+            try:
+                asyncio.ensure_future(self.device.say(str(payload)))
+            except RuntimeError:
+                pass
+            self.device.emit("touch_ui", {"action": "prompt", "text": str(payload)})
+        elif action == "open_chat_kb":
+            self._open_keyboard("chat_message", ssid="")
+        elif action == "treat":
+            try:
+                self.device.give_treat(str(payload))
+            except ValueError:
+                pass
+            self.render()
         elif action == "select_character":
             cid = str(payload)
             if cid != self.device.active_id():
                 try:
                     name = self.device.characters.manifest(cid).get("name", cid)
-                    self.dismiss()
+                    self.device.play_ui_sound("open")
+                    self.open_view("pill", quiet=True)
                     self.device.overlays.hint("Switching to %s…" % name, seconds=2.0)
                     self.device.activate(cid)
                     self.device.emit("touch_ui", {"action": "character", "id": cid})
@@ -753,19 +1011,24 @@ class TouchUI:
             else:
                 self.dismiss()
         elif action == "char_prev":
+            self.device.play_ui_sound("tap")
             self._step_char_page(-1)
         elif action == "char_next":
+            self.device.play_ui_sound("tap")
             self._step_char_page(1)
         elif action == "quick_timer":
             secs, label = payload
+            self.device.play_ui_sound("timer")
             self.device.action({"kind": "timer", "seconds": secs, "label": "%s timer" % label})
             self.device.overlays.hint("%s timer set" % label, seconds=1.8)
             self.render()
             self._ensure_tick()
         elif action == "cancel_timer":
+            self.device.play_ui_sound("close")
             self.device.action({"kind": "cancel", "label": str(payload)})
             self.render()
         elif action == "mood":
+            self.device.play_ui_sound("tap")
             if payload == "wave":
                 if hasattr(self.device.stage, "gesture"):
                     self.device.stage.gesture("wave")
@@ -774,11 +1037,20 @@ class TouchUI:
             self.device.emit("touch_ui", {"action": "mood", "name": str(payload)})
             self.render()
         elif action == "toggle_spoken_touch":
+            self.device.play_ui_sound("tap")
             cur = bool(self.device.store.settings().get("touch", {}).get("spoken_reactions", True))
             self.device.store.update_settings({"touch": {"spoken_reactions": not cur}})
             self.device.emit("touch_ui", {"action": "spoken_reactions", "on": not cur})
             self.render()
+        elif action == "toggle_touch_sounds":
+            cur = bool(self.device.store.settings().get("touch", {}).get("sounds", True))
+            self.device.store.update_settings({"touch": {"sounds": not cur}})
+            if not cur:
+                self.device.play_ui_sound("tap")
+            self.device.emit("touch_ui", {"action": "sounds", "on": not cur})
+            self.render()
         elif action == "toggle_wake_word":
+            self.device.play_ui_sound("tap")
             old = self.device.store.settings()
             cur = bool(old.get("wake_word", {}).get("on"))
             new = self.device.store.update_settings({"wake_word": {"on": not cur}})
@@ -786,31 +1058,74 @@ class TouchUI:
             self.device.emit("touch_ui", {"action": "wake_word", "on": not cur})
             self.render()
         elif action == "toggle_heard_captions":
+            self.device.play_ui_sound("tap")
             old = self.device.store.settings()
             cur = bool(old.get("captions", {}).get("heard"))
             new = self.device.store.update_settings({"captions": {"on": True if not cur else old.get("captions", {}).get("on", False), "heard": not cur}})
             self.device.settings_changed(old, new)
             self.render()
         elif action == "wifi_scan":
+            self.device.play_ui_sound("tap")
             self._start_wifi_scan()
         elif action == "wifi_prev":
+            self.device.play_ui_sound("tap")
             self._step_wifi_page(-1)
         elif action == "wifi_next":
+            self.device.play_ui_sound("tap")
             self._step_wifi_page(1)
         elif action == "wifi_pick":
+            self.device.play_ui_sound("tap")
             net = payload
             if net.get("secure"):
                 self._open_keyboard("wifi_password", ssid=net["ssid"])
             else:
                 self._join_wifi_async(net["ssid"], "")
         elif action == "wifi_hidden":
+            self.device.play_ui_sound("tap")
             self._open_keyboard("wifi_ssid", ssid="")
+        elif action == "bt_scan":
+            self.device.play_ui_sound("tap")
+            self._start_bt_scan(quick=False)
+        elif action == "bt_prev":
+            self.device.play_ui_sound("tap")
+            self._step_bt_page(-1)
+        elif action == "bt_next":
+            self.device.play_ui_sound("tap")
+            self._step_bt_page(1)
+        elif action == "bt_toggle":
+            self.device.play_ui_sound("tap")
+            self._bt_toggle_async(payload)
+        elif action == "setup_step":
+            self.device.play_ui_sound("tap")
+            self.setup_step = max(0, min(2, int(payload)))
+            if self.setup_step in (0, 2):
+                self._refresh_wifi_address()
+            self.render()
+        elif action == "setup_test_speaker":
+            self.device.play_ui_sound("test", force=True)
+            self.device.overlays.hint("Playing test chime…", seconds=1.8)
+        elif action == "setup_rotate":
+            self.device.play_ui_sound("tap")
+            deg = int(payload)
+            if deg in (0, 90, 180, 270):
+                old = self.device.store.settings()
+                new = self.device.store.update_settings({"screen": {"rotation": deg}})
+                self.device.settings_changed(old, new)
+                self.device.emit("touch_ui", {"action": "rotation", "degrees": deg})
+                self.render()
+        elif action == "setup_cal_tap":
+            self.device.play_ui_sound("poke")
+            self.cal_last = (round(x, 2), round(y, 2))
+            self.device.stage.send({"touch_fx": {"kind": "sparkles", "x": x, "y": y}})
+            self.render()
         elif action == "kb_back_view":
-            self.open_view("wifi")
+            self.open_view("prompts" if self.kb_target == "chat_message" else "wifi")
         elif action == "kb_toggle_show":
+            self.device.play_ui_sound("tap")
             self.kb_show_text = not self.kb_show_text
             self.render()
         elif action == "kb_key":
+            self.device.play_ui_sound("tap")
             self._handle_key(str(payload))
 
     def _step_char_page(self, delta):
@@ -823,16 +1138,21 @@ class TouchUI:
         self.wifi_page = (self.wifi_page + delta) % total
         self.render()
 
-    # ----- Wi-Fi helpers & touch keyboard logic
+    def _step_bt_page(self, delta):
+        total = max(1, (len(self.bt_devices) + 3) // 4)
+        self.bt_page = (self.bt_page + delta) % total
+        self.render()
+
+    # ----- Wi-Fi, Bluetooth & touch keyboard helpers
 
     def _open_keyboard(self, target, ssid=""):
         self.kb_target = target
         self.kb_ssid = ssid
         self.kb_text = ""
         self.kb_layout = "abc"
-        self.kb_shift = False
+        self.kb_shift = target == "chat_message"
         self.kb_caps = False
-        self.kb_show_text = target == "wifi_ssid"
+        self.kb_show_text = target != "wifi_password"
         self.kb_error = ""
         self.kb_busy = False
         self.open_view("keyboard")
@@ -841,12 +1161,13 @@ class TouchUI:
         if self.kb_busy:
             return
         self.kb_error = ""
+        max_len = 160 if self.kb_target == "chat_message" else (32 if self.kb_target == "wifi_ssid" else 63)
         if key == "back":
             self.kb_text = self.kb_text[:-1]
         elif key == "clear":
             self.kb_text = ""
         elif key == "space":
-            if len(self.kb_text) < 63:
+            if len(self.kb_text) < max_len:
                 self.kb_text += " "
         elif key == "shift":
             now = time.monotonic()
@@ -868,7 +1189,6 @@ class TouchUI:
             self._submit_keyboard()
             return
         else:
-            max_len = 32 if self.kb_target == "wifi_ssid" else 63
             if len(self.kb_text) < max_len:
                 ch = key.upper() if (self.kb_layout == "abc" and (self.kb_shift or self.kb_caps)) else key
                 self.kb_text += ch
@@ -877,6 +1197,19 @@ class TouchUI:
         self.render()
 
     def _submit_keyboard(self):
+        if self.kb_target == "chat_message":
+            msg = self.kb_text.strip()
+            if not msg:
+                self.kb_error = "Type a message to send"
+                self.render()
+                return
+            self.open_view("pill", quiet=True)
+            try:
+                asyncio.ensure_future(self.device.say(msg))
+            except RuntimeError:
+                pass
+            self.device.emit("touch_ui", {"action": "chat_typed", "text": msg})
+            return
         if self.kb_target == "wifi_ssid":
             ssid = self.kb_text.strip()
             if not ssid:
@@ -913,7 +1246,7 @@ class TouchUI:
                 self.wifi_error = str(err)
             finally:
                 self.wifi_scanning = False
-                if self.view in ("wifi", "status", "dock"):
+                if self.view in ("wifi", "status", "dock", "setup"):
                     self.render()
 
         try:
@@ -929,7 +1262,7 @@ class TouchUI:
             try:
                 self.wifi_connected = await self.device.wifi.connected()
                 self.wifi_address = await self.device.wifi.address() if self.wifi_connected else ""
-                if self.view == "status":
+                if self.view in ("status", "setup"):
                     self.render()
             except Exception:
                 pass
@@ -975,6 +1308,66 @@ class TouchUI:
         except RuntimeError:
             self.kb_busy = False
 
+    def _start_bt_scan(self, quick=False):
+        bt = self.device.bluetooth
+        if bt is None or not bt.available():
+            self.bt_error = "Bluetooth is unavailable on this machine"
+            self.bt_scanning = False
+            self.render()
+            return
+        if self.bt_scanning:
+            return
+        self.bt_scanning = True
+        self.bt_error = ""
+        self.render()
+
+        async def run_scan():
+            try:
+                self.bt_devices = await (bt.devices() if quick else bt.scan(seconds=4.0))
+            except Exception as err:
+                self.bt_error = str(err)
+            finally:
+                self.bt_scanning = False
+                if self.view == "bluetooth":
+                    self.render()
+
+        try:
+            asyncio.ensure_future(run_scan())
+        except RuntimeError:
+            self.bt_scanning = False
+
+    def _bt_toggle_async(self, dev):
+        bt = self.device.bluetooth
+        if bt is None or not bt.available() or self.bt_busy_mac:
+            return
+        mac = dev["mac"]
+        want_disconnect = bool(dev.get("connected"))
+        self.bt_busy_mac = mac
+        self.bt_error = ""
+        self.render()
+
+        async def toggle():
+            try:
+                if want_disconnect:
+                    await bt.disconnect(mac)
+                    self.device.overlays.hint("Disconnected %s" % dev["name"], seconds=2.0)
+                else:
+                    await bt.connect(mac)
+                    self.device.overlays.hint("Connected %s" % dev["name"], seconds=2.5)
+                self.bt_devices = await bt.devices()
+                self.device.emit("touch_ui", {"action": "bluetooth", "mac": mac, "connected": not want_disconnect})
+            except Exception as err:
+                self.bt_error = str(err)
+            finally:
+                self.bt_busy_mac = ""
+                if self.view == "bluetooth":
+                    self.render()
+
+        try:
+            asyncio.ensure_future(toggle())
+        except RuntimeError:
+            self.bt_busy_mac = ""
+
     # ----- Rendering dispatch
 
     def render(self):
@@ -983,6 +1376,14 @@ class TouchUI:
             self.hide_all()
             return
         screen = self.device.overlays.screen
+        if self.view == "nightstand":
+            canvas = self._render_nightstand(screen)
+            self.pill_rect = None
+            self.panel_rect = None
+            self.hits = []
+            self.device.overlays.show(ov.TOUCH_NIGHTSTAND, canvas.finish(), anchor="center", layer=90, slide="none")
+            self._push_capture()
+            return
         if self.view == "pill":
             if self._caption_visible:
                 # Yield cleanly while captions sit at the bottom edge.
@@ -1005,10 +1406,13 @@ class TouchUI:
             self.device.overlays.show(ov.TOUCH_DOCK, canvas.finish(), anchor="bottom", layer=30, slide="up", scrim=0.28)
         else:
             builder = {
+                "prompts": self._render_prompts,
                 "characters": self._render_characters,
                 "timers": self._render_timers,
                 "status": self._render_status,
                 "wifi": self._render_wifi,
+                "bluetooth": self._render_bluetooth,
+                "setup": self._render_setup,
                 "keyboard": self._render_keyboard,
             }[self.view]
             canvas = builder(screen)
@@ -1090,9 +1494,17 @@ class TouchUI:
         volume = float(settings.get("volume", 0.8))
         brightness = int(settings.get("screen", {}).get("brightness", 100))
         captions_on = bool(settings.get("captions", {}).get("on"))
+        sleep_how = settings.get("screen", {}).get("how", "off")
         muted = self.device.muted
         state = self.device.state
         busy = self.device.conversation is not None and self.device.conversation.busy
+        cid = self.device.active_id()
+        char_name = self.device.characters.manifest(cid).get("name", cid) if cid else "No character"
+        mood = (self.device.animation or {}).get("mood") or getattr(self.device.stage, "expression", None) or "neutral"
+        bond_label = self.device.touch_stats(cid)["bond"] if cid else ""
+        chars_count = len(self.device.characters.ids())
+        next_t = self._next_timer_label()
+        now_hm = time.strftime("%H:%M")
 
         # Layout vertical rhythm.
         handle_h = 26
@@ -1101,96 +1513,129 @@ class TouchUI:
         slider_h = 68
         tile_h = 104
         h = pad + handle_h + header_h + gap + hero_h + gap + slider_h + gap + slider_h + gap + tile_h * 2 + gap + pad
-        c = _Canvas(w, h, screen, anchor="bottom")
-        c.panel(radius=34)
+        y_vol = pad + handle_h + header_h + gap + hero_h + gap
+        y_bri = y_vol + slider_h + gap
+        y_tiles = y_bri + slider_h + gap
 
-        y = pad
-        # Grab handle pill at top center.
-        c.rect((w / 2 - 34, y, w / 2 + 34, y + 7), radius=4, fill=(255, 255, 255, 72))
-        y += handle_h
-
-        # Header: active character name + mood chip on left, live time + close button on right.
-        cid = self.device.active_id()
-        char_name = self.device.characters.manifest(cid).get("name", cid) if cid else "No character"
-        mood = (self.device.animation or {}).get("mood") or getattr(self.device.stage, "expression", None) or "neutral"
-        c.text((pad, y + 18), char_name, round(side * 0.044), TEXT_PRIMARY, bold=True, anchor="lm", max_w=w * 0.52)
-        c.text((pad, y + 44), "%s · %s" % (mood.capitalize(), state), round(side * 0.027), TEXT_MUTED, bold=False, anchor="lm", max_w=w * 0.52)
-
-        # Clock + close pill.
-        close_r = 22
-        close_cx, close_cy = w - pad - close_r, y + 26
-        c.circle(close_cx, close_cy, close_r, GLASS_CARD_HI, outline=GLASS_BORDER)
-        c.icon(_icon_close, close_cx, close_cy, 11, TEXT_PRIMARY)
-        c.hit((close_cx - close_r - 8, close_cy - close_r - 8, close_cx + close_r + 8, close_cy + close_r + 8), "close")
-        c.text((close_cx - close_r - 18, close_cy), time.strftime("%H:%M"), round(side * 0.036), TEXT_PRIMARY, bold=True, anchor="rm")
-        y += header_h + gap
-
-        # Hero Row: Talk / Stop button + Mute button.
-        mute_w = round((w - 2 * pad - gap) * 0.29)
-        talk_w = (w - 2 * pad - gap) - mute_w
-        if busy or state == "speaking":
-            talk_bg, talk_txt = CORAL_BG, "Stop Speaking"
-        elif self.device.recording is not None:
-            talk_bg, talk_txt = CYAN_BG, "Tap to Send"
-        elif self.device.listening or state == "listening":
-            talk_bg, talk_txt = CYAN_BG, "Listening · Stop"
+        # Cache everything except the two live sliders so dragging on Pi 4 only redraws two small strips.
+        cache_key = (
+            screen, w, h, cid, char_name, mood, bond_label, state, busy,
+            self.device.recording is not None, self.device.listening,
+            muted, captions_on, sleep_how, chars_count, next_t,
+            len(self.device.timers), self.wifi_connected, self.wifi_address, now_hm,
+        )
+        if self._dock_cache is not None and self._dock_cache[0] == cache_key:
+            self._dock_cache_hits += 1
+            base_img, base_hits = self._dock_cache[1], self._dock_cache[2]
         else:
-            talk_bg, talk_txt = ACCENT_BG, "Tap to Talk"
-        talk_box = (pad, y, pad + talk_w, y + hero_h)
-        c.rect(talk_box, radius=24, fill=talk_bg, outline=(255, 255, 255, 65), width=1.5)
-        c.icon(_icon_mic, pad + 38, y + hero_h / 2, 18, TEXT_PRIMARY, muted=muted and talk_txt == "Tap to Talk")
-        c.text((pad + 70, y + hero_h / 2), talk_txt, round(side * 0.038), TEXT_PRIMARY, bold=True, anchor="lm", max_w=talk_w - 86)
-        c.hit(talk_box, "talk")
+            c = _Canvas(w, h, screen, anchor="bottom")
+            c.panel(radius=34)
 
-        mute_x = pad + talk_w + gap
-        mute_box = (mute_x, y, mute_x + mute_w, y + hero_h)
-        c.rect(mute_box, radius=24, fill=CORAL_BG if muted else GLASS_CARD,
-               outline=CORAL if muted else GLASS_BORDER, width=1.5)
-        c.icon(_icon_mic, mute_x + mute_w / 2, y + hero_h * 0.36, 15, TEXT_PRIMARY, muted=muted)
-        c.text((mute_x + mute_w / 2, y + hero_h * 0.74), "Muted" if muted else "Mute",
-               round(side * 0.028), TEXT_PRIMARY if muted else TEXT_MUTED, bold=True, anchor="mm")
-        c.hit(mute_box, "mute")
-        y += hero_h + gap
+            y = pad
+            # Grab handle pill at top center.
+            c.rect((w / 2 - 34, y, w / 2 + 34, y + 7), radius=4, fill=(255, 255, 255, 72))
+            y += handle_h
 
-        # Interactive Sliders: Volume & Brightness.
-        self._draw_slider(c, (pad, y, w - pad, y + slider_h), "Volume", volume, "%d%%" % round(volume * 100),
-                          _icon_speaker, {"level": volume}, "slider_volume", side)
-        y += slider_h + gap
-        self._draw_slider(c, (pad, y, w - pad, y + slider_h), "Brightness", (brightness - 10) / 90.0, "%d%%" % brightness,
-                          _icon_sun, {}, "slider_brightness", side)
-        y += slider_h + gap
+            # Header: active character name + mood/bond on left; Chat pill, clock & close on right.
+            close_r = 22
+            close_cx, close_cy = w - pad - close_r, y + 26
+            c.circle(close_cx, close_cy, close_r, GLASS_CARD_HI, outline=GLASS_BORDER)
+            c.icon(_icon_close, close_cx, close_cy, 11, TEXT_PRIMARY)
+            c.hit((close_cx - close_r - 8, close_cy - close_r - 8, close_cx + close_r + 8, close_cy + close_r + 8), "close")
 
-        # 2x3 Quick Action Tile Grid.
-        chars_count = len(self.device.characters.ids())
-        next_t = self._next_timer_label()
-        timers_sub = next_t if next_t else ("%d active" % len(self.device.timers) if self.device.timers else "Set timer")
-        wifi_sub = self.wifi_address if self.wifi_connected and self.wifi_address else ("Connected" if self.wifi_connected else "Setup")
-        tiles = [
-            ("Characters", "%d installed" % chars_count, _icon_people, {}, "open_characters", False),
-            ("Captions", "On" if captions_on else "Off", _icon_captions, {}, "captions", captions_on),
-            ("Sleep", "Tap to wake", _icon_moon, {"bg": GLASS_CARD}, "sleep", False),
-            ("Timers", timers_sub, _icon_timer, {}, "open_timers", bool(self.device.timers)),
-            ("Wi-Fi", wifi_sub, _icon_wifi, {"strength": 100 if self.wifi_connected else 40}, "open_wifi", self.wifi_connected),
-            ("More & QR", "Moods · Web", _icon_qr, {}, "open_status", False),
-        ]
-        col_w = (w - 2 * pad - 2 * gap) / 3.0
-        for idx, (title, sub, icon_fn, icon_kw, act, active) in enumerate(tiles):
-            row, col = divmod(idx, 3)
-            tx = pad + col * (col_w + gap)
-            ty = y + row * (tile_h + gap)
-            box = (tx, ty, tx + col_w, ty + tile_h)
-            fill = (44, 58, 108, 236) if active else GLASS_CARD
-            outline = ACCENT if active else GLASS_BORDER
-            c.rect(box, radius=22, fill=fill, outline=outline, width=1.6 if active else 1.0)
-            kw = dict(icon_kw)
-            if icon_fn is _icon_moon:
-                kw["bg"] = fill
-            c.icon(icon_fn, tx + col_w / 2, ty + 32, 16, TEXT_PRIMARY if active else (218, 224, 242, 255), **kw)
-            c.text((tx + col_w / 2, ty + 64), title, round(side * 0.030), TEXT_PRIMARY, bold=True, anchor="mm", max_w=col_w - 16)
-            c.text((tx + col_w / 2, ty + 86), sub, round(side * 0.023),
-                   (188, 206, 255, 255) if active else TEXT_MUTED, bold=False, anchor="mm", max_w=col_w - 16)
-            c.hit(box, act)
-        return c
+            clock_x = close_cx - close_r - 14
+            c.text((clock_x, close_cy), now_hm, round(side * 0.034), TEXT_PRIMARY, bold=True, anchor="rm")
+
+            # Compact Chat / Quick Prompts button in header.
+            chat_w, chat_h = 98, 40
+            chat_x1 = clock_x - 96
+            chat_x0 = chat_x1 - chat_w
+            chat_box = (chat_x0, close_cy - chat_h / 2, chat_x1, close_cy + chat_h / 2)
+            c.rect(chat_box, radius=20, fill=GLASS_CARD_HI, outline=GLASS_BORDER)
+            c.icon(_icon_chat, chat_x0 + 23, close_cy, 12, CYAN)
+            c.text((chat_x0 + 42, close_cy), "Chat", round(side * 0.026), TEXT_PRIMARY, bold=True, anchor="lm")
+            c.hit(chat_box, "open_prompts")
+
+            left_max = max(120, chat_x0 - pad - 12)
+            c.text((pad, y + 17), char_name, round(side * 0.043), TEXT_PRIMARY, bold=True, anchor="lm", max_w=left_max)
+            sub_txt = "%s · %s" % (mood.capitalize(), bond_label if (state == "idle" and bond_label) else state)
+            c.text((pad, y + 44), sub_txt, round(side * 0.026), TEXT_MUTED, bold=False, anchor="lm", max_w=left_max)
+            y += header_h + gap
+
+            # Hero Row: Talk / Stop button + Mute button.
+            mute_w = round((w - 2 * pad - gap) * 0.29)
+            talk_w = (w - 2 * pad - gap) - mute_w
+            if busy or state == "speaking":
+                talk_bg, talk_txt = CORAL_BG, "Stop Speaking"
+            elif self.device.recording is not None:
+                talk_bg, talk_txt = CYAN_BG, "Tap to Send"
+            elif self.device.listening or state == "listening":
+                talk_bg, talk_txt = CYAN_BG, "Listening · Stop"
+            else:
+                talk_bg, talk_txt = ACCENT_BG, "Tap to Talk"
+            talk_box = (pad, y, pad + talk_w, y + hero_h)
+            c.rect(talk_box, radius=24, fill=talk_bg, outline=(255, 255, 255, 65), width=1.5)
+            c.icon(_icon_mic, pad + 38, y + hero_h / 2, 18, TEXT_PRIMARY, muted=muted and talk_txt == "Tap to Talk")
+            c.text((pad + 70, y + hero_h / 2), talk_txt, round(side * 0.038), TEXT_PRIMARY, bold=True, anchor="lm", max_w=talk_w - 86)
+            c.hit(talk_box, "talk")
+
+            mute_x = pad + talk_w + gap
+            mute_box = (mute_x, y, mute_x + mute_w, y + hero_h)
+            c.rect(mute_box, radius=24, fill=CORAL_BG if muted else GLASS_CARD,
+                   outline=CORAL if muted else GLASS_BORDER, width=1.5)
+            c.icon(_icon_mic, mute_x + mute_w / 2, y + hero_h * 0.36, 15, TEXT_PRIMARY, muted=muted)
+            c.text((mute_x + mute_w / 2, y + hero_h * 0.74), "Muted" if muted else "Mute",
+                   round(side * 0.028), TEXT_PRIMARY if muted else TEXT_MUTED, bold=True, anchor="mm")
+            c.hit(mute_box, "mute")
+
+            # 2x3 Quick Action Tile Grid (drawn below the two slider slots).
+            timers_sub = next_t if next_t else ("%d active" % len(self.device.timers) if self.device.timers else "Set timer")
+            wifi_sub = self.wifi_address if self.wifi_connected and self.wifi_address else ("Connected" if self.wifi_connected else "Setup")
+            sleep_sub = "Nightstand" if sleep_how == "nightstand" else ("Dim screen" if sleep_how == "dim" else "Tap to wake")
+            tiles = [
+                ("Characters", "%d installed" % chars_count, _icon_people, {}, "open_characters", False),
+                ("Captions", "On" if captions_on else "Off", _icon_captions, {}, "captions", captions_on),
+                ("Sleep", sleep_sub, _icon_moon, {"bg": GLASS_CARD}, "sleep", False),
+                ("Timers", timers_sub, _icon_timer, {}, "open_timers", bool(self.device.timers)),
+                ("Wi-Fi", wifi_sub, _icon_wifi, {"strength": 100 if self.wifi_connected else 40}, "open_wifi", self.wifi_connected),
+                ("More & Care", "Treats · QR", _icon_qr, {}, "open_status", False),
+            ]
+            col_w = (w - 2 * pad - 2 * gap) / 3.0
+            for idx, (title, sub, icon_fn, icon_kw, act, active) in enumerate(tiles):
+                row, col = divmod(idx, 3)
+                tx = pad + col * (col_w + gap)
+                ty = y_tiles + row * (tile_h + gap)
+                box = (tx, ty, tx + col_w, ty + tile_h)
+                fill = (44, 58, 108, 236) if active else GLASS_CARD
+                outline = ACCENT if active else GLASS_BORDER
+                c.rect(box, radius=22, fill=fill, outline=outline, width=1.6 if active else 1.0)
+                kw = dict(icon_kw)
+                if icon_fn is _icon_moon:
+                    kw["bg"] = fill
+                c.icon(icon_fn, tx + col_w / 2, ty + 32, 16, TEXT_PRIMARY if active else (218, 224, 242, 255), **kw)
+                c.text((tx + col_w / 2, ty + 64), title, round(side * 0.030), TEXT_PRIMARY, bold=True, anchor="mm", max_w=col_w - 16)
+                c.text((tx + col_w / 2, ty + 86), sub, round(side * 0.023),
+                       (188, 206, 255, 255) if active else TEXT_MUTED, bold=False, anchor="mm", max_w=col_w - 16)
+                c.hit(box, act)
+
+            base_img = c.finish_image()
+            base_hits = list(c.hits)
+            self._dock_cache = (cache_key, base_img, base_hits)
+
+        # Composite fresh Volume & Brightness slider strips onto a copy of the cached static dock.
+        img = base_img.copy()
+        all_hits = list(base_hits)
+        slider_w = max(40, int(w - 2 * pad))
+        for sy, label, frac, readout, icon_fn, icon_kw, action in (
+            (y_vol, "Volume", volume, "%d%%" % round(volume * 100), _icon_speaker, {"level": volume}, "slider_volume"),
+            (y_bri, "Brightness", (brightness - 10) / 90.0, "%d%%" % brightness, _icon_sun, {}, "slider_brightness"),
+        ):
+            sc = _Canvas(slider_w, slider_h, screen, anchor="bottom")
+            self._draw_slider(sc, (1, 1, slider_w - 1, slider_h - 1), label, frac, readout, icon_fn, icon_kw, action, side)
+            img.alpha_composite(sc.finish_image(), (int(pad), int(sy)))
+            for hx0, hy0, hx1, hy1, hact, hpay in sc.hits:
+                all_hits.append((hx0 + pad, hy0 + sy, hx1 + pad, hy1 + sy, hact, hpay))
+        return _ReadyCanvas(img, screen, anchor="bottom", hits=all_hits)
 
     def _draw_slider(self, c, box, label, frac, readout, icon_fn, icon_kw, action, side):
         x0, y0, x1, y1 = box
@@ -1359,85 +1804,135 @@ class TouchUI:
                 y += row_h + 12
         return c
 
-    # ----- View 5: Moods, Quick Toggles & Settings QR Sheet
+    # ----- View 5: Moods, Care & Treats, Quick Toggles, Tools & Settings QR Sheet
 
     def _render_status(self, screen):
         sw, sh = screen
         side = min(sw, sh)
         w = min(sw - 2 * round(side * 0.03), round(sw * 0.94))
-        pad = round(side * 0.038)
-        gap = round(side * 0.022)
+        pad = round(side * 0.034)
+        gap = round(side * 0.019)
         settings = self.device.store.settings()
         spoken_touch = bool(settings.get("touch", {}).get("spoken_reactions", True))
+        touch_sounds = bool(settings.get("touch", {}).get("sounds", True))
         wake_on = bool(settings.get("wake_word", {}).get("on", False))
         heard_on = bool(settings.get("captions", {}).get("heard", False))
         cur_mood = (self.device.animation or {}).get("mood") or getattr(self.device.stage, "expression", None) or "neutral"
+        cid = self.device.active_id()
+        stats = self.device.touch_stats(cid) if cid else None
+        bt_connected = any(d.get("connected") for d in self.bt_devices)
 
-        mood_h = 64
-        toggle_h = 66
-        qr_card_h = 204
-        h = pad + 26 + 68 + gap + 28 + mood_h + gap + 3 * (toggle_h + 10) + gap + qr_card_h + pad
+        mood_h = 54
+        treat_h = 68
+        toggle_h = 62
+        tools_h = 66
+        qr_card_h = 178
+        h = (pad + 26 + 66 + gap + 24 + mood_h + gap + 24 + treat_h + gap
+             + (toggle_h * 2 + 10) + gap + tools_h + gap + qr_card_h + pad)
         c = _Canvas(w, h, screen, anchor="bottom")
         c.panel(radius=34)
 
         ver = updates_mod.current_version()
         ver_label = "Dev build" if ver == "0" else ("v%s" % ver)
-        y = self._sheet_header(c, w, pad, side, "Moods & Console", ver_label)
+        sub = ("Bond: %s (%d) · %s" % (stats["bond"], stats["total"], ver_label)) if stats else ver_label
+        y = self._sheet_header(c, w, pad, side, "Moods & Care", sub)
         y += gap
 
         # Quick Mood / Gesture Strip.
-        c.text((pad, y + 10), "Express", round(side * 0.028), TEXT_MUTED, bold=True, anchor="lm")
-        y += 28
+        c.text((pad, y + 10), "Express", round(side * 0.026), TEXT_MUTED, bold=True, anchor="lm")
+        y += 24
         bw = (w - 2 * pad - (len(QUICK_MOODS) - 1) * 10) / len(QUICK_MOODS)
         for i, (key, lbl) in enumerate(QUICK_MOODS):
             bx = pad + i * (bw + 10)
             box = (bx, y, bx + bw, y + mood_h)
             selected = key == cur_mood
-            c.rect(box, radius=18, fill=ACCENT_BG if selected else GLASS_CARD,
+            c.rect(box, radius=16, fill=ACCENT_BG if selected else GLASS_CARD,
                    outline=ACCENT if selected else GLASS_BORDER, width=1.6 if selected else 1.0)
-            c.text((bx + bw / 2, y + mood_h / 2), lbl, round(side * 0.028), TEXT_PRIMARY, bold=True, anchor="mm", max_w=bw - 10)
+            c.text((bx + bw / 2, y + mood_h / 2), lbl, round(side * 0.027), TEXT_PRIMARY, bold=True, anchor="mm", max_w=bw - 10)
             c.hit(box, "mood", key)
         y += mood_h + gap
 
-        # Quick Feature Toggles.
-        toggles = [
-            ("Spoken touch reactions", "Reply aloud when petted or poked", spoken_touch, "toggle_spoken_touch"),
-            ("Wake word", "Listen when you say its name", wake_on, "toggle_wake_word"),
-            ("Show what it heard", "Display your words at the top", heard_on, "toggle_heard_captions"),
-        ]
-        for title, sub, is_on, act in toggles:
-            box = (pad, y, w - pad, y + toggle_h)
-            c.rect(box, radius=20, fill=GLASS_CARD, outline=GLASS_BORDER)
-            c.text((pad + 20, y + 24), title, round(side * 0.031), TEXT_PRIMARY, bold=True, anchor="lm", max_w=w - 2 * pad - 110)
-            c.text((pad + 20, y + 48), sub, round(side * 0.022), TEXT_MUTED, bold=False, anchor="lm", max_w=w - 2 * pad - 110)
-            # iOS-style switch pill.
-            sw_x1 = w - pad - 18
-            sw_x0 = sw_x1 - 68
-            sw_y0 = y + toggle_h / 2 - 19
-            sw_y1 = y + toggle_h / 2 + 19
-            c.rect((sw_x0, sw_y0, sw_x1, sw_y1), radius=19, fill=EMERALD if is_on else (72, 78, 102, 230))
-            knob_x = (sw_x1 - 19) if is_on else (sw_x0 + 19)
-            c.circle(knob_x, y + toggle_h / 2, 14, TEXT_PRIMARY)
-            c.hit(box, act)
-            y += toggle_h + 10
+        # Interactive Care & Treats Strip.
+        c.text((pad, y + 10), "Care & Treats", round(side * 0.026), TEXT_MUTED, bold=True, anchor="lm")
+        y += 24
+        treat_styles = {
+            "tea": (_icon_heart, ROSE),
+            "snack": (_icon_sparkle, AMBER),
+            "star": (_icon_sparkle, (255, 224, 102, 255)),
+            "high_five": (_icon_heart, CYAN),
+        }
+        tw = (w - 2 * pad - (len(QUICK_TREATS) - 1) * 10) / len(QUICK_TREATS)
+        for i, (key, lbl) in enumerate(QUICK_TREATS):
+            tx = pad + i * (tw + 10)
+            box = (tx, y, tx + tw, y + treat_h)
+            icon_fn, icon_col = treat_styles[key]
+            c.rect(box, radius=18, fill=GLASS_CARD, outline=(icon_col[0], icon_col[1], icon_col[2], 95), width=1.2)
+            c.icon(icon_fn, tx + tw / 2, y + 23, 12, icon_col)
+            c.text((tx + tw / 2, y + 50), lbl, round(side * 0.024), TEXT_PRIMARY, bold=True, anchor="mm", max_w=tw - 10)
+            c.hit(box, "treat", key)
+        y += treat_h + gap
 
-        y += gap - 10
+        # 2x2 Quick Feature Toggles Grid.
+        toggles = [
+            ("Touch speech", "Reply on pet", spoken_touch, "toggle_spoken_touch"),
+            ("Touch sounds", "Subtle UI chimes", touch_sounds, "toggle_touch_sounds"),
+            ("Wake word", "Say name to talk", wake_on, "toggle_wake_word"),
+            ("Show heard", "Your words on top", heard_on, "toggle_heard_captions"),
+        ]
+        t_gap = 10
+        t_col_w = (w - 2 * pad - t_gap) / 2.0
+        for idx, (title, tsub, is_on, act) in enumerate(toggles):
+            r, col = divmod(idx, 2)
+            tx = pad + col * (t_col_w + t_gap)
+            ty = y + r * (toggle_h + t_gap)
+            box = (tx, ty, tx + t_col_w, ty + toggle_h)
+            c.rect(box, radius=18, fill=GLASS_CARD, outline=GLASS_BORDER)
+            c.text((tx + 16, ty + 22), title, round(side * 0.027), TEXT_PRIMARY, bold=True, anchor="lm", max_w=t_col_w - 86)
+            c.text((tx + 16, ty + 44), tsub, round(side * 0.020), TEXT_MUTED, bold=False, anchor="lm", max_w=t_col_w - 86)
+            sw_x1 = tx + t_col_w - 14
+            sw_x0 = sw_x1 - 52
+            sw_y0 = ty + toggle_h / 2 - 15
+            sw_y1 = ty + toggle_h / 2 + 15
+            c.rect((sw_x0, sw_y0, sw_x1, sw_y1), radius=15, fill=EMERALD if is_on else (72, 78, 102, 230))
+            knob_x = (sw_x1 - 15) if is_on else (sw_x0 + 15)
+            c.circle(knob_x, ty + toggle_h / 2, 11, TEXT_PRIMARY)
+            c.hit(box, act)
+        y += toggle_h * 2 + t_gap + gap
+
+        # Tools Row: Bluetooth Audio, Quick Setup Wizard, Ambient Nightstand.
+        tools = [
+            ("Bluetooth", _icon_bluetooth, CYAN if bt_connected else TEXT_PRIMARY, "open_bluetooth", bt_connected),
+            ("Setup Wizard", _icon_sparkle, AMBER, "open_setup", False),
+            ("Nightstand", _icon_moon, VIOLET, "enter_nightstand", False),
+        ]
+        tool_w = (w - 2 * pad - 2 * 10) / 3.0
+        for i, (lbl, icon_fn, icol, act, active) in enumerate(tools):
+            tx = pad + i * (tool_w + 10)
+            box = (tx, y, tx + tool_w, y + tools_h)
+            fill = (34, 54, 88, 236) if active else GLASS_CARD_HI
+            c.rect(box, radius=18, fill=fill, outline=CYAN if active else GLASS_BORDER, width=1.4 if active else 1.0)
+            kw = {"bg": fill} if icon_fn is _icon_moon else {}
+            c.icon(icon_fn, tx + tool_w / 2, y + 23, 12, icol, **kw)
+            c.text((tx + tool_w / 2, y + 48), lbl, round(side * 0.024), TEXT_PRIMARY, bold=True, anchor="mm", max_w=tool_w - 12)
+            c.hit(box, act)
+        y += tools_h + gap
+
         # Web Settings Console QR Card.
         qbox = (pad, y, w - pad, y + qr_card_h)
         c.rect(qbox, radius=24, fill=GLASS_CARD, outline=GLASS_BORDER)
         url = ("http://%s" % self.wifi_address) if self.wifi_address else "http://companion.local"
         qr_img = screen_mod.qr_code(url, box=6)
-        qr_side = qr_card_h - 32
+        qr_side = qr_card_h - 28
         if qr_img is not None:
-            c.paste_rounded(qr_img, (pad + 16, y + 16, pad + 16 + qr_side, y + 16 + qr_side), radius=14, sharp=True)
-        tx = pad + qr_side + 36 if qr_img is not None else pad + 24
+            c.paste_rounded(qr_img, (pad + 14, y + 14, pad + 14 + qr_side, y + 14 + qr_side), radius=14, sharp=True)
+        tx = pad + qr_side + 32 if qr_img is not None else pad + 22
         max_tw = w - pad - tx - 14
-        c.text((tx, y + 40), "Settings page", round(side * 0.036), TEXT_PRIMARY, bold=True, anchor="lm", max_w=max_tw)
-        c.text((tx, y + 76), "Scan to manage AI keys, memory & voices:", round(side * 0.023), TEXT_MUTED, bold=False, anchor="lm", max_w=max_tw)
-        c.text((tx, y + 114), url, round(side * 0.030), CYAN, bold=True, anchor="lm", max_w=max_tw)
-        c.text((tx, y + 148), "USB: http://10.12.194.1", round(side * 0.023), TEXT_MUTED, bold=False, anchor="lm", max_w=max_tw)
-        c.text((tx, y + 178), "Up %dm · %s" % (max(1, round((time.time() - self.device.started) / 60)), self.device.timezone() or "Local time"),
-               round(side * 0.021), TEXT_DIM, bold=False, anchor="lm", max_w=max_tw)
+        c.text((tx, y + 34), "Settings page", round(side * 0.035), TEXT_PRIMARY, bold=True, anchor="lm", max_w=max_tw)
+        c.text((tx, y + 66), "AI keys, memory & voices:", round(side * 0.022), TEXT_MUTED, bold=False, anchor="lm", max_w=max_tw)
+        c.text((tx, y + 98), url, round(side * 0.029), CYAN, bold=True, anchor="lm", max_w=max_tw)
+        c.text((tx, y + 128), "USB: http://10.12.194.1", round(side * 0.022), TEXT_MUTED, bold=False, anchor="lm", max_w=max_tw)
+        c.text((tx, y + 154), "Up %dm · %s" % (max(1, round((time.time() - self.device.started) / 60)), self.device.timezone() or "Local time"),
+               round(side * 0.020), TEXT_DIM, bold=False, anchor="lm", max_w=max_tw)
         return c
 
     # ----- View 6: On-Screen Wi-Fi Picker Sheet
@@ -1522,8 +2017,21 @@ class TouchUI:
         gap = round(side * 0.014)
 
         is_pw = self.kb_target == "wifi_password"
-        title = ("Join %s" % self.kb_ssid) if is_pw else "Hidden Wi-Fi Network"
-        sub = "Connecting…" if self.kb_busy else ("Enter password (8–63 characters)" if is_pw else "Enter network name (SSID)")
+        is_chat = self.kb_target == "chat_message"
+        if is_chat:
+            cid = self.device.active_id()
+            cname = self.device.characters.manifest(cid).get("name", cid) if cid else "Companion"
+            title = "Message to %s" % cname
+            sub = "Type anything to say aloud"
+            placeholder = "Type a message…"
+        elif is_pw:
+            title = "Join %s" % self.kb_ssid
+            sub = "Connecting…" if self.kb_busy else "Enter password (8–63 characters)"
+            placeholder = "Password"
+        else:
+            title = "Hidden Wi-Fi Network"
+            sub = "Connecting…" if self.kb_busy else "Enter network name (SSID)"
+            placeholder = "Network name"
 
         field_h = 74
         err_h = 34 if self.kb_error else 0
@@ -1545,12 +2053,13 @@ class TouchUI:
         else:
             shown_txt = self.kb_text
         if shown_txt:
-            display = shown_txt[-26:] + "|"
+            display = shown_txt + "|"
             tcol = TEXT_PRIMARY
         else:
-            display = "Password" if is_pw else "Network name"
+            display = placeholder
             tcol = TEXT_DIM
-        c.text((pad + 20, y + field_h / 2), display, round(side * 0.036), tcol, bold=False, anchor="lm", max_w=w - 2 * pad - 120)
+        c.text_tail((pad + 20, y + field_h / 2), display, round(side * 0.036), tcol, bold=False, anchor="lm",
+                    max_w=w - 2 * pad - (110 if is_pw else 36))
 
         if is_pw:
             eye_box = (w - pad - 72, y + 10, w - pad - 10, y + field_h - 10)
@@ -1570,6 +2079,7 @@ class TouchUI:
         # Keyboard rows.
         inner_w = w - 2 * pad
         can_submit = (not self.kb_busy) and (bool(self.kb_text.strip()) if not is_pw else (len(self.kb_text) == 0 or len(self.kb_text) >= 8))
+        submit_text = "…" if self.kb_busy else ("Send" if is_chat else ("Connect" if is_pw else "Next"))
         for row_idx, row in enumerate(rows):
             total_w = sum(k[2] for k in row)
             # Slightly inset the middle 9-key alpha row like a real phone keyboard.
@@ -1583,7 +2093,7 @@ class TouchUI:
                 is_mod = key_id in ("shift", "back", "mode_num", "mode_sym", "mode_abc", "clear")
                 if is_submit:
                     bg = ACCENT_BG if can_submit else (48, 54, 78, 200)
-                    label = ("…" if self.kb_busy else ("Connect" if is_pw else "Next"))
+                    label = submit_text
                 elif key_id == "shift" and (self.kb_shift or self.kb_caps):
                     bg = ACCENT_BG
                     label = ""
@@ -1606,6 +2116,388 @@ class TouchUI:
                 c.hit(kbox, "kb_key", key_id)
                 kx += kw + gap
             y += key_h + gap
+        return c
+
+    # ----- View 8: Ambient Nightstand Clock Overlay (layer=90, drawn above the night veil)
+
+    def _render_nightstand(self, screen):
+        sw, sh = screen
+        side = min(sw, sh)
+        now_dt = datetime.datetime.now()
+        next_t = self._next_timer_label()
+        w = min(round(sw * 0.84), 540)
+        h = 304 if next_t else 258
+        c = _Canvas(w, h, screen, anchor="center")
+        # Warm low-glare dark obsidian glass with soft amber moonlight typography.
+        c.rect((0, 0, w, h), radius=34, fill=(10, 11, 18, 138), outline=(245, 214, 178, 36), width=1.4)
+        c.text((w / 2, 92), now_dt.strftime("%H:%M"), round(side * 0.175), (238, 222, 200, 218), bold=True, anchor="mm")
+        c.text((w / 2, 168), now_dt.strftime("%A, %d %B"), round(side * 0.034), (176, 164, 152, 192), bold=False, anchor="mm", max_w=w - 48)
+        if next_t:
+            pill_w = min(w - 80, 240)
+            px0, py0 = (w - pill_w) / 2, 196
+            c.rect((px0, py0, px0 + pill_w, py0 + 42), radius=21, fill=(46, 36, 22, 176), outline=(251, 191, 36, 95), width=1.2)
+            c.icon(_icon_timer, px0 + 25, py0 + 21, 11, (242, 190, 92, 220))
+            c.text((px0 + 44, py0 + 21), "Next timer · %s" % next_t, round(side * 0.025), (242, 206, 146, 220), bold=True, anchor="lm", max_w=pill_w - 54)
+        c.text((w / 2, h - 28), "Tap anywhere to wake", round(side * 0.023), (146, 140, 146, 156), bold=False, anchor="mm")
+        return c
+
+    # ----- View 9: Interactive Chat Transcript & Quick Prompts Drawer (left-edge swipe-right)
+
+    def _recent_turns(self, limit=3):
+        """Read the latest conversation turns directly from history.jsonl with minimal RAM."""
+        cid = self.device.active_id()
+        if not cid:
+            return []
+        path = os.path.join(self.device.memory_dir, cid, "history.jsonl")
+        try:
+            with open(path, encoding="utf-8") as f:
+                lines = [ln.strip() for ln in f if ln.strip()][-limit:]
+        except OSError:
+            return []
+        out = []
+        for ln in lines:
+            try:
+                item = json.loads(ln)
+            except ValueError:
+                continue
+            if isinstance(item, dict):
+                out.append(item)
+        return out
+
+    def _render_prompts(self, screen):
+        sw, sh = screen
+        side = min(sw, sh)
+        w = min(sw - 2 * round(side * 0.03), round(sw * 0.94))
+        pad = round(side * 0.036)
+        gap = round(side * 0.020)
+        cid = self.device.active_id()
+        char_name = self.device.characters.manifest(cid).get("name", cid) if cid else "Companion"
+
+        # Flatten recent turns into the latest 3 speech bubbles.
+        bubbles = []
+        for turn in self._recent_turns(limit=3):
+            u = str(turn.get("user") or "").strip()
+            r = str(turn.get("reply") or "").strip()
+            if u:
+                bubbles.append(("user", u))
+            if r:
+                bubbles.append(("assistant", r))
+        bubbles = bubbles[-3:]
+
+        chat_h = 298
+        prompt_h = 64
+        action_h = 72
+        h = pad + 26 + 66 + gap + chat_h + gap + 26 + (prompt_h * 2 + 10) + gap + action_h + pad
+        c = _Canvas(w, h, screen, anchor="bottom")
+        c.panel(radius=34)
+
+        y = self._sheet_header(c, w, pad, side, "Chat & Prompts", "%s · Swipe left edge anytime" % char_name)
+        y += gap
+
+        # Recent conversation transcript card.
+        tbox = (pad, y, w - pad, y + chat_h)
+        c.rect(tbox, radius=24, fill=(14, 16, 26, 224), outline=GLASS_BORDER)
+        if not bubbles:
+            c.icon(_icon_chat, w / 2, y + chat_h * 0.38, 22, TEXT_DIM)
+            c.text((w / 2, y + chat_h * 0.58), "No recent messages with %s" % char_name,
+                   round(side * 0.030), TEXT_PRIMARY, bold=True, anchor="mm", max_w=w - 2 * pad - 48)
+            c.text((w / 2, y + chat_h * 0.72), "Pick a quick prompt below or type a message",
+                   round(side * 0.023), TEXT_MUTED, bold=False, anchor="mm", max_w=w - 2 * pad - 48)
+        else:
+            b_pad = 14
+            b_gap = 10
+            b_h = (chat_h - 2 * b_pad - 2 * b_gap) / 3.0
+            max_bw = (w - 2 * pad - 2 * b_pad) * 0.84
+            # Anchor bubbles toward the bottom when fewer than 3 exist.
+            by = y + b_pad + (3 - len(bubbles)) * (b_h + b_gap)
+            for role, text in bubbles:
+                if role == "user":
+                    bx1 = w - pad - b_pad
+                    bx0 = bx1 - max_bw
+                    c.rect((bx0, by, bx1, by + b_h), radius=18, fill=(54, 72, 138, 232), outline=(126, 152, 255, 80))
+                    c.text((bx0 + 16, by + 16), "You", round(side * 0.020), (192, 210, 255, 255), bold=True, anchor="lm")
+                    c.text_wrapped((bx0 + 16, by + 33), text, round(side * 0.024), TEXT_PRIMARY, bold=False, anchor="la", max_w=max_bw - 32, max_lines=2, line_gap=3)
+                else:
+                    bx0 = pad + b_pad
+                    bx1 = bx0 + max_bw
+                    c.rect((bx0, by, bx1, by + b_h), radius=18, fill=GLASS_CARD_HI, outline=GLASS_BORDER)
+                    c.text((bx0 + 16, by + 16), char_name, round(side * 0.020), CYAN, bold=True, anchor="lm", max_w=max_bw - 32)
+                    c.text_wrapped((bx0 + 16, by + 33), text, round(side * 0.024), TEXT_PRIMARY, bold=False, anchor="la", max_w=max_bw - 32, max_lines=2, line_gap=3)
+                by += b_h + b_gap
+        y += chat_h + gap
+
+        # 2x2 One-Tap Quick Prompts.
+        c.text((pad, y + 10), "Quick prompts", round(side * 0.026), TEXT_MUTED, bold=True, anchor="lm")
+        y += 26
+        p_gap = 10
+        pw = (w - 2 * pad - p_gap) / 2.0
+        for idx, (label, prompt) in enumerate(QUICK_PROMPTS):
+            r, col = divmod(idx, 2)
+            px = pad + col * (pw + p_gap)
+            py = y + r * (prompt_h + p_gap)
+            box = (px, py, px + pw, py + prompt_h)
+            c.rect(box, radius=18, fill=(38, 48, 86, 232), outline=(120, 146, 255, 92), width=1.2)
+            c.icon(_icon_sparkle, px + 26, py + prompt_h / 2, 10, CYAN if idx % 2 == 0 else VIOLET)
+            c.text((px + 46, py + prompt_h / 2), label, round(side * 0.029), TEXT_PRIMARY, bold=True, anchor="lm", max_w=pw - 58)
+            c.hit(box, "send_prompt", prompt)
+        y += prompt_h * 2 + p_gap + gap
+
+        # Bottom Compose + Talk bar.
+        talk_w = round((w - 2 * pad - gap) * 0.30)
+        type_w = (w - 2 * pad - gap) - talk_w
+        type_box = (pad, y, pad + type_w, y + action_h)
+        c.rect(type_box, radius=22, fill=GLASS_CARD_HI, outline=ACCENT, width=1.4)
+        c.icon(_icon_chat, pad + 32, y + action_h / 2, 14, CYAN)
+        c.text((pad + 58, y + action_h / 2), "Type a message…", round(side * 0.032), TEXT_PRIMARY, bold=True, anchor="lm", max_w=type_w - 72)
+        c.hit(type_box, "open_chat_kb")
+
+        tx0 = pad + type_w + gap
+        talk_box = (tx0, y, tx0 + talk_w, y + action_h)
+        c.rect(talk_box, radius=22, fill=ACCENT_BG, outline=(255, 255, 255, 60), width=1.4)
+        c.icon(_icon_mic, tx0 + 34, y + action_h / 2, 14, TEXT_PRIMARY)
+        c.text((tx0 + 58, y + action_h / 2), "Talk", round(side * 0.032), TEXT_PRIMARY, bold=True, anchor="lm")
+        c.hit(talk_box, "talk")
+        return c
+
+    # ----- View 10: Bluetooth Audio Pairing Sheet
+
+    def _render_bluetooth(self, screen):
+        sw, sh = screen
+        side = min(sw, sh)
+        w = min(sw - 2 * round(side * 0.03), round(sw * 0.94))
+        pad = round(side * 0.036)
+        gap = round(side * 0.020)
+        per_page = 4
+        pages = max(1, (len(self.bt_devices) + per_page - 1) // per_page)
+        self.bt_page = min(self.bt_page, pages - 1)
+        shown = self.bt_devices[self.bt_page * per_page:(self.bt_page + 1) * per_page]
+
+        status_h = 66
+        row_h = 78
+        rows_h = (len(shown) * (row_h + 10)) if shown else 116
+        pager_h = 56 if pages > 1 else 0
+        footer_h = 56
+        h = pad + 26 + 66 + gap + status_h + gap + rows_h + (gap + pager_h if pager_h else 0) + gap + footer_h + pad
+        c = _Canvas(w, h, screen, anchor="bottom")
+        c.panel(radius=34)
+
+        conn = next((d for d in self.bt_devices if d.get("connected")), None)
+        sub = "Scanning nearby speakers…" if self.bt_scanning else (
+            ("Connected · " + conn["name"]) if conn else "Pair a wireless speaker or headphones"
+        )
+        y = self._sheet_header(c, w, pad, side, "Bluetooth Audio", sub, back_action="open_status")
+        y += gap
+
+        # Status + Scan bar.
+        sbox = (pad, y, w - pad, y + status_h)
+        c.rect(sbox, radius=20, fill=GLASS_CARD, outline=CORAL if self.bt_error else GLASS_BORDER)
+        st_text = self.bt_error or ("Discovering devices (4s)…" if self.bt_scanning else "%d devices found" % len(self.bt_devices))
+        c.text((pad + 20, y + status_h / 2), st_text, round(side * 0.027),
+               CORAL if self.bt_error else TEXT_MUTED, bold=bool(self.bt_error), anchor="lm", max_w=w - 2 * pad - 150)
+        scan_box = (w - pad - 122, y + 11, w - pad - 12, y + status_h - 11)
+        c.rect(scan_box, radius=14, fill=ACCENT_BG if not self.bt_scanning else GLASS_CARD_HI)
+        c.text(((scan_box[0] + scan_box[2]) / 2, y + status_h / 2), "Scanning" if self.bt_scanning else "Scan",
+               round(side * 0.027), TEXT_PRIMARY, bold=True, anchor="mm")
+        c.hit(scan_box, "bt_scan")
+        y += status_h + gap
+
+        if not shown:
+            c.rect((pad, y, w - pad, y + 102), radius=20, fill=GLASS_CARD)
+            msg = "Looking for Bluetooth speakers & headphones…" if self.bt_scanning else "No Bluetooth audio devices found yet. Put your speaker in pairing mode and tap Scan."
+            c.text_wrapped((w / 2, y + 51), msg, round(side * 0.026), TEXT_MUTED, bold=False, anchor="mm", max_w=w - 2 * pad - 40, max_lines=2)
+            y += 116
+        else:
+            for dev in shown:
+                box = (pad, y, w - pad, y + row_h)
+                is_conn = bool(dev.get("connected"))
+                is_busy = self.bt_busy_mac == dev["mac"]
+                fill = (32, 54, 88, 236) if is_conn else GLASS_CARD
+                c.rect(box, radius=20, fill=fill, outline=CYAN if is_conn else GLASS_BORDER, width=1.5 if is_conn else 1.0)
+                c.icon(_icon_bluetooth, pad + 32, y + row_h / 2, 16, EMERALD if is_conn else (CYAN if dev.get("paired") else TEXT_MUTED))
+                c.text((pad + 64, y + 28), dev.get("name") or dev["mac"], round(side * 0.032), TEXT_PRIMARY, bold=True, anchor="lm", max_w=w - 2 * pad - 216)
+                meta = "Working…" if is_busy else (
+                    "Connected · Tap to disconnect" if is_conn else (
+                        "Paired · Tap to connect" if dev.get("paired") else "Available · Tap to pair"
+                    )
+                )
+                c.text((pad + 64, y + 54), meta, round(side * 0.022), EMERALD if is_conn else TEXT_MUTED, bold=False, anchor="lm", max_w=w - 2 * pad - 216)
+                badge_txt = "…" if is_busy else ("Connected" if is_conn else ("Connect" if dev.get("paired") else "Pair"))
+                badge_bg = (32, 118, 92, 230) if is_conn else ACCENT_BG
+                bbox = (w - pad - 138, y + 18, w - pad - 14, y + row_h - 18)
+                c.rect(bbox, radius=14, fill=GLASS_CARD_HI if is_busy else badge_bg)
+                c.text(((bbox[0] + bbox[2]) / 2, y + row_h / 2), badge_txt, round(side * 0.024), TEXT_PRIMARY, bold=True, anchor="mm")
+                c.hit(box, "bt_toggle", dev)
+                y += row_h + 10
+
+        if pager_h:
+            y += gap
+            self._draw_pager(c, w, y, pad, side, self.bt_page, pages, "bt_prev", "bt_next")
+            y += pager_h
+
+        y += gap
+        c.rect((pad, y, w - pad, y + footer_h), radius=18, fill=(22, 26, 40, 220))
+        c.text((w / 2, y + footer_h / 2), "Audio routes to connected Bluetooth speakers via PipeWire",
+               round(side * 0.023), TEXT_MUTED, bold=False, anchor="mm", max_w=w - 2 * pad - 24)
+        return c
+
+    # ----- View 11: 3-Step On-Screen Quick Setup Wizard & Touch Calibration
+
+    def _render_setup(self, screen):
+        sw, sh = screen
+        side = min(sw, sh)
+        w = min(sw - 2 * round(side * 0.03), round(sw * 0.94))
+        pad = round(side * 0.036)
+        gap = round(side * 0.020)
+        step = max(0, min(2, int(self.setup_step)))
+        step_titles = ("Wi-Fi", "Audio & Touch", "Ready & Console")
+
+        tab_h = 46
+        footer_h = 64
+        body_h = 312 if step == 0 else (402 if step == 1 else 370)
+        h = pad + 26 + 66 + gap + tab_h + gap + body_h + gap + footer_h + pad
+        c = _Canvas(w, h, screen, anchor="bottom")
+        c.panel(radius=34)
+
+        y = self._sheet_header(c, w, pad, side, "Quick Setup", "Step %d of 3 · %s" % (step + 1, step_titles[step]), back_action="open_status")
+        y += gap
+
+        # 3-step interactive tab bar.
+        tab_w = (w - 2 * pad - 2 * 10) / 3.0
+        for idx, label in enumerate(("1. Wi-Fi", "2. Audio & Touch", "3. Ready")):
+            tx = pad + idx * (tab_w + 10)
+            box = (tx, y, tx + tab_w, y + tab_h)
+            active = idx == step
+            c.rect(box, radius=14, fill=ACCENT_BG if active else GLASS_CARD, outline=ACCENT if active else GLASS_BORDER)
+            c.text((tx + tab_w / 2, y + tab_h / 2), label, round(side * 0.024), TEXT_PRIMARY if active else TEXT_MUTED, bold=True, anchor="mm", max_w=tab_w - 10)
+            c.hit(box, "setup_step", idx)
+        y += tab_h + gap
+
+        body_top = y
+        if step == 0:
+            # Step 1: Wi-Fi status + quick launcher.
+            sbox = (pad, y, w - pad, y + 124)
+            c.rect(sbox, radius=22, fill=GLASS_CARD, outline=EMERALD if self.wifi_connected else GLASS_BORDER, width=1.5 if self.wifi_connected else 1.0)
+            c.icon(_icon_wifi, pad + 44, y + 62, 22, EMERALD if self.wifi_connected else AMBER, strength=100 if self.wifi_connected else 40)
+            st_title = "Wi-Fi Connected" if self.wifi_connected else "Connect to home Wi-Fi"
+            st_sub = (self.wifi_address or "Online on your local network") if self.wifi_connected else "Pick your network and type the password right on screen"
+            c.text((pad + 86, y + 46), st_title, round(side * 0.036), TEXT_PRIMARY, bold=True, anchor="lm", max_w=w - 2 * pad - 104)
+            c.text((pad + 86, y + 80), st_sub, round(side * 0.024), EMERALD if self.wifi_connected else TEXT_MUTED, bold=False, anchor="lm", max_w=w - 2 * pad - 104)
+            y += 124 + gap
+
+            wbtn = (pad, y, w - pad, y + 76)
+            c.rect(wbtn, radius=22, fill=ACCENT_BG, outline=(255, 255, 255, 60), width=1.4)
+            c.text((w / 2, y + 38), "Change Wi-Fi Network" if self.wifi_connected else "Open On-Screen Wi-Fi Picker",
+                   round(side * 0.033), TEXT_PRIMARY, bold=True, anchor="mm")
+            c.hit(wbtn, "open_wifi")
+            y += 76 + gap
+
+            c.rect((pad, y, w - pad, y + 84), radius=20, fill=(22, 26, 40, 220))
+            c.text_wrapped((w / 2, y + 42), "You can also connect over USB at http://10.12.194.1 even without Wi-Fi.",
+                           round(side * 0.024), TEXT_MUTED, bold=False, anchor="mm", max_w=w - 2 * pad - 36, max_lines=2)
+
+        elif step == 1:
+            # Step 2: Speaker chime test, Touch Coordinate Rotation, and Interactive Touch Calibration Target.
+            sp_h = 76
+            c.rect((pad, y, w - pad, y + sp_h), radius=20, fill=GLASS_CARD, outline=GLASS_BORDER)
+            c.icon(_icon_speaker, pad + 32, y + sp_h / 2, 16, CYAN, level=1.0)
+            c.text((pad + 62, y + 26), "Speaker check", round(side * 0.030), TEXT_PRIMARY, bold=True, anchor="lm")
+            c.text((pad + 62, y + 52), "Play a warm harmonic test chime", round(side * 0.022), TEXT_MUTED, bold=False, anchor="lm", max_w=w - 2 * pad - 210)
+            tbtn = (w - pad - 144, y + 14, w - pad - 14, y + sp_h - 14)
+            c.rect(tbtn, radius=14, fill=ACCENT_BG)
+            c.text(((tbtn[0] + tbtn[2]) / 2, y + sp_h / 2), "Test chime", round(side * 0.026), TEXT_PRIMARY, bold=True, anchor="mm")
+            c.hit(tbtn, "setup_test_speaker")
+            y += sp_h + gap
+
+            rot_h = 114
+            rot_cur = int(self.device.store.settings().get("screen", {}).get("rotation", 0))
+            c.rect((pad, y, w - pad, y + rot_h), radius=20, fill=GLASS_CARD, outline=GLASS_BORDER)
+            c.text((pad + 20, y + 24), "Touch rotation compensation", round(side * 0.028), TEXT_PRIMARY, bold=True, anchor="lm")
+            c.text((w - pad - 20, y + 24), "%d°" % rot_cur, round(side * 0.026), CYAN, bold=True, anchor="rm")
+            rbw = (w - 2 * pad - 36 - 3 * 10) / 4.0
+            ry0, ry1 = y + 50, y + rot_h - 16
+            for i, deg in enumerate((0, 90, 180, 270)):
+                rx = pad + 18 + i * (rbw + 10)
+                rbox = (rx, ry0, rx + rbw, ry1)
+                sel = rot_cur == deg
+                c.rect(rbox, radius=14, fill=ACCENT_BG if sel else GLASS_CARD_HI, outline=ACCENT if sel else GLASS_BORDER)
+                c.text((rx + rbw / 2, (ry0 + ry1) / 2), "%d°" % deg, round(side * 0.028), TEXT_PRIMARY, bold=True, anchor="mm")
+                c.hit(rbox, "setup_rotate", deg)
+            y += rot_h + gap
+
+            # Interactive touch alignment target pad.
+            cal_h = 184
+            cbox = (pad, y, w - pad, y + cal_h)
+            c.rect(cbox, radius=22, fill=(12, 16, 28, 240), outline=CYAN if self.cal_last else GLASS_BORDER, width=1.4)
+            cx_m, cy_m = (pad + w - pad) / 2.0, y + cal_h / 2.0 - 12
+            c.line([(pad + 24, cy_m), (w - pad - 24, cy_m)], color=(255, 255, 255, 26), width=1.0)
+            c.line([(cx_m, y + 18), (cx_m, y + cal_h - 42)], color=(255, 255, 255, 26), width=1.0)
+            c.circle(cx_m, cy_m, 26, (0, 0, 0, 0), outline=(56, 198, 255, 90), width=1.5)
+            c.circle(cx_m, cy_m, 5, (56, 198, 255, 160))
+            if self.cal_last is not None:
+                ox, oy, dw, dh = place_overlay(w, h, sw, sh, "bottom")
+                lx = (self.cal_last[0] * sw - ox) * (w / max(1.0, dw))
+                ly = (self.cal_last[1] * sh - oy) * (h / max(1.0, dh))
+                lx = max(pad + 24, min(w - pad - 24, lx))
+                ly = max(y + 24, min(y + cal_h - 44, ly))
+                c.circle(lx, ly, 16, (56, 198, 255, 70), outline=CYAN, width=2.0)
+                c.circle(lx, ly, 5, TEXT_PRIMARY)
+                cal_msg = "Touch verified at (%.2f, %.2f) · Sparkles aligned!" % self.cal_last
+                cal_col = EMERALD
+            else:
+                cal_msg = "Tap anywhere inside this target box to verify touch alignment"
+                cal_col = TEXT_MUTED
+            c.text((w / 2, y + cal_h - 20), cal_msg, round(side * 0.023), cal_col, bold=bool(self.cal_last), anchor="mm", max_w=w - 2 * pad - 28)
+            c.hit(cbox, "setup_cal_tap")
+
+        else:
+            # Step 3: Live readiness checklist + Web Console QR code.
+            settings = self.device.store.settings()
+            secrets = self.device.store.secret_status()
+            llm_prov = settings.get("llm", {}).get("provider", "")
+            ai_ready = llm_prov == "local" or any(bool(v) for v in secrets.values())
+            cid = self.device.active_id()
+            cname = self.device.characters.manifest(cid).get("name", cid) if cid else ""
+            checks = [
+                ("Wi-Fi network", self.wifi_address or ("Connected" if self.wifi_connected else "Not connected yet"), self.wifi_connected),
+                ("Active character", cname if cid else "Upload one on the Settings page", bool(cid)),
+                ("AI conversation key", ("Local model" if llm_prov == "local" else "Configured") if ai_ready else "Add API key on Settings page", ai_ready),
+            ]
+            chk_h = 178
+            c.rect((pad, y, w - pad, y + chk_h), radius=22, fill=GLASS_CARD, outline=GLASS_BORDER)
+            row_step = chk_h / 3.0
+            for idx, (label, detail, ok) in enumerate(checks):
+                ry = y + idx * row_step + row_step / 2.0
+                c.circle(pad + 28, ry, 10, EMERALD if ok else (251, 191, 36, 70), outline=EMERALD if ok else AMBER, width=1.6)
+                c.text((pad + 52, ry - 8), label, round(side * 0.027), TEXT_PRIMARY, bold=True, anchor="lm", max_w=w - 2 * pad - 72)
+                c.text((pad + 52, ry + 14), detail, round(side * 0.021), EMERALD if ok else TEXT_MUTED, bold=False, anchor="lm", max_w=w - 2 * pad - 72)
+            y += chk_h + gap
+
+            qr_card_h = 178
+            c.rect((pad, y, w - pad, y + qr_card_h), radius=22, fill=GLASS_CARD, outline=GLASS_BORDER)
+            url = ("http://%s" % self.wifi_address) if self.wifi_address else "http://companion.local"
+            qr_img = screen_mod.qr_code(url, box=6)
+            qr_side = qr_card_h - 28
+            if qr_img is not None:
+                c.paste_rounded(qr_img, (pad + 14, y + 14, pad + 14 + qr_side, y + 14 + qr_side), radius=14, sharp=True)
+            tx = pad + qr_side + 30 if qr_img is not None else pad + 22
+            max_tw = w - pad - tx - 14
+            c.text((tx, y + 36), "Open Settings Console", round(side * 0.032), TEXT_PRIMARY, bold=True, anchor="lm", max_w=max_tw)
+            c.text((tx, y + 72), "Add AI keys or upload characters:", round(side * 0.022), TEXT_MUTED, bold=False, anchor="lm", max_w=max_tw)
+            c.text((tx, y + 110), url, round(side * 0.029), CYAN, bold=True, anchor="lm", max_w=max_tw)
+            c.text((tx, y + 144), "USB: http://10.12.194.1", round(side * 0.022), TEXT_MUTED, bold=False, anchor="lm", max_w=max_tw)
+
+        # Wizard Footer Navigation.
+        fy = body_top + body_h + gap
+        bw = (w - 2 * pad - gap) / 2.0
+        lbox = (pad, fy, pad + bw, fy + footer_h)
+        rbox = (pad + bw + gap, fy, w - pad, fy + footer_h)
+        c.rect(lbox, radius=20, fill=GLASS_CARD_HI, outline=GLASS_BORDER)
+        c.text((pad + bw / 2, fy + footer_h / 2), "Back" if step > 0 else "Close", round(side * 0.031), TEXT_PRIMARY, bold=True, anchor="mm")
+        c.hit(lbox, "setup_step" if step > 0 else "close", step - 1 if step > 0 else None)
+
+        c.rect(rbox, radius=20, fill=ACCENT_BG, outline=(255, 255, 255, 60), width=1.4)
+        c.text((pad + bw + gap + bw / 2, fy + footer_h / 2), "Next Step" if step < 2 else "Done", round(side * 0.031), TEXT_PRIMARY, bold=True, anchor="mm")
+        c.hit(rbox, "setup_step" if step < 2 else "close", step + 1 if step < 2 else None)
         return c
 
     # ----- shared sheet chrome

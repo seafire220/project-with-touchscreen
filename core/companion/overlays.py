@@ -16,7 +16,7 @@ from .store import write_atomic
 
 # Slots, and where each sits on the screen.
 CAPTION, HEARD, MIC, HINT = "caption", "heard", "mic-off", "hint"
-TOUCH_PILL, TOUCH_DOCK, TOUCH_SHEET = "touch-pill", "touch-dock", "touch-sheet"
+TOUCH_PILL, TOUCH_DOCK, TOUCH_SHEET, TOUCH_NIGHTSTAND = "touch-pill", "touch-dock", "touch-sheet", "touch-nightstand"
 ANCHORS = {
     CAPTION: "bottom",
     HEARD: "top",
@@ -25,6 +25,7 @@ ANCHORS = {
     TOUCH_PILL: "bottom",
     TOUCH_DOCK: "bottom",
     TOUCH_SHEET: "bottom",
+    TOUCH_NIGHTSTAND: "center",
 }
 LAYERS = {
     TOUCH_PILL: 10,
@@ -34,6 +35,7 @@ LAYERS = {
     TOUCH_DOCK: 30,
     TOUCH_SHEET: 40,
     HINT: 50,
+    TOUCH_NIGHTSTAND: 90,
 }
 LINES_PER_PAGE = 3
 CHARS_PER_SECOND = 14.0       # how fast the device's voices speak, roughly, at speed 1

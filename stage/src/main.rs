@@ -782,6 +782,19 @@ impl StageApp {
 			}
 			Command::TouchCapture(cap) => self.touch.set_capture(cap),
 			Command::TouchSim(sample) => self.handle_touch(sample),
+			Command::TouchFx { kind, x, y } => match kind.as_str() {
+				"hearts" => self.fx.spawn_hearts(x, y, 4),
+				"sparkles" => self.fx.spawn_sparkles(x, y, 7, true),
+				"ripple" => self.fx.spawn_ripple(x, y, [0.58, 0.78, 1.0, 0.9]),
+				_ => self.fx.spawn_celebrate(x, y),
+			},
+			Command::Shot(shot) => {
+				self.opts.shot = shot;
+				self.touch.set_framing(touch::Framing::from(shot));
+				if let Some((Renderer::Vrm(r), _)) = &mut self.on_window {
+					r.shot = shot;
+				}
+			}
 			Command::Quit => self.quit = true,
 		}
 	}
@@ -1166,7 +1179,8 @@ impl App for StageApp {
 		self.motion.set_resting(direction.resting);
 		let (energy, beats) = self.motion.style();
 		self.behaviour.set_style(energy * direction.liveliness, beats);
-		self.behaviour.set_drowsy(direction.drowsy);
+		let nightstand = self.overlays.as_ref().is_some_and(|o| o.nightstand());
+		self.behaviour.set_drowsy(if nightstand { direction.drowsy.max(0.85) } else { direction.drowsy });
 		// An avatar's own idle loop for the mood shows its posture; the mood still shows on the face.
 		if let Puppet::Vrm(p) = &self.puppet {
 			if let Some(a) = p.animator() {
@@ -1265,8 +1279,13 @@ impl App for StageApp {
 		// Too slow for this device: give something up, one step at a time, and say so.
 		let real = now.duration_since(self.last_real).as_secs_f32();
 		self.last_real = now;
-		if let Some(step) = self.watchdog.as_mut().and_then(|w| w.frame(real, self.t)) {
-			self.step_down(step);
+		if !nightstand {
+			if let Some(step) = self.watchdog.as_mut().and_then(|w| w.frame(real, self.t)) {
+				self.step_down(step);
+			}
+		} else if self.opts.fixed_dt.is_none() {
+			// Gentle ~12 fps bedside breathing so the Pi stays cool and silent overnight.
+			std::thread::sleep(std::time::Duration::from_millis(70));
 		}
 		self.heartbeat(now);
 

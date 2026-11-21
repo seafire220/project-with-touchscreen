@@ -21,22 +21,24 @@ times slower.
 | Rejected voices | Kokoro (int8): only just real time on these PC cores, 428 MB. KittenTTS nano: fast, but sherpa-onnx 2.x drops words missing from its word list, and a third of words came back wrong. Piper LibriTTS-R medium (904 speakers, the first default: real-time factor 0.045, 108 MB): fine-tuned from Piper's lessac voice, whose recordings are licensed for research only (`34-licences.md`) | |
 | Stage peak memory, 720x1280 window, software graphics | Synthetic test figure: 16 MB (Inochi2D), 22 MB (Live2D format). A test character from a picture: 22 MB (Inochi2D), 68 MB (Live2D format). Live2D's sample models: 13-57 MB | Before part pictures were packed into one texture page, the same test character took 158 MB in the Live2D format. The device's limit for the stage is 300 MB (`MemoryMax` in `companion-stage.service`) |
 | Stage time per frame on the processor | Moving the character: 0.10-0.17 ms with Ayagami, 0.19-0.27 ms with Inox2D, for the same two characters. Handing the drawing to the graphics chip: about 0.4 ms for ours; 4-7 ms for sample models with many masks | Software graphics here, so the drawing figure is not the device's. Ayagami is not slower than Inox2D at moving a character. Models with many masks redraw each mask every frame; to watch on the Pi |
+| Touchscreen edition overhead (`TouchEngine`, `FxRenderer`, `TouchUI`, `sounds.py`) | Idle core overhead: < 0.2 MB (10 cached synthesized PCM UI cues = 83 KB); idle pill GPU texture: ~0.04 MB; open dock/sheet GPU texture: ~1.9 MB; cached 1× dock base layer while dock is open: ~2.1 MB (released immediately on close, 2.6× faster slider drag renders); transient 2× Pillow render spike: ~8 MB | Zero new Python or Rust dependencies. Nightstand mode throttles stage redraws to ~12 fps and refreshes the clock overlay once every 30 s |
 
 ## Estimated memory budget on the 1 GB Pi
 
 | Part | Estimate |
 |---|---|
 | Raspberry Pi OS Lite, cage, NetworkManager | 150–200 MB |
-| Stage (character, textures in graphics memory) | 20–70 MB measured on a PC for our characters (above); to measure on the Pi |
-| Core with on-device speech recognition | 220 MB idle, about 360 MB while recognising |
+| Stage (character, textures in graphics memory, touchscreen FX + overlays) | 20–72 MB measured on a PC for our characters (above); to measure on the Pi |
+| Core with on-device speech recognition (+ touchscreen UI & cached sound cues) | 220 MB idle, about 360 MB while recognising |
 | On-device voice, in the core | about 110 MB loaded, up to about 230 MB while speaking |
 | Anthropic library, if chosen | 50 MB |
-| Total | about 630–1,040 MB with the on-device voice; tight on 1 GB, comfortable on 2 GB |
+| Total | about 630–1,045 MB with the on-device voice; tight on 1 GB, comfortable on 2 GB |
 
 With the on-device voice it is tight on a 1 GB board. If it does not fit, the
 first remedies are one thread for the voice, a cloud speech or voice service
 (saving about 300 MB or 200 MB), or loading the speech model only while
-listening; a 2 GB board has room for all of it.
+listening; a 2 GB board has room for all of it. The touchscreen edition adds
+under ~4 MB while a sheet is open and < 0.2 MB at rest.
 
 ## To measure on the device
 

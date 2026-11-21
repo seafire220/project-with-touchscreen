@@ -98,6 +98,7 @@ function show(tab) {
   if (tab === "memory") loadMemory();
   if (tab === "device") {
     loadWifi().catch((e) => text($("wifi-status"), e.message));
+    loadBluetooth(false).catch((e) => text($("bt-status"), e.message));
     loadUpdate().catch((e) => text($("upd-status"), e.message));
   }
   if (tab === "animation") loadAnimation().catch((e) => text($("an-speed"), e.message));
@@ -140,11 +141,17 @@ function onEvent(e) {
   else if (e.kind === "microphone") showMicrophone(e);
   else if (e.kind === "wake word") addLog("Heard its name:", e.phrase || "");
   else if (e.kind === "touch") {
-    addLog("Touch:", String(e.action === "wake" ? "woke the screen" : (e.action || "tap") + (e.zone && e.zone !== "background" ? " on " + e.zone : "")));
+    let msg = (e.action || "tap") + (e.zone && e.zone !== "background" ? " on " + e.zone : "");
+    if (e.action === "wake") msg = "woke the screen";
+    else if (e.action === "treat") msg = "gave treat: " + String(e.treat || "snack").replace(/_/g, " ");
+    else if (e.action === "pinch") msg = "pinch zoom → " + String(e.shot || "");
+    else if (e.action === "swipe2") msg = "two-finger swipe → " + String(e.character || "");
+    addLog("Touch:", msg);
   }
   else if (e.kind === "touch_ui") {
     if (e.action === "character") { refreshCharacters(); api("GET", "/api/status").then(setStatus).catch(() => {}); }
     else if (e.action === "wifi_joined") addLog("Touch Wi-Fi:", "joined " + (e.ssid || ""));
+    else if (e.action === "bluetooth") addLog("Bluetooth:", (e.connected ? "connected " : "disconnected ") + (e.mac || ""));
   }
 }
 
@@ -1167,10 +1174,12 @@ async function loadSettings() {
   $("dev-sleep-from").value = screen.sleep_from ?? 23;
   $("dev-sleep-to").value = screen.sleep_to ?? 7;
   $("dev-brightness").value = screen.brightness ?? 100;
+  $("dev-rotation").value = String(screen.rotation ?? 0);
   const touch = s.touch || {};
   $("dev-touch-enabled").checked = touch.enabled !== false;
   $("dev-touch-char").checked = touch.character_touch !== false;
   $("dev-touch-fx").checked = touch.effects !== false;
+  $("dev-touch-sounds").checked = touch.sounds !== false;
   $("dev-touch-spoken").checked = touch.spoken_reactions !== false;
   $("dev-touch-cooldown").value = touch.reaction_cooldown ?? 25;
   $("dev-touch-autohide").value = touch.auto_hide ?? 8;
@@ -1339,9 +1348,11 @@ $("btn-save-device").addEventListener("click", async () => {
       wake_word: { on: $("dev-wake").checked, phrase: $("dev-wake-phrase").value.trim(), sensitivity: $("dev-wake-sens").value },
       captions: { on: $("dev-captions").checked, heard: $("dev-captions-heard").checked, size: $("dev-captions-size").value },
       screen: { sleep: $("dev-sleep").checked, how: $("dev-sleep-how").value, sleep_from: Number($("dev-sleep-from").value),
-                sleep_to: Number($("dev-sleep-to").value), brightness: Number($("dev-brightness").value) },
+                sleep_to: Number($("dev-sleep-to").value), brightness: Number($("dev-brightness").value),
+                rotation: Number($("dev-rotation").value) },
       touch: { enabled: $("dev-touch-enabled").checked, character_touch: $("dev-touch-char").checked,
-               effects: $("dev-touch-fx").checked, spoken_reactions: $("dev-touch-spoken").checked,
+               effects: $("dev-touch-fx").checked, sounds: $("dev-touch-sounds").checked,
+               spoken_reactions: $("dev-touch-spoken").checked,
                reaction_cooldown: Number($("dev-touch-cooldown").value), auto_hide: Number($("dev-touch-autohide").value) },
     });
     const family = $("dev-family").checked;
@@ -1381,6 +1392,46 @@ $("wifi-form").addEventListener("submit", async (e) => {
   try { await api("POST", "/api/wifi", { ssid: $("wifi-ssid").value, password: $("wifi-password").value }); text($("wifi-msg"), "Joined."); }
   catch (err) { text($("wifi-msg"), err.message); }
   $("wifi-password").value = "";
+});
+
+// ----- Bluetooth audio
+async function loadBluetooth(scan) {
+  const b = scan ? await api("POST", "/api/bluetooth/scan", {}) : await api("GET", "/api/bluetooth");
+  const list = $("bt-list");
+  list.replaceChildren();
+  if (!b.available) {
+    text($("bt-status"), "Bluetooth audio is unavailable on this machine.");
+    $("bt-actions").hidden = true;
+    return;
+  }
+  $("bt-actions").hidden = false;
+  const devs = b.devices || [];
+  const conn = devs.find((d) => d.connected);
+  text($("bt-status"), b.error ? "Problem: " + b.error : conn ? "Connected to " + conn.name + "." :
+       devs.length ? devs.length + " Bluetooth device(s) found." : "No Bluetooth speakers paired yet.");
+  for (const d of devs) {
+    const li = document.createElement("li");
+    const label = document.createElement("span");
+    text(label, d.name + " (" + (d.connected ? "connected" : d.paired ? "paired" : "available") + ") ");
+    const btn = document.createElement("button"); btn.type = "button";
+    btn.className = d.connected ? "secondary small" : "small";
+    text(btn, d.connected ? "Disconnect" : d.paired ? "Connect" : "Pair & Connect");
+    btn.addEventListener("click", async () => {
+      text($("bt-msg"), d.connected ? "Disconnecting…" : "Connecting…");
+      try {
+        await api("POST", d.connected ? "/api/bluetooth/disconnect" : "/api/bluetooth/connect", { mac: d.mac });
+        text($("bt-msg"), d.connected ? "Disconnected." : "Connected.");
+        await loadBluetooth(false);
+      } catch (err) { text($("bt-msg"), err.message); }
+    });
+    li.append(label, btn);
+    list.append(li);
+  }
+}
+$("btn-bt-scan").addEventListener("click", async () => {
+  text($("bt-msg"), "Scanning for speakers (4 s)…");
+  try { await loadBluetooth(true); text($("bt-msg"), "Done."); }
+  catch (err) { text($("bt-msg"), err.message); }
 });
 
 $("btn-tz").addEventListener("click", async () => {

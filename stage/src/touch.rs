@@ -114,11 +114,22 @@ pub struct TouchConfig {
 	pub enabled: bool,
 	pub character_touch: bool,
 	pub effects: bool,
+	/// Clockwise digitizer rotation compensation in degrees (0, 90, 180, 270).
+	pub rotation: u16,
 }
 
 impl Default for TouchConfig {
 	fn default() -> Self {
-		Self { enabled: true, character_touch: true, effects: true }
+		Self { enabled: true, character_touch: true, effects: true, rotation: 0 }
+	}
+}
+
+fn rotate_point(x: f32, y: f32, deg: u16) -> (f32, f32) {
+	match deg {
+		90 => (1.0 - y, x),
+		180 => (1.0 - x, 1.0 - y),
+		270 => (y, 1.0 - x),
+		_ => (x, y),
 	}
 }
 
@@ -132,7 +143,7 @@ pub struct TouchCapture {
 	pub panel: Option<Rect>,
 	/// Bounding rect of the subtle floating bottom pill, when visible.
 	pub pill: Option<Rect>,
-	/// Whether edge swipes (bottom swipe-up for dock, top swipe-down for quick status) are active.
+	/// Whether edge swipes (bottom swipe-up for dock, top swipe-down for timers, left swipe-right for prompts) are active.
 	pub edge_swipe: bool,
 }
 
@@ -165,6 +176,7 @@ enum Route {
 	UiPill,
 	EdgeBottom,
 	EdgeTop,
+	EdgeLeft,
 	Character,
 }
 
@@ -191,6 +203,18 @@ struct ActiveTouch {
 	edge_swiped: bool,
 }
 
+/// Simultaneous two-finger gesture tracker on the character canvas (pinch framing & 2-finger character swipe).
+struct MultiTouch {
+	id1: u64,
+	id2: u64,
+	start1: (f32, f32),
+	start2: (f32, f32),
+	pos1: (f32, f32),
+	pos2: (f32, f32),
+	start_dist: f32,
+	fired: bool,
+}
+
 const TAP_MAX_DIST: f32 = 0.045;
 const TAP_MAX_TIME: f32 = 0.45;
 const DOUBLE_TAP_GAP: f32 = 0.34;
@@ -198,6 +222,8 @@ const DOUBLE_TAP_DIST: f32 = 0.085;
 const LONG_PRESS_TIME: f32 = 0.55;
 const SWIPE_MIN_DIST: f32 = 0.085;
 const EDGE_SWIPE_MIN: f32 = 0.065;
+const PINCH_MIN_DELTA: f32 = 0.11;
+const SWIPE2_MIN_DIST: f32 = 0.13;
 const LOOK_LINGER: f32 = 1.2;
 const UI_MOVE_INTERVAL: f32 = 0.03; // ~33 Hz max for slider drag forwarding
 
@@ -207,6 +233,7 @@ pub struct TouchEngine {
 	framing: Framing,
 	t: f32,
 	active: Option<ActiveTouch>,
+	multi: Option<MultiTouch>,
 	/// Last completed tap for double-tap detection: (time, x, y, zone).
 	last_tap: Option<(f32, f32, f32, Zone)>,
 	/// Alternate between playful surprised/giggle reactions on repeated pokes.
@@ -230,6 +257,7 @@ impl TouchEngine {
 			framing,
 			t: 0.0,
 			active: None,
+			multi: None,
 			last_tap: None,
 			poke_toggle: false,
 			look_target: (0.0, 0.0),
@@ -246,6 +274,7 @@ impl TouchEngine {
 		self.config = config;
 		if !config.enabled {
 			self.active = None;
+			self.multi = None;
 		}
 	}
 
@@ -253,16 +282,21 @@ impl TouchEngine {
 		self.capture = capture;
 	}
 
+	pub fn set_framing(&mut self, framing: Framing) {
+		self.framing = framing;
+	}
+
 	/// True when a modal sheet or dock currently covers the bottom area.
 	pub fn ui_covering_bottom(&self) -> bool {
 		self.capture.modal
 	}
 
-	/// Process one raw touch sample. `screen_sleeping` is true when the screen is currently `Dim` or `Off`.
+	/// Process one raw touch sample. `screen_sleeping` is true when the screen is currently `Dim`, `Nightstand` or `Off`.
 	pub fn on_sample(&mut self, sample: TouchSample, screen_sleeping: bool, fx: &mut FxState) -> TouchOutput {
 		let mut out = TouchOutput::default();
-		let x = sample.x.clamp(0.0, 1.0);
-		let y = sample.y.clamp(0.0, 1.0);
+		let (rx, ry) = rotate_point(sample.x.clamp(0.0, 1.0), sample.y.clamp(0.0, 1.0), self.config.rotation);
+		let x = rx.clamp(0.0, 1.0);
+		let y = ry.clamp(0.0, 1.0);
 
 		if !self.config.enabled {
 			// Even when touch controls are turned off, tapping a sleeping screen wakes it cleanly.
@@ -284,8 +318,22 @@ impl TouchEngine {
 	}
 
 	fn handle_down(&mut self, id: u64, x: f32, y: f32, screen_sleeping: bool, fx: &mut FxState, out: &mut TouchOutput) {
-		// Ignore a second simultaneous finger while tracking the primary touch.
-		if self.active.is_some() {
+		// A second finger landing on the character canvas initiates two-finger pinch / swipe tracking.
+		if let Some(primary) = &self.active {
+			if self.multi.is_none() && !screen_sleeping && !self.capture.modal && primary.route == Route::Character {
+				let start_dist = (x - primary.x).hypot(y - primary.y);
+				self.multi = Some(MultiTouch {
+					id1: primary.id,
+					id2: id,
+					start1: (primary.x, primary.y),
+					start2: (x, y),
+					pos1: (primary.x, primary.y),
+					pos2: (x, y),
+					start_dist,
+					fired: false,
+				});
+				fx.set_finger(None, false);
+			}
 			return;
 		}
 
@@ -320,7 +368,7 @@ impl TouchEngine {
 			Route::UiBackdrop => {
 				// Wait for tap/release to dismiss cleanly (or swipe down).
 			}
-			Route::EdgeBottom | Route::EdgeTop => {
+			Route::EdgeBottom | Route::EdgeTop | Route::EdgeLeft => {
 				fx.spawn_ripple(x, y, [0.6, 0.78, 1.0, 0.5]);
 			}
 			Route::Character => {
@@ -341,6 +389,40 @@ impl TouchEngine {
 	}
 
 	fn handle_move(&mut self, id: u64, x: f32, y: f32, fx: &mut FxState, out: &mut TouchOutput) {
+		if let Some(m) = &mut self.multi {
+			if id == m.id1 {
+				m.pos1 = (x, y);
+			} else if id == m.id2 {
+				m.pos2 = (x, y);
+			} else {
+				return;
+			}
+			if !m.fired {
+				let d1x = m.pos1.0 - m.start1.0;
+				let d1y = m.pos1.1 - m.start1.1;
+				let d2x = m.pos2.0 - m.start2.0;
+				let d2y = m.pos2.1 - m.start2.1;
+				let cur_dist = (m.pos2.0 - m.pos1.0).hypot(m.pos2.1 - m.pos1.1);
+				let dist_delta = cur_dist - m.start_dist;
+				let avg_dx = (d1x + d2x) * 0.5;
+				let avg_dy = (d1y + d2y) * 0.5;
+				let parallel = d1x * d2x + d1y * d2y;
+				let cx = (m.pos1.0 + m.pos2.0) * 0.5;
+				let cy = (m.pos1.1 + m.pos2.1) * 0.5;
+				if avg_dx.abs() >= SWIPE2_MIN_DIST && avg_dx.abs() > avg_dy.abs() * 1.45 && dist_delta.abs() < 0.08 && parallel > 0.0 {
+					m.fired = true;
+					let dir = if avg_dx < 0.0 { "left" } else { "right" };
+					fx.spawn_ripple(cx, cy, [0.58, 0.78, 1.0, 0.75]);
+					out.events.push(json!({"event": "touch_swipe2", "dir": dir, "x": round3(cx), "y": round3(cy)}));
+				} else if dist_delta.abs() >= PINCH_MIN_DELTA && parallel <= 0.002 {
+					m.fired = true;
+					let dir = if dist_delta > 0.0 { "out" } else { "in" };
+					fx.spawn_sparkles(cx, cy, 5, false);
+					out.events.push(json!({"event": "touch_pinch", "dir": dir, "x": round3(cx), "y": round3(cy)}));
+				}
+			}
+			return;
+		}
 		let Some(mut touch) = self.active.take() else { return };
 		if touch.id != id {
 			self.active = Some(touch);
@@ -400,6 +482,17 @@ impl TouchEngine {
 					}));
 				}
 			}
+			Route::EdgeLeft => {
+				let total_dx = x - touch.start_x;
+				let total_dy = y - touch.start_y;
+				if !touch.edge_swiped && total_dx >= EDGE_SWIPE_MIN && total_dx.abs() > total_dy.abs() * 1.2 {
+					touch.edge_swiped = true;
+					out.events.push(json!({
+						"event": "ui_touch", "phase": "swipe", "target": "edge", "dir": "right",
+						"x": round3(x), "y": round3(y),
+					}));
+				}
+			}
 			Route::Character => {
 				if self.config.character_touch {
 					self.update_look_from_point(x, y);
@@ -451,6 +544,20 @@ impl TouchEngine {
 	}
 
 	fn handle_up(&mut self, id: u64, x: f32, y: f32, fx: &mut FxState, out: &mut TouchOutput) {
+		if let Some(m) = &self.multi {
+			if id == m.id1 || id == m.id2 {
+				self.multi = None;
+				// Consume the remaining finger cleanly so lifting from a pinch/2-finger swipe never pokes.
+				if let Some(a) = &mut self.active {
+					a.route = Route::ConsumedWake;
+				}
+				if self.active.as_ref().is_some_and(|a| a.id == id) {
+					self.active = None;
+				}
+				fx.set_finger(None, false);
+				return;
+			}
+		}
 		let Some(touch) = self.active.take() else { return };
 		if touch.id != id {
 			self.active = Some(touch);
@@ -506,7 +613,7 @@ impl TouchEngine {
 					}));
 				}
 			}
-			Route::EdgeBottom | Route::EdgeTop => {
+			Route::EdgeBottom | Route::EdgeTop | Route::EdgeLeft => {
 				if !touch.edge_swiped && is_tap && self.config.character_touch {
 					// A short tap near an edge (without swiping) still feels responsive as a gentle tap.
 					let zone = Zone::from_point(x, y, self.framing);
@@ -545,6 +652,9 @@ impl TouchEngine {
 	}
 
 	fn handle_cancel(&mut self, id: u64, fx: &mut FxState) {
+		if self.multi.as_ref().is_some_and(|m| m.id1 == id || m.id2 == id) {
+			self.multi = None;
+		}
 		if self.active.as_ref().is_some_and(|a| a.id == id) {
 			self.active = None;
 			fx.set_finger(None, false);
@@ -629,6 +739,9 @@ impl TouchEngine {
 		}
 		if self.capture.edge_swipe && y <= 0.09 {
 			return Route::EdgeTop;
+		}
+		if self.capture.edge_swipe && x <= 0.06 {
+			return Route::EdgeLeft;
 		}
 		Route::Character
 	}
@@ -893,5 +1006,52 @@ mod tests {
 		assert_eq!(sw.events[0]["dir"], "up");
 		assert_eq!(sw.events[0]["target"], "edge");
 		engine.on_sample(up(0.16, 0.84), false, &mut fx);
+	}
+
+	#[test]
+	fn left_edge_swipe_and_rotation_and_multitouch_work() {
+		let mut engine = TouchEngine::new(Framing::Upper);
+		let mut fx = FxState::new(6);
+
+		// Left-edge swipe right opens Quick Prompts & Transcript drawer.
+		engine.on_sample(down(0.03, 0.50), false, &mut fx);
+		let sw = engine.on_sample(mv(0.16, 0.51), false, &mut fx);
+		assert_eq!(sw.events[0]["target"], "edge");
+		assert_eq!(sw.events[0]["dir"], "right");
+		engine.on_sample(up(0.16, 0.51), false, &mut fx);
+
+		// Two-finger pinch out on the character canvas.
+		engine.on_sample(TouchSample { id: 1, phase: Phase::Down, x: 0.45, y: 0.40 }, false, &mut fx);
+		engine.on_sample(TouchSample { id: 2, phase: Phase::Down, x: 0.55, y: 0.40 }, false, &mut fx);
+		let p = engine.on_sample(TouchSample { id: 2, phase: Phase::Move, x: 0.72, y: 0.40 }, false, &mut fx);
+		assert_eq!(p.events[0]["event"], "touch_pinch");
+		assert_eq!(p.events[0]["dir"], "out");
+		let u1 = engine.on_sample(TouchSample { id: 1, phase: Phase::Up, x: 0.45, y: 0.40 }, false, &mut fx);
+		let u2 = engine.on_sample(TouchSample { id: 2, phase: Phase::Up, x: 0.72, y: 0.40 }, false, &mut fx);
+		assert!(u1.events.is_empty() && u2.events.is_empty(), "releasing pinch does not poke");
+
+		// Two-finger horizontal swipe left to switch characters.
+		engine.on_sample(TouchSample { id: 10, phase: Phase::Down, x: 0.60, y: 0.35 }, false, &mut fx);
+		engine.on_sample(TouchSample { id: 11, phase: Phase::Down, x: 0.65, y: 0.45 }, false, &mut fx);
+		let mut sw2_events = Vec::new();
+		for sample in [
+			TouchSample { id: 10, phase: Phase::Move, x: 0.51, y: 0.35 },
+			TouchSample { id: 11, phase: Phase::Move, x: 0.56, y: 0.45 },
+			TouchSample { id: 10, phase: Phase::Move, x: 0.42, y: 0.35 },
+			TouchSample { id: 11, phase: Phase::Move, x: 0.47, y: 0.45 },
+		] {
+			sw2_events.extend(engine.on_sample(sample, false, &mut fx).events);
+		}
+		assert_eq!(sw2_events.len(), 1);
+		assert_eq!(sw2_events[0]["event"], "touch_swipe2");
+		assert_eq!(sw2_events[0]["dir"], "left");
+		engine.on_sample(TouchSample { id: 10, phase: Phase::Up, x: 0.42, y: 0.35 }, false, &mut fx);
+		engine.on_sample(TouchSample { id: 11, phase: Phase::Up, x: 0.47, y: 0.45 }, false, &mut fx);
+
+		// 180-degree rotation maps bottom-right raw touch to top-left head/face area.
+		engine.set_config(TouchConfig { rotation: 180, ..TouchConfig::default() });
+		engine.on_sample(down(0.50, 0.84), false, &mut fx);
+		let r = engine.on_sample(up(0.50, 0.84), false, &mut fx);
+		assert_eq!(r.events[0]["zone"], "head");
 	}
 }

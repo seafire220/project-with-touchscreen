@@ -72,6 +72,8 @@ pub enum Screen {
 	On,
 	/// Dimmed, the character still moving under a dark veil.
 	Dim,
+	/// Ambient nightstand desk mode: dimmed low-fps sleeping silhouette behind a dim clock overlay.
+	Nightstand,
 	/// Dark: the character is neither moved nor drawn, to save power.
 	Off,
 }
@@ -81,6 +83,7 @@ impl Screen {
 		match name {
 			"on" => Some(Self::On),
 			"dim" => Some(Self::Dim),
+			"nightstand" => Some(Self::Nightstand),
 			"off" => Some(Self::Off),
 			_ => None,
 		}
@@ -90,6 +93,7 @@ impl Screen {
 		match self {
 			Self::On => "on",
 			Self::Dim => "dim",
+			Self::Nightstand => "nightstand",
 			Self::Off => "off",
 		}
 	}
@@ -99,6 +103,7 @@ impl Screen {
 		match self {
 			Self::On => 0.0,
 			Self::Dim => DIM_VEIL,
+			Self::Nightstand => 0.78,
 			Self::Off => 1.0,
 		}
 	}
@@ -385,6 +390,11 @@ impl Overlays {
 		self.screen == Screen::Off && self.veil >= 0.999
 	}
 
+	/// The screen is in low-power ambient nightstand mode.
+	pub fn nightstand(&self) -> bool {
+		self.screen == Screen::Nightstand
+	}
+
 	/// Which slots show a picture now (for the heartbeat and tests).
 	pub fn showing(&self) -> Vec<String> {
 		self.slots.iter().filter(|(_, s)| s.visible && s.picture.is_some()).map(|(n, _)| n.clone()).collect()
@@ -406,7 +416,7 @@ impl Overlays {
 	}
 
 	/// Draw the pictures over whatever is on the screen (ordered by `layer`), then the veil
-	/// (pictures stay under the veil: the screen dims as a whole). Does nothing when nothing shows.
+	/// (normal UI stays under the veil; nightstand ambient slots with layer >= 80 draw above it).
 	pub fn draw(&self, gl: &glow::Context, width: u32, height: u32) {
 		let mut pictures: Vec<&Slot> = self.slots.values().filter(|s| s.alpha > 0.0 && s.picture.is_some()).collect();
 		if pictures.is_empty() && self.veil <= 0.0 {
@@ -429,7 +439,7 @@ impl Overlays {
 			gl.uniform_2_f32(self.u_screen.as_ref(), sw, sh);
 			gl.active_texture(glow::TEXTURE0);
 			gl.uniform_1_i32(self.u_tex.as_ref(), 0);
-			for slot in pictures {
+			let draw_slot = |slot: &Slot| {
 				let ease = ease_out(slot.alpha);
 				if slot.scrim > 0.0 {
 					gl.uniform_1_i32(self.u_textured.as_ref(), 0);
@@ -448,12 +458,18 @@ impl Overlays {
 				gl.uniform_4_f32(self.u_color.as_ref(), 1.0, 1.0, 1.0, ease);
 				gl.uniform_4_f32(self.u_rect.as_ref(), x, y + dy, w, h);
 				gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+			};
+			for slot in pictures.iter().copied().filter(|s| s.layer < 80) {
+				draw_slot(slot);
 			}
 			if self.veil > 0.0 {
 				gl.uniform_1_i32(self.u_textured.as_ref(), 0);
 				gl.uniform_4_f32(self.u_color.as_ref(), 0.0, 0.0, 0.0, self.veil);
 				gl.uniform_4_f32(self.u_rect.as_ref(), 0.0, 0.0, sw, sh);
 				gl.draw_arrays(glow::TRIANGLE_STRIP, 0, 4);
+			}
+			for slot in pictures.iter().copied().filter(|s| s.layer >= 80) {
+				draw_slot(slot);
 			}
 			saved.restore(gl);
 		}

@@ -10,9 +10,10 @@ import shutil
 import subprocess
 import time
 
-from . import animations, family, package, providers
+from . import animations, family, package, providers, sounds
 from .audio import Detector, Microphone, Speaker, tone
 from .backlight import Backlight
+from .bluetooth import Bluetooth
 from .characters import Characters, split_persona
 from .conversation import Conversation
 from .memory import Memory
@@ -84,6 +85,18 @@ TOUCH_PROMPTS = {
     ),
 }
 
+# Interactive treats and playful desk interactions offered from the touchscreen Care & Treats bar.
+TREAT_PROMPTS = {
+    "tea": ("(The person just handed you a warm cup of tea on the screen. Thank them warmly in character in one "
+            "brief sentence, with a matching feeling tag.)"),
+    "snack": ("(The person just gave you a delicious little snack on the screen. React cheerfully in character in "
+              "one brief sentence, with a matching feeling tag.)"),
+    "star": ("(The person just gifted you a shining gold star on the screen. React happily in character in one "
+             "brief sentence, with a matching feeling tag.)"),
+    "high_five": ("(The person just gave you an enthusiastic high-five on the screen! React playfully in character "
+                  "in one brief sentence, with a matching feeling tag.)"),
+}
+
 # The button, held: from MUTE_HOLD seconds the microphone goes off (or on) when it is let go; from
 # RESET_WARN the screen warns that holding on forgets the Wi-Fi and the settings-page password, which
 # happens when it is let go after RESET_HOLD.
@@ -92,9 +105,10 @@ RESET_WARN = 7.0
 RESET_HOLD = 12.0
 
 # The screen at night (docs/28-user-guide.md): it sleeps in its hours once nothing has happened for
-# SCREEN_IDLE seconds, and wakes for the button, the wake word, an alarm or speech.
+# SCREEN_IDLE seconds, and wakes for the button, touch, the wake word, an alarm or speech.
 SCREEN_IDLE = 90.0
 DIM_BACKLIGHT = 0.12          # how bright a dimmed screen's backlight is, where it can be set
+NIGHTSTAND_BACKLIGHT = 0.18   # soft bedside glow for Ambient Nightstand Mode
 
 # The wake word (docs/28-user-guide.md): after it, how long it listens for the request; after the reply,
 # how long it listens for more without the wake word again.
@@ -111,7 +125,7 @@ ANIMATION_FIELDS = ("fps", "state", "mood", "playing", "channels", "budget", "dr
 
 class Device:
     def __init__(self, data_dir, stage_socket=None, speaker=None, microphone=None, stage=None,
-                 provider_factory=None, wifi=None, restart=None, run=None):
+                 provider_factory=None, wifi=None, bluetooth=None, restart=None, run=None):
         self.data_dir = data_dir
         self.store = Store(os.path.join(data_dir, "config"))
         self.characters = Characters(os.path.join(data_dir, "characters"))
@@ -139,6 +153,7 @@ class Device:
         self.started = time.time()
         self.log = []
         self.wifi = wifi
+        self.bluetooth = bluetooth if bluetooth is not None else Bluetooth()
         self.card = os.path.join(data_dir, "card.inp")
         # How to restart the service after a reset (systemd starts it again), and
         # how to run system commands; both replaceable in tests.
@@ -166,8 +181,8 @@ class Device:
         self._mute_choice = bool(self.store.settings().get("microphone", {}).get("muted"))
         self._hold = None                   # the button's hold hints, while it is held
         self.backlight = Backlight()
-        self.screen_mode = "on"             # "on", "dim" or "off"
-        self.last_activity = time.time()    # the button, speech, the wake word: someone is there
+        self.screen_mode = "on"             # "on", "dim", "nightstand" or "off"
+        self.last_activity = time.time()    # the button, touch, speech, the wake word: someone is there
         self._wake = None                   # the wake-word listener, once built for the words set now
         self._wake_for = None               # what it was built for (words, sensitivity)
         self._wake_building = False
@@ -176,6 +191,7 @@ class Device:
         self._strip_wake = False            # the next utterance starts with the wake words
         self.touch_ready = False            # True once a touch-capable stage announces ready
         self.last_touch_speech = 0.0        # smart cooldown for optional spoken touch reactions
+        self.ui_sounds_played = []          # recent tactile UI cues played (diagnostics/tests)
         self.touch_ui = TouchUI(self)
 
     # ----- events for the console
@@ -211,12 +227,17 @@ class Device:
             self.publish("animation", {"gesture": entry})
         elif kind == "touch_wake":
             self.activity()
+            self.play_ui_sound("open")
             self.emit("touch", {"action": "wake"})
         elif kind == "ui_touch":
             self.touch_ready = True
             self.touch_ui.handle_ui_event(event)
         elif kind == "touch":
             self.handle_touch(event)
+        elif kind == "touch_pinch":
+            self.handle_pinch(str(event.get("dir") or "out"))
+        elif kind == "touch_swipe2":
+            self.handle_two_finger_swipe(str(event.get("dir") or "left"))
         if kind == "quality":
             self._quality_stepped(event)
         # Stopping soon after it started, unasked, is a failure (a crash or running out of memory).
@@ -248,12 +269,150 @@ class Device:
                 self.touch_ready = True
                 self.touch_ui.on_stage_ready()
 
-    # ----- touchscreen character reactions (docs/35-touchscreen.md)
+    # ----- tactile UI sounds, per-character bond stats, multi-touch & treats (docs/35-touchscreen.md)
+    def play_ui_sound(self, name, force=False):
+        """Play a subtle synthesized UI chime without interrupting speech or recording."""
+        if not force:
+            if not self.store.settings().get("touch", {}).get("sounds", True):
+                return
+            if self.state in ("speaking", "listening") or self.recording is not None:
+                return
+        self.ui_sounds_played = (self.ui_sounds_played + [name])[-20:]
+        try:
+            asyncio.ensure_future(sounds.play_cue(self.speaker, name))
+        except RuntimeError:
+            pass
+
+    def _touch_stats_path(self, cid):
+        return self.characters.file(cid, "touch-stats.json")
+
+    def touch_stats(self, cid=None):
+        """Per-character affectionate touch counters and derived bond/style metadata."""
+        cid = cid or self.active_id()
+        base = {"headpats": 0, "cheek_rubs": 0, "pokes": 0, "treats": 0, "high_fives": 0, "last": 0}
+        if not cid:
+            return dict(base, total=0, bond="New friend", style="warm")
+        try:
+            with open(self._touch_stats_path(cid), encoding="utf-8") as f:
+                saved = json.load(f)
+            if isinstance(saved, dict):
+                for k in base:
+                    if isinstance(saved.get(k), (int, float)):
+                        base[k] = int(saved[k])
+        except (OSError, ValueError, KeyError):
+            pass
+        total = base["headpats"] + base["cheek_rubs"] + base["treats"] * 2 + base["high_fives"]
+        bond = "Bestie" if total >= 30 else ("Close" if total >= 12 else ("Warm" if total >= 3 else "New friend"))
+        return dict(base, total=total, bond=bond, style=self._touch_style(cid))
+
+    def _touch_style(self, cid):
+        """Infer whether a character reacts more shyly, playfully, or warmly from persona/temperament."""
+        try:
+            body = (self.characters.persona(cid) or "").lower()
+        except (OSError, KeyError):
+            body = ""
+        if any(w in body for w in ("shy", "fluster", "timid", "bashful", "tsundere", "reserved")):
+            return "shy"
+        if any(w in body for w in ("mischiev", "playful", "teas", "energetic", "cheerful", "bubbly")):
+            return "playful"
+        return "warm"
+
+    def _record_touch_stat(self, cid, key):
+        if not cid or key not in ("headpats", "cheek_rubs", "pokes", "treats", "high_fives"):
+            return
+        stats = self.touch_stats(cid)
+        data = {k: stats[k] for k in ("headpats", "cheek_rubs", "pokes", "treats", "high_fives", "last")}
+        data[key] += 1
+        data["last"] = int(time.time())
+        try:
+            write_atomic(self._touch_stats_path(cid), json.dumps(data))
+        except (OSError, KeyError):
+            pass
+
+    def handle_pinch(self, direction):
+        """Two-finger pinch cycles VRM framing (bust <-> upper <-> full) live without restarting."""
+        self.activity()
+        cid = self.active_id()
+        if not cid:
+            return
+        if self.characters.drawing(cid) != "vrm":
+            self.play_ui_sound("tap")
+            self.overlays.hint("Pinch framing works with 3D avatars", seconds=2.0)
+            return
+        order = ("bust", "upper", "full")
+        labels = {"bust": "Close-up (head & shoulders)", "upper": "Upper body", "full": "Whole body"}
+        cur = self.animations.settings(cid).get("shot", "upper")
+        idx = order.index(cur) if cur in order else 1
+        # Pinch out zooms in (towards bust); pinch in zooms out (towards full).
+        nxt = order[max(0, idx - 1)] if direction == "out" else order[min(len(order) - 1, idx + 1)]
+        if nxt != cur:
+            self.animations.set_settings(cid, {"shot": nxt})
+            self.write_stage_settings(cid)
+            self.stage.send({"shot": nxt})
+            self.play_ui_sound("open")
+            self.overlays.hint("View: %s" % labels[nxt], seconds=2.0)
+            self.emit("touch", {"action": "pinch", "dir": direction, "shot": nxt})
+
+    def handle_two_finger_swipe(self, direction):
+        """Two-finger horizontal swipe switches directly to the next or previous character."""
+        self.activity()
+        ids = self.characters.ids()
+        if len(ids) < 2:
+            self.play_ui_sound("tap")
+            return
+        cur = self.active_id()
+        idx = ids.index(cur) if cur in ids else 0
+        nxt = ids[(idx + (1 if direction == "left" else -1)) % len(ids)]
+        name = self.characters.manifest(nxt).get("name", nxt)
+        self.play_ui_sound("open")
+        self.overlays.hint("Switching to %s…" % name, seconds=2.0)
+        self.activate(nxt)
+        self.emit("touch", {"action": "swipe2", "dir": direction, "character": nxt})
+
+    def give_treat(self, treat):
+        """Give the active character a treat (tea, snack, star) or a high-five from the touchscreen."""
+        treat = str(treat or "snack").lower()
+        if treat not in TREAT_PROMPTS:
+            raise ValueError("unknown treat: %s" % treat)
+        self.activity()
+        cid = self.active_id()
+        self.play_ui_sound("gift")
+        self.stage.send({"touch_fx": {"kind": "hearts" if treat == "tea" else "celebrate", "x": 0.5, "y": 0.36}})
+        self.stage.express("happy")
+        if hasattr(self.stage, "gesture"):
+            self.stage.gesture("wave" if treat == "high_five" else ("headpat" if treat in ("tea", "snack") else "nod"))
+        if cid:
+            self._record_touch_stat(cid, "high_fives" if treat == "high_five" else "treats")
+        labels = {"tea": "Shared warm tea", "snack": "Gave a sweet snack", "star": "Gifted a gold star", "high_five": "High-five!"}
+        self.overlays.hint(labels[treat], seconds=2.0)
+        self.emit("touch", {"action": "treat", "treat": treat})
+        opts = self.store.settings().get("touch", {})
+        if opts.get("enabled", True) and opts.get("spoken_reactions", True) and cid:
+            now = time.time()
+            cooldown = float(opts.get("reaction_cooldown", 25.0))
+            if (now - self.last_touch_speech >= cooldown and now - self.last_talk >= 4.0
+                    and self.state == "idle" and not self.listening
+                    and not (self.conversation is not None and self.conversation.busy)):
+                try:
+                    asyncio.ensure_future(self.react_to_prompt(TREAT_PROMPTS[treat]))
+                except RuntimeError:
+                    pass
+
     def handle_touch(self, event):
         """A touch gesture on the character canvas (headpat, cheek rub, poke, tap)."""
         self.activity()
         t_kind = str(event.get("kind") or "tap")
         zone = str(event.get("zone") or "background")
+        cid = self.active_id()
+        if t_kind in ("pet", "tap") and zone == "head":
+            self.play_ui_sound("headpat")
+            self._record_touch_stat(cid, "headpats")
+        elif t_kind == "pet" and zone == "face":
+            self.play_ui_sound("headpat")
+            self._record_touch_stat(cid, "cheek_rubs")
+        elif t_kind in ("poke", "double_tap") and zone != "background":
+            self.play_ui_sound("poke")
+            self._record_touch_stat(cid, "pokes")
         self.emit("touch", {"action": t_kind, "zone": zone})
         opts = self.store.settings().get("touch", {})
         if not opts.get("enabled", True) or not opts.get("character_touch", True) or not opts.get("spoken_reactions", True):
@@ -266,7 +425,7 @@ class Device:
             return
         if self.state != "idle" or self.listening or (self.conversation is not None and self.conversation.busy):
             return
-        if not self.active_id():
+        if not cid:
             return
         try:
             asyncio.ensure_future(self.react_to_touch(t_kind, zone))
@@ -275,9 +434,24 @@ class Device:
 
     async def react_to_touch(self, t_kind, zone, now=None):
         """Speak a brief, natural in-character reaction to a headpat, cheek rub or poke."""
-        prompt = TOUCH_PROMPTS.get((t_kind, zone))
-        if not prompt:
+        base_prompt = TOUCH_PROMPTS.get((t_kind, zone))
+        if not base_prompt:
             return None
+        cid = self.active_id()
+        if not cid:
+            return None
+        stats = self.touch_stats(cid)
+        nuance = ""
+        if stats["style"] == "shy" and t_kind in ("poke", "pet"):
+            nuance = " You feel a little shy or flustered by the sudden affection."
+        elif stats["style"] == "playful" and t_kind in ("poke", "double_tap"):
+            nuance = " Tease them playfully back."
+        if stats["total"] >= 12 and t_kind == "pet":
+            nuance += " You've grown very fond of their headpats."
+        return await self.react_to_prompt(base_prompt + nuance, now=now)
+
+    async def react_to_prompt(self, prompt, now=None):
+        """Run a brief spontaneous spoken reaction when idle, failing silently if unconfigured."""
         now = now or time.time()
         if self.state != "idle" or self.listening or (self.conversation is not None and self.conversation.busy):
             return None
@@ -1122,12 +1296,19 @@ class Device:
             self.set_screen("on")
 
     def set_screen(self, mode):
-        """Light the screen, dim it or darken it: the stage draws a veil, and the backlight follows where
-        it can be set."""
+        """Light the screen, dim it, show Ambient Nightstand Mode, or darken it: the stage draws a veil,
+        and the backlight follows where it can be set."""
+        prev = self.screen_mode
         self.screen_mode = mode
         self.stage.send({"screen": mode})
         brightness = float(self.store.settings().get("screen", {}).get("brightness", 100)) / 100.0
-        self.backlight.set({"on": brightness, "dim": DIM_BACKLIGHT, "off": 0.0}[mode])
+        levels = {"on": brightness, "dim": DIM_BACKLIGHT, "nightstand": NIGHTSTAND_BACKLIGHT, "off": 0.0}
+        self.backlight.set(levels.get(mode, brightness))
+        if self.touch_ready and self.touch_ui.enabled():
+            if mode == "nightstand":
+                self.touch_ui.enter_nightstand()
+            elif prev == "nightstand" and mode == "on":
+                self.touch_ui.exit_nightstand()
         self.emit("screen", {"screen": mode})
 
     def screen_step(self, now=None):
@@ -1160,6 +1341,8 @@ class Device:
             if self.screen_mode == "on":
                 self.backlight.set(float(new["screen"].get("brightness", 100)) / 100.0)
             self.screen_step()
+            if (old.get("screen") or {}).get("rotation") != (new.get("screen") or {}).get("rotation") and self.touch_ready:
+                self.touch_ui.sync_stage_config()
         if old.get("wake_word") != new.get("wake_word") or old.get("active_character") != new.get("active_character"):
             self.reload_wake()
         captions = new.get("captions", {})
@@ -1252,12 +1435,19 @@ class Device:
             "mute_switch": self.mic_switch,
             "screen": self.screen_mode,
             "backlight": self.backlight.available,
+            "bluetooth": {"available": self.bluetooth.available()},
             "usb": usb_status(),
             # The data partition was damaged beyond repair and made again (device/readonly/companion-data-check).
             "storage_recovered": os.path.exists(os.path.join(self.data_dir, "storage-recovered")),
             "wake_word": {"words": [w.title() for w in self.wake_words()],
                           "ready": self._wake is not None, "error": self.wake_error},
-            "touch": {"ready": self.touch_ready, "enabled": self.touch_ui.enabled(), "view": self.touch_ui.view},
+            "touch": {
+                "ready": self.touch_ready,
+                "enabled": self.touch_ui.enabled(),
+                "view": self.touch_ui.view,
+                "rotation": int(settings.get("screen", {}).get("rotation", 0)),
+                "bond": self.touch_stats(cid)["bond"] if cid else "",
+            },
             # timedatectl needs systemd running (true on the device, not in every test machine)
             "can_set_timezone": shutil.which("timedatectl") is not None and os.path.isdir("/run/systemd/system"),
         }

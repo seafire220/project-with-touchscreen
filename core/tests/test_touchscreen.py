@@ -402,8 +402,44 @@ class WifiAndKeyboardTest(TouchBase):
         self.assertEqual(self.device.touch_ui.kb_text, "")
 
 
+class FakeBluetooth:
+    def __init__(self, devices=None, fail=None):
+        self._available = True
+        self._devices = devices if devices is not None else [
+            {"mac": "AA:BB:CC:DD:EE:01", "name": "Desk Speaker", "paired": True, "connected": False},
+            {"mac": "AA:BB:CC:DD:EE:02", "name": "Studio Buds", "paired": False, "connected": False},
+        ]
+        self.fail = fail
+
+    def available(self):
+        return self._available
+
+    async def devices(self):
+        return [dict(d) for d in self._devices]
+
+    async def scan(self, seconds=4.0):
+        return await self.devices()
+
+    async def connect(self, mac):
+        from companion.bluetooth import BluetoothError
+        if self.fail:
+            raise BluetoothError(self.fail)
+        for d in self._devices:
+            if d["mac"].upper() == mac.upper():
+                d["paired"] = True
+                d["connected"] = True
+                return
+        raise BluetoothError("device not found")
+
+    async def disconnect(self, mac):
+        for d in self._devices:
+            if d["mac"].upper() == mac.upper():
+                d["connected"] = False
+
+
 class TouchWebApiTest(TouchBase):
     async def test_settings_validation_status_and_touch_endpoint(self):
+        self.device.bluetooth = FakeBluetooth()
         client = TestClient(TestServer(make_app(self.device)))
         await client.start_server()
         try:
@@ -411,26 +447,50 @@ class TouchWebApiTest(TouchBase):
             await client.post("/api/setup", json={"password": "a good password"}, headers=h)
 
             st = await (await client.get("/api/status")).json()
-            self.assertEqual(st["touch"], {"ready": True, "enabled": True, "view": "pill"})
+            self.assertEqual(st["touch"], {
+                "ready": True, "enabled": True, "view": "pill", "rotation": 0, "bond": "New friend",
+            })
+            self.assertTrue(st["bluetooth"])
 
-            # Validation rejects out-of-range cooldown/auto_hide.
+            # Validation rejects out-of-range cooldown/auto_hide/rotation/sleep mode.
             bad = await client.put("/api/settings", json={"touch": {"reaction_cooldown": 1}}, headers=h)
             self.assertEqual(bad.status, 400)
             bad2 = await client.put("/api/settings", json={"touch": {"auto_hide": 1}}, headers=h)
             self.assertEqual(bad2.status, 400)
+            bad3 = await client.put("/api/settings", json={"screen": {"rotation": 45}}, headers=h)
+            self.assertEqual(bad3.status, 400)
 
-            # Valid update persists and pushes touch_config to stage.
-            ok = await client.put("/api/settings", json={"touch": {"reaction_cooldown": 45, "effects": False}}, headers=h)
+            # Valid update persists and pushes touch_config (including rotation) to stage.
+            ok = await client.put("/api/settings", json={
+                "screen": {"rotation": 90, "how": "nightstand"},
+                "touch": {"reaction_cooldown": 45, "effects": False, "sounds": False},
+            }, headers=h)
             self.assertEqual(ok.status, 200)
             body = await ok.json()
             self.assertEqual(body["touch"]["reaction_cooldown"], 45.0)
             self.assertFalse(body["touch"]["effects"])
-            self.assertIn({"touch_config": {"enabled": True, "character_touch": True, "effects": False}}, self.stage.commands)
+            self.assertFalse(body["touch"]["sounds"])
+            self.assertEqual(body["screen"]["rotation"], 90)
+            self.assertEqual(body["screen"]["how"], "nightstand")
+            self.assertIn(
+                {"touch_config": {"enabled": True, "character_touch": True, "effects": False, "rotation": 90}},
+                self.stage.commands,
+            )
 
-            # POST /api/touch opens views, simulates touches, and rejects invalid payloads.
-            r = await client.post("/api/touch", json={"view": "dock"}, headers=h)
-            self.assertEqual(r.status, 200)
-            self.assertEqual(self.device.touch_ui.view, "dock")
+            # POST /api/touch opens all views, gives treats, simulates touches, and rejects invalid payloads.
+            for view in ("dock", "prompts", "setup", "bluetooth", "nightstand"):
+                r = await client.post("/api/touch", json={"view": view}, headers=h)
+                self.assertEqual(r.status, 200)
+                self.assertEqual(self.device.touch_ui.view, view)
+
+            r_treat = await client.post("/api/touch", json={"treat": "tea"}, headers=h)
+            self.assertEqual(r_treat.status, 200)
+            treat_body = await r_treat.json()
+            self.assertTrue(treat_body["ok"])
+            self.assertIn({"touch_fx": {"kind": "hearts", "x": 0.5, "y": 0.36}}, self.stage.commands)
+
+            r_bad_treat = await client.post("/api/touch", json={"treat": "rocks"}, headers=h)
+            self.assertEqual(r_bad_treat.status, 400)
 
             r2 = await client.post("/api/touch", json={"sim": {"phase": "start", "x": 0.5, "y": 0.25}}, headers=h)
             self.assertEqual(r2.status, 200)
@@ -442,8 +502,220 @@ class TouchWebApiTest(TouchBase):
 
             r4 = await client.post("/api/touch", json={"view": "bogus"}, headers=h)
             self.assertEqual(r4.status, 400)
+
+            # Bluetooth REST API: status, scan, connect, disconnect.
+            bt_get = await (await client.get("/api/bluetooth")).json()
+            self.assertTrue(bt_get["available"])
+            self.assertEqual(len(bt_get["devices"]), 2)
+
+            bt_scan = await (await client.post("/api/bluetooth/scan", json={}, headers=h)).json()
+            self.assertEqual(len(bt_scan["devices"]), 2)
+
+            bt_conn = await client.post("/api/bluetooth/connect", json={"mac": "AA:BB:CC:DD:EE:01"}, headers=h)
+            self.assertEqual(bt_conn.status, 200)
+            self.assertTrue(any(d["connected"] for d in (await bt_conn.json())["devices"]))
+
+            bt_disc = await client.post("/api/bluetooth/disconnect", json={"mac": "AA:BB:CC:DD:EE:01"}, headers=h)
+            self.assertEqual(bt_disc.status, 200)
+            self.assertFalse(any(d["connected"] for d in (await bt_disc.json())["devices"]))
         finally:
             await client.close()
+
+
+class Phase2EnhancementsTest(TouchBase):
+    async def test_tactile_ui_sounds_synthesis_and_guards(self):
+        from companion import sounds
+        for name in sounds.CUES:
+            pcm = sounds.pcm_for(name)
+            self.assertGreater(len(pcm), 400)
+            self.assertEqual(len(pcm) % 2, 0)
+            # Subsequent lookup hits the in-memory cache (exact same bytes object).
+            self.assertIs(sounds.pcm_for(name), pcm)
+
+        self.device.ui_sounds_played.clear()
+        self.device.play_ui_sound("tap")
+        self.assertEqual(self.device.ui_sounds_played[-1], "tap")
+
+        # Suppressed while speaking or when touch.sounds is disabled.
+        self.device.set_state("speaking")
+        self.device.play_ui_sound("open")
+        self.assertEqual(self.device.ui_sounds_played, ["tap"])
+
+        self.device.set_state("idle")
+        self.device.store.update_settings({"touch": {"sounds": False}})
+        self.device.play_ui_sound("close")
+        self.assertEqual(self.device.ui_sounds_played, ["tap"])
+
+        # force=True still plays the speaker test chime even when sounds are muted.
+        self.device.play_ui_sound("test", force=True)
+        self.assertEqual(self.device.ui_sounds_played[-1], "test")
+
+    async def test_nightstand_mode_clock_layer_backlight_and_wake(self):
+        self.device.store.update_settings({"screen": {"how": "nightstand", "brightness": 85}})
+        self.device.touch_ui.open_view("dock")
+        tap_hit(self.device, "sleep")
+
+        self.assertEqual(self.device.screen_mode, "nightstand")
+        self.assertEqual(self.device.touch_ui.view, "nightstand")
+        self.assertIn({"screen": "nightstand"}, self.stage.commands)
+        self.assertEqual(self.backlight.values[-1], 0.18)
+        ns_ov = last_overlay(self.stage, "touch-nightstand")
+        self.assertIsNotNone(ns_ov["image"])
+        self.assertEqual(ns_ov["anchor"], "center")
+        self.assertEqual(ns_ov["layer"], 90)
+        self.assertIsNone(last_overlay(self.stage, "touch-pill")["image"])
+
+        # Touch wake restores screen, backlight, and floating pill cleanly.
+        self.device._stage_event({"event": "touch_wake"})
+        self.assertEqual(self.device.screen_mode, "on")
+        self.assertEqual(self.device.touch_ui.view, "pill")
+        self.assertEqual(self.backlight.values[-1], 0.85)
+        self.assertIsNone(last_overlay(self.stage, "touch-nightstand")["image"])
+        self.assertIsNotNone(last_overlay(self.stage, "touch-pill")["image"])
+
+    async def test_left_edge_prompts_drawer_transcript_and_typed_chat(self):
+        # Seed a recent turn in memory history so chat bubbles render.
+        mem = self.device.memory("aria")
+        mem.add_turn("Good morning!", "Morning! Ready for a great day?")
+
+        self.device._stage_event({"event": "ui_touch", "phase": "swipe", "target": "edge", "dir": "right", "x": 0.02, "y": 0.5})
+        self.assertEqual(self.device.touch_ui.view, "prompts")
+        self.assertEqual(len(self.device.touch_ui._recent_turns()), 1)
+
+        # Open chat keyboard, type "Hi", and send.
+        tap_hit(self.device, "open_chat_kb")
+        self.assertEqual(self.device.touch_ui.view, "keyboard")
+        self.assertEqual(self.device.touch_ui.kb_target, "chat_message")
+        tap_hit(self.device, "kb_key", "h")
+        tap_hit(self.device, "kb_key", "i")
+        self.assertEqual(self.device.touch_ui.kb_text, "Hi")
+        tap_hit(self.device, "kb_key", "submit")
+        await asyncio.sleep(0.15)
+        self.assertEqual(self.device.touch_ui.view, "pill")
+        self.assertGreaterEqual(len(self.llm.calls), 1)
+        self.assertIn("Hi", self.llm.calls[-1][1][-1]["content"])
+
+    async def test_multitouch_pinch_and_two_finger_swipe_and_bond_treats(self):
+        # Install a second character for two-finger swipe switching.
+        m = manifest()
+        m["id"] = "mika"
+        m["name"] = "Mika"
+        self.device.characters.install(package.build(good_files(), m))
+        first_id = self.device.active_id()
+
+        # Two-finger swipe switches active character.
+        self.device._stage_event({"event": "touch_swipe2", "dir": "left"})
+        self.assertNotEqual(self.device.active_id(), first_id)
+
+        # Pinch on 2D character shows a gentle hint without crashing.
+        self.device._stage_event({"event": "touch_pinch", "dir": "out"})
+        self.assertFalse(any("shot" in c for c in self.stage.commands if isinstance(c, dict)))
+
+        # Simulate a VRM character to verify live pinch framing (upper -> bust -> upper -> full).
+        orig_drawing = self.device.characters.drawing
+        self.device.characters.drawing = lambda cid: "vrm"
+        try:
+            self.device._stage_event({"event": "touch_pinch", "dir": "out"})
+            self.assertIn({"shot": "bust"}, self.stage.commands)
+            self.device._stage_event({"event": "touch_pinch", "dir": "in"})
+            self.assertIn({"shot": "upper"}, self.stage.commands)
+            self.device._stage_event({"event": "touch_pinch", "dir": "in"})
+            self.assertIn({"shot": "full"}, self.stage.commands)
+        finally:
+            self.device.characters.drawing = orig_drawing
+
+        # Persona-inferred style + bond tiers + Care & Treats.
+        cid = self.device.active_id()
+        self.device.characters.set_persona(cid, "She is very shy and easily flustered when complimented.")
+        self.assertEqual(self.device.touch_stats(cid)["style"], "shy")
+        self.assertEqual(self.device.touch_stats(cid)["bond"], "New friend")
+
+        self.device.touch_ui.open_view("status")
+        tap_hit(self.device, "treat", "tea")
+        tap_hit(self.device, "treat", "star")
+        stats = self.device.touch_stats(cid)
+        self.assertEqual(stats["treats"], 2)
+        self.assertEqual(stats["total"], 4)
+        self.assertEqual(stats["bond"], "Warm")
+        self.assertIn({"touch_fx": {"kind": "hearts", "x": 0.5, "y": 0.36}}, self.stage.commands)
+        self.assertIn({"touch_fx": {"kind": "celebrate", "x": 0.5, "y": 0.36}}, self.stage.commands)
+
+    async def test_dock_static_cache_and_quick_setup_wizard(self):
+        # First dock render populates the static base cache; slider drags hit cache without rebuilding base.
+        self.device.touch_ui.open_view("dock")
+        self.assertIsNotNone(self.device.touch_ui._dock_cache)
+        hits_before = self.device.touch_ui._dock_cache_hits
+        vol_hit = self.device.touch_ui._find_action("slider_volume")
+        vy = (vol_hit[1] + vol_hit[3]) * 0.5
+        for frac in (0.2, 0.4, 0.6, 0.8):
+            vx = vol_hit[0] + (vol_hit[2] - vol_hit[0]) * frac
+            self.device.touch_ui._last_slider_render = 0.0
+            self.device._stage_event({"event": "ui_touch", "phase": "tap", "target": "panel", "x": vx, "y": vy})
+        self.assertGreaterEqual(self.device.touch_ui._dock_cache_hits, hits_before + 3)
+
+        # Leaving dock frees the base cache immediately.
+        self.device.touch_ui.open_view("setup")
+        self.assertIsNone(self.device.touch_ui._dock_cache)
+        self.assertEqual(self.device.touch_ui.setup_step, 0)
+
+        # Advance to Step 2: speaker test chime, 180-deg touch rotation, and interactive calibration tap.
+        tap_hit(self.device, "setup_step", 1)
+        self.assertEqual(self.device.touch_ui.setup_step, 1)
+        tap_hit(self.device, "setup_test_speaker")
+        self.assertEqual(self.device.ui_sounds_played[-1], "test")
+        tap_hit(self.device, "setup_rotate", 180)
+        self.assertEqual(self.device.store.settings()["screen"]["rotation"], 180)
+        self.assertIn(
+            {"touch_config": {"enabled": True, "character_touch": True, "effects": True, "rotation": 180}},
+            self.stage.commands,
+        )
+        tap_hit(self.device, "setup_cal_tap")
+        self.assertIsNotNone(self.device.touch_ui.cal_last)
+        self.assertTrue(any("touch_fx" in c and c["touch_fx"]["kind"] == "sparkles" for c in self.stage.commands if isinstance(c, dict)))
+
+        # Advance to Step 3 (Readiness + QR) and finish.
+        tap_hit(self.device, "setup_step", 2)
+        self.assertEqual(self.device.touch_ui.setup_step, 2)
+        tap_hit(self.device, "close")
+        self.assertEqual(self.device.touch_ui.view, "pill")
+
+    async def test_bluetooth_cli_parser_and_onscreen_pairing_sheet(self):
+        from companion.bluetooth import Bluetooth, BluetoothError
+
+        calls = []
+
+        async def fake_run(*args, timeout=15.0):
+            calls.append(args)
+            if args == ("bluetoothctl", "devices"):
+                return (
+                    "Device 11:22:33:44:55:66 JBL Flip 6\n"
+                    "Device AA:BB:CC:DD:EE:FF AA-BB-CC-DD-EE-FF\n"
+                    "Device 77:88:99:AA:BB:CC Sony WH-1000XM5\n"
+                )
+            if args == ("bluetoothctl", "devices", "Paired"):
+                return "Device 11:22:33:44:55:66 JBL Flip 6\n"
+            if args == ("bluetoothctl", "devices", "Connected"):
+                return "Device 11:22:33:44:55:66 JBL Flip 6\n"
+            return ""
+
+        bt = Bluetooth(run=fake_run)
+        devs = await bt.devices()
+        # Skips unnamed MAC-only noise, sorts connected device first.
+        self.assertEqual([d["name"] for d in devs], ["JBL Flip 6", "Sony WH-1000XM5"])
+        self.assertTrue(devs[0]["connected"] and devs[0]["paired"])
+        self.assertFalse(devs[1]["connected"] or devs[1]["paired"])
+
+        with self.assertRaises(BluetoothError):
+            await bt.connect("not-a-mac")
+
+        # On-screen Bluetooth sheet toggles connection cleanly.
+        self.device.bluetooth = FakeBluetooth()
+        self.device.touch_ui.open_view("bluetooth")
+        await asyncio.sleep(0.05)
+        self.assertEqual(len(self.device.touch_ui.bt_devices), 2)
+        tap_hit(self.device, "bt_toggle", self.device.touch_ui.bt_devices[0])
+        await asyncio.sleep(0.05)
+        self.assertTrue(self.device.touch_ui.bt_devices[0]["connected"])
 
 
 if __name__ == "__main__":

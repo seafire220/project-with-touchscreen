@@ -71,6 +71,7 @@ use serde_json::Value;
 use crate::behaviour::State;
 use crate::overlay::{self, Anchor, Screen, Slide};
 use crate::touch::{Phase as TouchPhase, Rect, TouchCapture, TouchConfig, TouchSample};
+use crate::vrm::render::Shot;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
@@ -116,16 +117,20 @@ pub enum Command {
 	TryAnimation(std::path::PathBuf),
 	/// Show a picture from the overlay folder in a slot, or (None) fade the slot out.
 	Overlay { slot: String, image: Option<String>, anchor: Anchor, layer: i32, slide: Slide, scrim: f32 },
-	/// Light the screen, dim it, or make it dark.
+	/// Light the screen, dim it, show ambient nightstand mode, or make it dark.
 	Screen(Screen),
 	/// How much of a Live2D-format model's own idle motions shows, 0 to 1.
 	ModelMotions(f32),
-	/// Configure touchscreen features (enabled, character petting/poking, GPU touch effects).
+	/// Configure touchscreen features (enabled, character petting/poking, GPU touch effects, rotation).
 	TouchConfig(TouchConfig),
 	/// Active touch UI hit regions (modal sheet/dock panel, floating pill, edge swipes).
 	TouchCapture(TouchCapture),
 	/// Simulated raw touch input (for scripted tests and virtual-device testing).
 	TouchSim(TouchSample),
+	/// Trigger an on-demand GPU visual effect burst (hearts, sparkles, celebrate, ripple).
+	TouchFx { kind: String, x: f32, y: f32 },
+	/// Change VRM camera framing live (e.g. via two-finger pinch).
+	Shot(Shot),
 	Quit,
 }
 
@@ -290,7 +295,7 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 				out.push(Command::Overlay { slot: slot.to_string(), image, anchor, layer, slide, scrim });
 			}
 			"screen" => {
-				out.push(Command::Screen(val.as_str().and_then(Screen::parse).ok_or("\"screen\" is on, dim or off")?))
+				out.push(Command::Screen(val.as_str().and_then(Screen::parse).ok_or("\"screen\" is on, dim, nightstand or off")?))
 			}
 			"model_motions" => {
 				let v = val.as_f64().filter(|v| (0.0..=1.0).contains(v)).ok_or("\"model_motions\" is a number from 0 to 1")?;
@@ -307,6 +312,13 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 				}
 				if let Some(v) = obj.get("effects") {
 					cfg.effects = v.as_bool().ok_or("\"touch_config.effects\" must be true or false")?;
+				}
+				if let Some(v) = obj.get("rotation") {
+					let deg = v.as_u64().ok_or("\"touch_config.rotation\" must be 0, 90, 180 or 270")?;
+					if !matches!(deg, 0 | 90 | 180 | 270) {
+						return Err("\"touch_config.rotation\" must be 0, 90, 180 or 270".into());
+					}
+					cfg.rotation = deg as u16;
 				}
 				out.push(Command::TouchConfig(cfg));
 			}
@@ -326,9 +338,9 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 			"touch_sim" => {
 				let obj = val.as_object().ok_or("\"touch_sim\" must be an object")?;
 				let phase = match obj.get("phase").and_then(Value::as_str) {
-					Some("down") => TouchPhase::Down,
+					Some("down") | Some("start") => TouchPhase::Down,
 					Some("move") => TouchPhase::Move,
-					Some("up") => TouchPhase::Up,
+					Some("up") | Some("end") => TouchPhase::Up,
 					Some("cancel") => TouchPhase::Cancel,
 					_ => return Err("\"touch_sim.phase\" must be down, move, up or cancel".into()),
 				};
@@ -336,6 +348,25 @@ pub fn parse_line(line: &str) -> Result<(Option<f32>, Vec<Command>), String> {
 				let y = obj.get("y").and_then(Value::as_f64).ok_or("\"touch_sim.y\" must be a number")? as f32;
 				let id = obj.get("id").and_then(Value::as_u64).unwrap_or(1);
 				out.push(Command::TouchSim(TouchSample { id, phase, x: x.clamp(0.0, 1.0), y: y.clamp(0.0, 1.0) }));
+			}
+			"touch_fx" => {
+				let obj = val.as_object().ok_or("\"touch_fx\" must be an object")?;
+				let kind = obj.get("kind").and_then(Value::as_str).unwrap_or("celebrate").to_string();
+				if !matches!(kind.as_str(), "hearts" | "sparkles" | "celebrate" | "ripple") {
+					return Err("\"touch_fx.kind\" must be hearts, sparkles, celebrate or ripple".into());
+				}
+				let x = obj.get("x").and_then(Value::as_f64).unwrap_or(0.5).clamp(0.0, 1.0) as f32;
+				let y = obj.get("y").and_then(Value::as_f64).unwrap_or(0.35).clamp(0.0, 1.0) as f32;
+				out.push(Command::TouchFx { kind, x, y });
+			}
+			"shot" => {
+				let shot = match val.as_str() {
+					Some("bust") => Shot::Bust,
+					Some("upper") => Shot::Upper,
+					Some("full") => Shot::Full,
+					_ => return Err("\"shot\" must be bust, upper or full".into()),
+				};
+				out.push(Command::Shot(shot));
 			}
 			"quit" => {
 				if val.as_bool() == Some(true) {
@@ -572,8 +603,8 @@ mod tests {
 	#[test]
 	fn parses_touch_commands() {
 		assert_eq!(
-			parse_line(r#"{"touch_config": {"enabled": true, "character_touch": false, "effects": true}}"#).unwrap().1,
-			vec![Command::TouchConfig(TouchConfig { enabled: true, character_touch: false, effects: true })]
+			parse_line(r#"{"touch_config": {"enabled": true, "character_touch": false, "effects": true, "rotation": 180}}"#).unwrap().1,
+			vec![Command::TouchConfig(TouchConfig { enabled: true, character_touch: false, effects: true, rotation: 180 })]
 		);
 		assert_eq!(
 			parse_line(r#"{"touch_capture": {"modal": true, "panel": [0.05, 0.5, 0.95, 0.98], "pill": null, "edge_swipe": false}}"#)
@@ -590,10 +621,19 @@ mod tests {
 			parse_line(r#"{"touch_sim": {"phase": "down", "x": 0.5, "y": 0.2, "id": 7}}"#).unwrap().1,
 			vec![Command::TouchSim(TouchSample { id: 7, phase: TouchPhase::Down, x: 0.5, y: 0.2 })]
 		);
+		assert_eq!(parse_line(r#"{"screen": "nightstand"}"#).unwrap().1, vec![Command::Screen(Screen::Nightstand)]);
+		assert_eq!(
+			parse_line(r#"{"touch_fx": {"kind": "celebrate", "x": 0.5, "y": 0.3}}"#).unwrap().1,
+			vec![Command::TouchFx { kind: "celebrate".into(), x: 0.5, y: 0.3 }]
+		);
+		assert_eq!(parse_line(r#"{"shot": "bust"}"#).unwrap().1, vec![Command::Shot(Shot::Bust)]);
 		for bad in [
 			r#"{"touch_config": {"enabled": "yes"}}"#,
+			r#"{"touch_config": {"rotation": 45}}"#,
 			r#"{"touch_capture": {"panel": [0.9, 0.5, 0.1, 0.8]}}"#,
 			r#"{"touch_sim": {"phase": "hover", "x": 0.5, "y": 0.5}}"#,
+			r#"{"touch_fx": {"kind": "fireworks"}}"#,
+			r#"{"shot": "wide"}"#,
 		] {
 			assert!(parse_line(bad).is_err(), "{bad}");
 		}

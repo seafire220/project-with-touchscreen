@@ -25,6 +25,7 @@ from .memory import when
 from . import backup as backup_module
 from . import support as support_module
 from . import updates as updates_module
+from .bluetooth import BluetoothError
 from .network import NetworkError
 from .providers import ProviderError
 from .stage_link import CONTROL_NAMES, CONTROLS
@@ -972,20 +973,28 @@ class Console:
         return web.json_response({"ok": True})
 
     async def touch(self, request):
-        """Open a touchscreen view, send a character touch, or forward a simulated touch sample to the stage."""
+        """Open a touchscreen view, give a treat, send a character touch, or forward a simulated touch sample."""
         body = await request.json()
         if not isinstance(body, dict):
             raise web.HTTPBadRequest(text="touch payload must be an object")
         if "view" in body:
             view = str(body["view"]).strip().lower()
-            if view not in ("pill", "dock", "characters", "timers", "status", "wifi"):
+            if view not in ("pill", "dock", "prompts", "characters", "timers", "status", "wifi", "bluetooth", "setup", "nightstand"):
                 raise web.HTTPBadRequest(text="unknown touchscreen view")
             self.device.touch_ready = True
             if view == "pill":
                 self.device.touch_ui.dismiss()
+            elif view == "nightstand":
+                self.device.set_screen("nightstand")
             else:
                 self.device.touch_ui.open_view(view)
             return web.json_response({"ok": True, "view": self.device.touch_ui.view})
+        if "treat" in body:
+            try:
+                self.device.give_treat(str(body["treat"]))
+            except ValueError as error:
+                raise web.HTTPBadRequest(text=str(error))
+            return web.json_response({"ok": True, "bond": self.device.touch_stats()["bond"]})
         if "sim" in body:
             sim = body["sim"]
             if not isinstance(sim, dict):
@@ -1019,7 +1028,7 @@ class Console:
                     self.device.stage.gesture("poke_giggle" if kind == "double_tap" else "poke_surprised")
                 self.device.handle_touch({"kind": kind, "zone": zone})
             return web.json_response({"ok": True})
-        raise web.HTTPBadRequest(text="specify view, kind or sim")
+        raise web.HTTPBadRequest(text="specify view, treat, kind or sim")
 
     async def microphone(self, request):
         """Turn the microphone off or on (a mute switch, while on, wins)."""
@@ -1078,6 +1087,55 @@ class Console:
         except NetworkError as error:
             raise web.HTTPBadRequest(text=str(error))
         return web.json_response({"ok": True})
+
+    # ----- Bluetooth audio
+    async def bluetooth_status(self, request):
+        bt = self.device.bluetooth
+        if bt is None or not bt.available():
+            return web.json_response({"available": False, "devices": []})
+        try:
+            devices = await bt.devices()
+        except BluetoothError as error:
+            return web.json_response({"available": True, "error": str(error), "devices": []})
+        return web.json_response({"available": True, "devices": devices})
+
+    async def bluetooth_scan(self, request):
+        bt = self.device.bluetooth
+        if bt is None or not bt.available():
+            return web.json_response({"available": False, "devices": []})
+        try:
+            devices = await bt.scan(seconds=4.0)
+        except BluetoothError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        return web.json_response({"available": True, "devices": devices})
+
+    async def bluetooth_connect(self, request):
+        bt = self.device.bluetooth
+        if bt is None or not bt.available():
+            raise web.HTTPNotFound(text="this device has no Bluetooth control")
+        body = await request.json()
+        mac = str((body or {}).get("mac", "")).strip()
+        try:
+            await bt.connect(mac)
+            devices = await bt.devices()
+        except BluetoothError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        self.device.emit("touch_ui", {"action": "bluetooth", "mac": mac, "connected": True})
+        return web.json_response({"ok": True, "devices": devices})
+
+    async def bluetooth_disconnect(self, request):
+        bt = self.device.bluetooth
+        if bt is None or not bt.available():
+            raise web.HTTPNotFound(text="this device has no Bluetooth control")
+        body = await request.json()
+        mac = str((body or {}).get("mac", "")).strip()
+        try:
+            await bt.disconnect(mac)
+            devices = await bt.devices()
+        except BluetoothError as error:
+            raise web.HTTPBadRequest(text=str(error))
+        self.device.emit("touch_ui", {"action": "bluetooth", "mac": mac, "connected": False})
+        return web.json_response({"ok": True, "devices": devices})
 
     # ----- device
     async def set_timezone(self, request):
@@ -1203,6 +1261,10 @@ def make_app(device):
     r.add_put("/api/update/settings", console.put_update_settings)
     r.add_get("/api/wifi", console.wifi_status)
     r.add_post("/api/wifi", console.wifi_join)
+    r.add_get("/api/bluetooth", console.bluetooth_status)
+    r.add_post("/api/bluetooth/scan", console.bluetooth_scan)
+    r.add_post("/api/bluetooth/connect", console.bluetooth_connect)
+    r.add_post("/api/bluetooth/disconnect", console.bluetooth_disconnect)
     if os.path.isdir(STATIC):
         r.add_static("/static/", STATIC)
     return app

@@ -43,18 +43,18 @@ DEFAULT_SETTINGS = {
     # The microphone, off when the owner says so (the button held, or the settings page). A mute
     # switch, if the device has one, wins over this.
     "microphone": {"muted": False},
-    # The screen: dark (or dim) at night, from `sleep_from` to `sleep_to` o'clock, when nobody is
-    # talking to the character; `brightness` in per cent, where the screen's backlight can be set.
-    "screen": {"sleep": False, "sleep_from": 23, "sleep_to": 7, "how": "off", "brightness": 100},
+    # The screen: dark, dim, or nightstand ambient clock at night, from `sleep_from` to `sleep_to` o'clock;
+    # `brightness` in per cent (where backlight is supported); `rotation` clockwise degrees (0, 90, 180, 270).
+    "screen": {"sleep": False, "sleep_from": 23, "sleep_to": 7, "how": "off", "brightness": 100, "rotation": 0},
     # Rules for every reply, for homes with children (docs/28-user-guide.md).
     "family_safe": {"on": False},
     # Saying the character's name starts listening, as the button does; `phrase` "" means "hey" and
     # its name; `sensitivity` "low", "normal" or "high".
     "wake_word": {"on": False, "phrase": "", "sensitivity": "normal"},
     # Touchscreen features (docs/35-touchscreen.md): on-screen quick controls, character petting/poking,
-    # optional spoken reactions with cooldown, GPU touch effects, and dock auto-hide seconds.
+    # optional spoken reactions with cooldown, GPU touch effects, subtle tactile UI sounds, and dock auto-hide seconds.
     "touch": {"enabled": True, "character_touch": True, "spoken_reactions": True, "reaction_cooldown": 25.0,
-              "effects": True, "auto_hide": 8.0},
+              "effects": True, "sounds": True, "auto_hide": 8.0},
 }
 
 # The secret names the device accepts: one key per provider.
@@ -208,14 +208,17 @@ def _check_choices(changes):
     for group, name in (("captions", "on"), ("captions", "heard"), ("microphone", "muted"), ("screen", "sleep"),
                         ("family_safe", "on"), ("wake_word", "on"),
                         ("touch", "enabled"), ("touch", "character_touch"), ("touch", "spoken_reactions"),
-                        ("touch", "effects")):
+                        ("touch", "effects"), ("touch", "sounds")):
         switch(group, name)
     choice("captions", "size", ("normal", "large"))
-    choice("screen", "how", ("off", "dim"))
+    choice("screen", "how", ("off", "dim", "nightstand"))
     choice("wake_word", "sensitivity", ("low", "normal", "high"))
     number("screen", "sleep_from", 0, 23)
     number("screen", "sleep_to", 0, 23)
     number("screen", "brightness", 10, 100)
+    rot = (changes.get("screen") or {}).get("rotation")
+    if rot is not None and (isinstance(rot, bool) or rot not in (0, 90, 180, 270)):
+        raise ValueError("screen.rotation must be 0, 90, 180 or 270")
     number("touch", "reaction_cooldown", 5, 300)
     number("touch", "auto_hide", 3, 60)
     phrase = (changes.get("wake_word") or {}).get("phrase")
