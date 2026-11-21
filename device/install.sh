@@ -124,6 +124,9 @@ else
     echo "note: no device/config/update-key.pem, so this software cannot install updates (device/release.py keygen)" >&2
 fi
 [ -f "$REPO/THIRD_PARTY.md" ] && install -m 0644 "$REPO/THIRD_PARTY.md" "$STAGING/share/THIRD_PARTY.md"
+# The licences of the libraries built into the stage program, for the settings page's "Licences and notices".
+install -d "$STAGING/share/licenses"
+install -m 0644 "$REPO/stage/THIRD_PARTY_LICENSES.txt" "$STAGING/share/licenses/stage.txt"
 # This version's own system files: the updater installs a version's when it switches to it.
 install -m 0644 "$REPO/device/systemd/companion-core.service" "$REPO/device/systemd/companion-stage.service" \
     "$REPO/device/systemd/companion-update.service" "$REPO/device/systemd/companion-update.path" \
@@ -293,6 +296,9 @@ systemctl set-default graphical.target
 
 if [ "$IMAGE" = 1 ]; then
     say "Preparing a ready-made device image"
+    # Which card image this is: the device's notice names it, with the address of its operating system's
+    # source code (published with the image, docs/34-licences.md).
+    printf '%s\n' "$VERSION" > /etc/companion-image
     # Raspberry Pi OS asks for a user name on the screen at first boot; the
     # device has no keyboard and needs no login, so that is switched off.
     systemctl mask userconfig.service 2>/dev/null || true

@@ -204,6 +204,8 @@ def _payload(version, stage_binary, requirements=None, wheels=None, models=None,
         if os.path.isfile(third_party):
             with open(third_party, "rb") as f:
                 _add(tar, "share/THIRD_PARTY.md", f.read())
+        with open(os.path.join(REPO, "stage", "THIRD_PARTY_LICENSES.txt"), "rb") as f:
+            _add(tar, "share/licenses/stage.txt", f.read())
         for name, source in SYSTEM_FILES.items():
             with open(os.path.join(REPO, source), "rb") as f:
                 _add(tar, "system/" + name, f.read(), 0o755 if name.endswith(".py") else 0o644)

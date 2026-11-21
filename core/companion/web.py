@@ -1005,12 +1005,33 @@ class Console:
     async def index(self, request):
         return web.FileResponse(os.path.join(STATIC, "index.html"))
 
+    # ----- licences and notices (open to anyone on the home network, like the leaflet in a box)
+    async def licences(self, request):
+        from . import notices, updates
+        names = {key: title for key, (title, _) in notices.DOCUMENTS.items()}
+        return web.Response(text=notices.index_page(names, updates.current_version()), content_type="text/html")
+
+    async def licence(self, request):
+        from . import notices
+        name = request.match_info["name"]
+        if name not in notices.DOCUMENTS:
+            raise web.HTTPNotFound(text="no such notice")
+        make = getattr(notices, notices.DOCUMENTS[name][1])
+        if name == "models":
+            folders = [(n, self.device.model_dir(n)) for n in ("stt", "tts", "meaning", "wake")]
+            text = await asyncio.get_running_loop().run_in_executor(None, make, folders)
+        else:
+            text = await asyncio.get_running_loop().run_in_executor(None, make)
+        return web.Response(text=text, content_type="text/plain", charset="utf-8")
+
 
 def make_app(device):
     console = Console(device)
     app = web.Application(middlewares=[console.guard], client_max_size=MAX_UPLOAD)
     r = app.router
     r.add_get("/", console.index)
+    r.add_get("/licences", console.licences)
+    r.add_get("/licences/{name}.txt", console.licence)
     r.add_get("/api/hello", console.hello)
     r.add_post("/api/setup", console.setup)
     r.add_post("/api/login", console.login)

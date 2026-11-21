@@ -28,6 +28,7 @@
       <button type="submit">Continue</button>
     </form>
     <p class="error" id="login-error"></p>
+      <p class="muted"><a href="/licences" target="_blank" rel="noopener">Licences and notices</a></p>
   </section>
 
   <section id="home" class="tab" hidden>
@@ -389,10 +390,12 @@
     <p><button id="btn-save-device">Save</button> <span id="device-msg"></span></p>
     <details>
       <summary>About this device</summary>
-      <p>The character is drawn with Inox2D (BSD-2-Clause) or Ayagami (MIT or Apache-2.0). Speech recognition on
-        the device uses Moonshine (MIT) through sherpa-onnx (Apache-2.0). The free on-device voice is a Piper voice
-        trained on LibriTTS-R (CC BY 4.0; Koizumi et al., 2023), with phonemes from espeak-ng (GPL-3.0).
-        The full list is in THIRD_PARTY.md in the device's software.</p>
+      <p>Characters are drawn with Inox2D, the Inochi2D project's player (BSD-2-Clause), or Ayagami (MIT or
+        Apache-2.0). Speech recognition on the device uses Moonshine (MIT) through sherpa-onnx (Apache-2.0). The free
+        on-device voice is a Piper voice trained on the CSTR VCTK Corpus (CC BY 4.0; Yamagishi, Veaux and MacDonald,
+        University of Edinburgh) and NVIDIA's Hi-Fi TTS dataset (CC BY 4.0), with phonemes from espeak-ng (GPL-3.0).</p>
+      <p><a href="/licences" target="_blank" rel="noopener">Licences and notices</a>: every part of the device's
+        software, its licence and credits, and how to get the source code of its open-source parts.</p>
     </details>
     <h3>Microphone</h3>
     <p><span id="mic-status">On.</span> <button type="button" id="btn-mic">Turn the microphone off</button>

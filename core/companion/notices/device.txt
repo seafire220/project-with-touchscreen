@@ -1,0 +1,41 @@
+THIS DEVICE'S SOFTWARE
+
+Copyright (c) 2026 {maker}. All rights reserved, except the open-source parts and models listed in these
+notices, which are each under their own licence.
+
+OPEN-SOURCE SOFTWARE, AND THE OFFER OF SOURCE CODE
+
+This device runs Raspberry Pi OS (based on Debian GNU/Linux) and other open-source software. Some of it is
+licensed under the GNU General Public License (GPL) or the GNU Lesser General Public License (LGPL), among
+them the Linux kernel, the GNU C library, systemd, NetworkManager, ALSA, espeak-ng and dnsmasq. Those
+licences entitle you to their complete corresponding source code.
+
+The source code of every operating-system package on this device, at the versions installed on its memory
+card (card image version {image_version}), is published at:
+
+    {source_url}
+
+For at least three years from the day you got this device, you may also ask {contact} for that source
+code on a physical medium (such as a USB stick), for no more than the cost of making and sending it. This
+offer is open to anyone who received this device's software.
+
+The open-source software is provided under its licences "as is", WITHOUT ANY WARRANTY; without even the
+implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See each licence for the details.
+This does not limit the guarantees the law gives you as a consumer for the device itself.
+
+You may change and replace the open-source software on this device: its memory card can be read and
+written in any computer, and nothing on the device checks the operating system or stops changed software
+from running. (The device's own updates install only software signed by its maker; that does not stop you
+installing other software yourself.)
+
+TRADEMARKS
+
+Live2D is a registered trademark of Live2D Inc. Raspberry Pi is a trademark of Raspberry Pi Ltd. Python is
+a registered trademark of the Python Software Foundation. Linux is a registered trademark of Linus
+Torvalds. Claude is a trademark of Anthropic, PBC. OpenAI and ChatGPT are trademarks of OpenAI. Other
+names are trademarks of their owners. This device and its maker are not affiliated with, sponsored or
+endorsed by any of them; the names are used only to say what the device works with.
+
+No Live2D software is included: models in the Live2D style are played by Ayagami, an independent
+open-source player (MIT or Apache-2.0), and Inochi2D models by Inox2D (BSD 2-Clause), the Inochi2D
+project's own player.
